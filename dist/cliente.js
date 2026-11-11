@@ -168,6 +168,10 @@
       ['salida', 'Dar salida', 'Sacar producto de la bodega'],
       ['estructura', 'Niveles y posiciones', 'Agregar o quitar niveles y posiciones del plano'],
       ['carga_manual', 'Cargar sin código de barras', 'Registrar a mano lo que ya está en la bodega con su rótulo viejo']] },
+    { k: 'inventario', t: 'Inventario', d: 'Conteos de planta contra SAP', p: [
+      ['inventario', 'Ver inventario contra SAP', 'La tabla de SAP contra lo que hay en planta'],
+      ['inv_contar', 'Registrar conteos', 'Llenar picking, calidad y bloqueado'],
+      ['inv_sap', 'Cargar Excel de SAP', 'Subir el reporte de SAP (reemplaza el anterior)']] },
     { k: 'productos', t: 'Productos', d: 'Catálogo y reportes del inventario', p: [
       ['productos', 'Crear productos', 'Agregar productos nuevos al catálogo'],
       ['reportes', 'Descargar reportes', 'Inventario, bitácora, salidas e historial en Excel']] },
@@ -194,7 +198,7 @@
   const PERMISOS = MODULOS.flatMap(m => m.p);
   const PERM_RC = ['rc_facturas', 'rc_lista', 'recibir', 'rc_corregir', 'rc_fotos', 'rc_cerrar'];
   const puedeAlguno = ks => ks.some(puede);
-  const PERM_OPERARIO = ['ubicar', 'mover', 'salida', 'rotular', 'recibir', 'rc_fotos'];
+  const PERM_OPERARIO = ['ubicar', 'mover', 'salida', 'rotular', 'recibir', 'rc_fotos', 'inventario', 'inv_contar'];
   function sinPermiso(k) {
     if (puede(k)) return false;
     const x = PERMISOS.find(p => p[0] === k);
@@ -528,7 +532,7 @@
     } else if (vista === 'config') {
       cuerpo = `<main class="wrap wrap-ancho">${vistaConfig()}</main>`;
     } else if (vista === 'productos') {
-      cuerpo = `<main class="wrap">${vistaProductos()}</main>`;
+      cuerpo = `<main class="wrap ${prodTab !== 'totales' ? 'wrap-ancho' : ''}">${vistaProductos()}</main>`;
     } else if (vista === 'recibidor') {
       cuerpo = `<main class="wrap ${rcTab !== 'recibir' ? 'wrap-ancho' : ''}">${vistaRecibidor()}</main>`;
     } else if (vista === 'rotulo') {
@@ -546,6 +550,7 @@
     enlazarRecibidor();
     enlazarCalidad();
     enlazarUsuarios();
+    enlazarInventario();
     ajustarPlano();
     dibujarCodigos($('app'));
   }
@@ -636,6 +641,7 @@
   let lugar = { zona: '', rack: '', pos: 0, nivel: null, lado: '' };
 
   function abrirLugar() {
+    lugarCtx = null;
     if (posSel && sede.rackPorId[posSel.rackId]) {
       const r = sede.rackPorId[posSel.rackId];
       lugar = { zona: r.zonaId, rack: r.id, pos: posSel.posicion, nivel: null, lado: '' };
@@ -692,7 +698,7 @@
       ${lados.length ? `<span class="lbl mt12">Lado</span>
       <div class="elige-grid">${lados.map(l => {
         const idL = `${lugar.rack}-P${pad3(lugar.pos)}-${lugar.nivel === 0 ? 'PK' : lugar.nivel}${l}`;
-        const lleno = ctx && lineasDe(idL).length > 0;
+        const lleno = ctx && !ctx.permitirLlenos && lineasDe(idL).length > 0;
         return boton(l === lugar.lado, l + (l === 'C' || l === 'D' ? ' <small>fondo</small>' : '') + (lleno ? ' <small>lleno</small>' : ''),
           `lugarSet('lado','${l}')`, lleno ? 'disabled title="Este espacio ya tiene producto"' : '');
       }).join('')}</div>` : ''}
@@ -730,7 +736,7 @@
     // Si el nivel tiene un solo lado, se elige solo
     if (campo === 'nivel') {
       const l = espaciosDe(lugar.rack, lugar.pos).filter(e => e.nivel === valor);
-      if (l.length === 1 && !(lugarCtx && lineasDe(l[0].id).length)) lugar.lado = l[0].lado;
+      if (l.length === 1 && !(lugarCtx && !lugarCtx.permitirLlenos && lineasDe(l[0].id).length)) lugar.lado = l[0].lado;
     }
     pintarLugar();
   }
@@ -1000,7 +1006,7 @@
     const c = sinGuion(txt);
     if (!c) return;
     const e = sede.espacios.find(x => sinGuion(x.id) === c);
-    if (e) { pitido(); return flujoLugarElegido(e.id); }
+    if (e) { pitido(); return lugarCtx && lugarCtx.alElegir ? lugarCtx.alElegir(e.id) : flujoLugarElegido(e.id); }
     for (const r of sede.racks) {
       const m = c.match(new RegExp('^' + sinGuion(r.id) + 'P0*(\\d+)$'));
       if (m && Number(m[1]) >= 1 && Number(m[1]) <= r.posiciones) {
@@ -2583,6 +2589,7 @@
     if (!vistaPermitida(v)) return toast('No tienes permiso para entrar ahí', 'error');
     if (v === 'usuarios') { usLista = null; usEdit = null; }
     if (v === 'rotulo') { sinImp = null; rotulos = null; }
+    if (v === 'productos') invData = null;
     vista = v; pintarApp();
   }
 
@@ -2866,9 +2873,439 @@
 
   let prodFiltro = '', prodSoloStock = true, prodVer = 60;
 
+  /* ================= PRODUCTOS: Inventario · Inventario por productos · Productos totales ================= */
+  let prodTab = 'inventario';
+
   function vistaProductos() {
+    const tabs = [['inventario', 'Inventario'], ['invprod', 'Inventario por productos'], ['totales', 'Productos totales']]
+      .filter(([k]) => k === 'totales' || puede('inventario'));
+    if (!tabs.some(t => t[0] === prodTab)) prodTab = tabs[0][0];
     return `<div class="col gap12">
-      <div class="fila-sb wrap-f gap8"><span class="h2">Productos</span>
+      <div class="tabs">${tabs.map(([k, t]) => `<button class="tab ${prodTab === k ? 'on' : ''}" onclick="prodTab='${k}'; pintarApp()">${t}</button>`).join('')}</div>
+      ${prodTab === 'inventario' ? vistaInventario()
+        : prodTab === 'invprod' ? `<div class="card col gap8"><span class="h3">Inventario por productos</span>
+            <span class="muted">Lo armamos cuando terminemos de ajustar la pestaña <b>Inventario</b>.</span></div>`
+        : vistaProductosTotales()}
+    </div>`;
+  }
+
+  /* ----- Inventario contra SAP ----- */
+  let invData = null;                                      // { sap, carga, conteos } de la sede
+  let invSede = null;                                      // sede de los datos cargados
+  const invF = { zona: '', q: '', soloDif: false };
+  const invForm = { ubic: '', prod: '', tipo: 'PICKING' };
+  const TIPOS_CONTEO = [['PICKING', 'Picking'], ['CALIDAD', 'Calidad'], ['BLOQUEADO', 'Bloqueado']];
+  const nInv = n => (Math.round(Number(n) * 1000) / 1000).toLocaleString('es-CO', { maximumFractionDigits: 3 });
+
+  function vistaInventario() {
+    if (invData === null || invSede !== ses.sedeId) {
+      invData = null; invSede = ses.sedeId;
+      llamar('bdInventarioGeneral', ses.sedeId).then(d => { invData = d; if (vista === 'productos' && prodTab === 'inventario') pintarApp(); })
+        .catch(e => { invData = { sap: [], carga: null, conteos: [], error: e.message }; if (vista === 'productos') pintarApp(); });
+      return '<div class="cargando">Cargando inventario…</div>';
+    }
+    const c = invData.carga;
+    const zonas = sede.zonas.filter(z => sede.racks.some(r => r.zonaId === z.id));
+    return `<div class="col gap12">
+      <div class="fila-sb wrap-f gap8">
+        <div class="col gap4"><span class="h2">Inventario contra SAP · ${esc(nombreSede(ses.sedeId))}</span>
+          <span class="muted small">${c ? `SAP cargado el ${fechaHora(c.fecha)} por ${esc(c.usuario || '—')} · ${c.filas} productos${c.archivo ? ' · ' + esc(c.archivo) : ''}`
+            : '<b class="txt-naranja">Todavía no se ha cargado el Excel de SAP de esta sede.</b>'}</span>
+          ${invData.error ? `<span class="error small">${esc(invData.error)}</span>` : ''}</div>
+        <span class="fila gap8 wrap-f">
+          ${puede('inv_sap') ? '<button class="btn btn-pri" onclick="abrirCargaSap()">Cargar Excel de SAP</button>' : ''}
+          ${puede('reportes') ? '<button class="btn btn-sec" onclick="descargarInventarioSap()">Descargar Excel</button>' : ''}
+          <button class="btn btn-sec" onclick="invData=null; pintarApp()">Actualizar</button></span>
+      </div>
+
+      ${puede('inv_contar') ? `<div class="card col gap8 inv-form">
+        <span class="h3">Registrar conteo</span>
+        <div class="inv-grid">
+          <div><label class="lbl" for="invLug">1. ¿Dónde lo encontraron?</label>
+            <div class="fila gap8">${campoConCamara(`<input id="invLug" class="campo" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="Escanea o escribe el lugar" value="${esc(invForm.ubic)}">`, 'invLug')}
+              <button class="btn btn-sec" onclick="invElegirLugar()">Elegir</button></div>
+            <span id="invLugInfo" class="small">${invLugarInfo()}</span></div>
+          <div><label class="lbl" for="invProd">2. Producto (código Nutresa, Atlantic o nombre)</label>
+            ${campoConCamara('<input id="invProd" class="campo" list="dlProductos" autocomplete="off" spellcheck="false" placeholder="Escanea, escribe o elige">', 'invProd')}</div>
+        </div>
+        <div id="invProdInfo" class="info" hidden></div>
+        <div class="inv-grid2">
+          <div><span class="lbl">3. ¿Qué es?</span>
+            <div class="seg" role="group" aria-label="Tipo de conteo">${TIPOS_CONTEO.map(([k, t]) =>
+              `<button class="${invForm.tipo === k ? 'on' : ''}" onclick="invTipo('${k}')">${t}</button>`).join('')}</div></div>
+          <div><label class="lbl" for="invCant">4. Cantidad <span id="invUm" class="muted small">(unidades)</span></label>
+            <input id="invCant" class="campo" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>
+          <button id="invOk" class="btn btn-ent-solido btn-xl" onclick="guardarConteo()">Guardar conteo</button>
+        </div>
+        <p id="invErr" class="error" hidden></p>
+      </div>` : ''}
+
+      <div class="card col gap12">
+        <div class="inv-filtros">
+          <div><label class="lbl" for="invZona">Zona</label>
+            <select id="invZona" class="campo"><option value="">Todas las zonas</option>${zonas.map(z =>
+              `<option value="${esc(z.id)}" ${invF.zona === z.id ? 'selected' : ''}>${esc(z.nombre)}</option>`).join('')}
+              <option value="-" ${invF.zona === '-' ? 'selected' : ''}>Sin ubicar en el plano</option></select></div>
+          <div class="inv-buscar"><label class="lbl" for="invQ">Buscar</label>
+            <input id="invQ" class="campo" placeholder="Código o nombre" value="${esc(invF.q)}" autocomplete="off"></div>
+          <label class="fila gap8 small" style="cursor:pointer;align-self:end;min-height:48px"><input type="checkbox" id="invDif" ${invF.soloDif ? 'checked' : ''}> Solo con diferencia</label>
+        </div>
+        <div id="invTabla">${tablaInventario()}</div>
+        <span class="muted small">Todo en unidades. <b>Total SAP</b> = Inventario SAP − Calidad SAP. <b>Aéreo</b> = lo ubicado en el plano del nivel 2 hacia arriba (sin picking).
+          <b>Total planta</b> = Picking + Aéreo + Bloqueado (sin Calidad, igual que SAP). <b>Diferencia</b> = Total planta − Total SAP. Toca un producto para ver su historial.</span>
+      </div>
+    </div>`;
+  }
+
+  // Une SAP + plano + conteos por producto
+  function datosInventario() {
+    const m = {};
+    const fila = cod => m[cod] || (m[cod] = { cod, p: prodDe(cod), sap: null, picking: 0, aereo: 0, calidad: 0, bloqueado: 0, zonas: new Set(), ult: null });
+    const zonaDe = ubic => { const e = sede.espPorId[ubic]; const r = e && sede.rackPorId[e.rackId]; return r ? r.zonaId : ''; };
+    (invData.sap || []).forEach(x => (fila(x.codigo).sap = x));
+    sede.lineas.forEach(l => {
+      const e = sede.espPorId[l.ubicacionId];
+      if (!e || e.nivel === 0) return;                    // el picking se cuenta a mano
+      const f = fila(l.productoId);
+      f.aereo += Number(l.unidades) || 0;
+      const z = zonaDe(l.ubicacionId); if (z) f.zonas.add(z);
+    });
+    (invData.conteos || []).forEach(c => {
+      const f = fila(c.codigo);
+      if (c.tipo === 'CALIDAD') f.calidad += c.cantidad;
+      else if (c.tipo === 'BLOQUEADO') f.bloqueado += c.cantidad;
+      else f.picking += c.cantidad;
+      const z = zonaDe(c.ubicacion); if (z) f.zonas.add(z);
+      if (!f.ult || c.fecha > f.ult.fecha) f.ult = c;
+    });
+    return Object.values(m).map(f => {
+      const sapTotal = f.sap ? f.sap.inventario - f.sap.calidad : 0;
+      const planta = f.picking + f.aereo + f.bloqueado;
+      return Object.assign(f, { sapTotal, planta, dif: +(planta - sapTotal).toFixed(3) });
+    });
+  }
+
+  function filtrarInventario(l) {
+    const pal = sinTilde(invF.q.trim()).split(/\s+/).filter(Boolean);
+    return l.filter(f => {
+      if (invF.zona === '-' && f.zonas.size) return false;
+      if (invF.zona && invF.zona !== '-' && !f.zonas.has(invF.zona)) return false;
+      if (invF.soloDif && !f.dif) return false;
+      if (!pal.length) return true;
+      const t = sinTilde(`${f.cod} ${f.p ? f.p.codigoNutresa + ' ' + f.p.nombre : ''}`);
+      return pal.every(w => t.includes(w));
+    }).sort((a, b) => (a.p ? a.p.nombre : a.cod).localeCompare(b.p ? b.p.nombre : b.cod));
+  }
+
+  function tablaInventario() {
+    const todos = datosInventario(), l = filtrarInventario(todos);
+    if (!todos.length) return '<p class="muted">Todavía no hay datos: carga el Excel de SAP o registra un conteo.</p>';
+    const con = todos.filter(f => f.dif).length;
+    const difCls = d => !d ? 'dif-ok' : d < 0 ? 'dif-falta' : 'dif-sobra';
+    const filas = l.slice(0, 500).map(f => `<tr onclick="historialInventario('${esc(f.cod)}')">
+        <td>${esc(f.p ? f.p.codigoNutresa || '—' : '—')}</td>
+        <td>${esc(f.cod)}</td>
+        <td class="inv-prod">${esc(f.p ? f.p.nombre : 'Producto no está en el catálogo')}</td>
+        <td>${esc(f.p ? f.p.unidadMedida || 'UN' : '')}</td>
+        <td class="num g-sap">${f.sap ? nInv(f.sap.inventario) : '—'}</td>
+        <td class="num g-sap">${f.sap ? nInv(f.sap.calidad) : '—'}</td>
+        <td class="num g-sap">${f.sap ? nInv(f.sap.bloqueado) : '—'}</td>
+        <td class="num g-sap fuerte">${f.sap ? nInv(f.sapTotal) : '—'}</td>
+        <td class="num">${nInv(f.picking)}</td>
+        <td class="num">${nInv(f.aereo)}</td>
+        <td class="num">${nInv(f.calidad)}</td>
+        <td class="num">${nInv(f.bloqueado)}</td>
+        <td class="num fuerte">${nInv(f.planta)}</td>
+        <td class="num"><span class="dif ${difCls(f.dif)}">${f.dif > 0 ? '+' : ''}${nInv(f.dif)}</span></td>
+      </tr>`).join('');
+    return `<div class="muted small">${l.length} de ${todos.length} productos · <b class="${con ? 'txt-rojo' : ''}">${con}</b> con diferencia${l.length > 500 ? ' · se muestran 500, usa los filtros' : ''}</div>
+      <div class="tabla-wrap mt8"><table class="tabla inv-tabla">
+        <thead>
+          <tr class="inv-grupos"><th colspan="4"></th><th colspan="4" class="g-sap">SAP</th><th colspan="5">Planta (conteo + plano)</th><th></th></tr>
+          <tr><th>Cód. Nutresa</th><th>Cód. Atlantic</th><th>Producto</th><th>Unidad</th>
+            <th class="num g-sap">Inventario</th><th class="num g-sap">Calidad</th><th class="num g-sap">Bloqueado</th><th class="num g-sap">Total</th>
+            <th class="num">Picking</th><th class="num">Aéreo</th><th class="num">Calidad</th><th class="num">Bloqueado</th><th class="num">Total</th>
+            <th class="num">Diferencia</th></tr>
+        </thead>
+        <tbody>${filas || '<tr><td colspan="14" class="muted">No hay productos con ese filtro.</td></tr>'}</tbody></table></div>`;
+  }
+
+  function enlazarInventario() {
+    if (!$('invTabla')) return;
+    const repintar = () => { $('invTabla').innerHTML = tablaInventario(); };
+    $('invZona').addEventListener('change', () => { invF.zona = $('invZona').value; repintar(); });
+    $('invQ').addEventListener('input', () => { invF.q = $('invQ').value; repintar(); });
+    $('invDif').addEventListener('change', () => { invF.soloDif = $('invDif').checked; repintar(); });
+    const lg = $('invLug'), pr = $('invProd');
+    if (lg) {
+      lg.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); invLugarTexto(lg.value); } });
+      lg.addEventListener('change', () => invLugarTexto(lg.value, true));
+    }
+    if (pr) {
+      pr.addEventListener('input', () => invProdTexto(pr.value));
+      pr.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); invProdTexto(pr.value, true); } });
+      $('invCant').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); guardarConteo(); } });
+      if (invForm.prod) { pr.value = invForm.prod; invProdTexto(invForm.prod); }
+    }
+  }
+
+  function invLugarInfo() {
+    const e = sede.espPorId[invForm.ubic];
+    if (!e) return invForm.ubic ? '<span class="txt-rojo">Ese lugar no existe en esta sede</span>' : '<span class="muted">Primero el lugar, después el producto.</span>';
+    const r = sede.rackPorId[e.rackId], z = r && sede.zonaPorId[r.zonaId];
+    return `<span class="txt-verde">✓ ${esc(etiqueta(e))} · ${esc(r ? r.nombre : '')} · Posición ${e.posicion}${z ? ' · ' + esc(z.nombre) : ''}</span>`;
+  }
+
+  // Lugar escaneado o escrito (con o sin guiones). Debe ser un espacio exacto (con nivel y lado).
+  function invLugarTexto(txt, silencio) {
+    const c = sinGuion(txt);
+    if (!c) { invForm.ubic = ''; $('invLugInfo').innerHTML = invLugarInfo(); return; }
+    const e = sede.espacios.find(x => sinGuion(x.id) === c);
+    if (!e) {
+      invForm.ubic = '';
+      $('invLugInfo').innerHTML = `<span class="txt-rojo">No es un espacio exacto de esta sede. Escanea el espacio (con nivel y lado) o toca Elegir.</span>`;
+      if (!silencio) toast('Ese lugar no existe o le falta el nivel y el lado', 'error');
+      return;
+    }
+    invSetLugar(e.id);
+  }
+
+  function invSetLugar(id) {
+    invForm.ubic = id;
+    if ($('invLug')) $('invLug').value = id;
+    if ($('invLugInfo')) $('invLugInfo').innerHTML = invLugarInfo();
+    invProdInfo();
+    const pr = $('invProd');
+    if (pr && !pr.value) pr.focus({ preventScroll: true });
+  }
+
+  function invElegirLugar() {
+    const e = sede.espPorId[invForm.ubic];
+    lugar = e ? { zona: (sede.rackPorId[e.rackId] || {}).zonaId || '', rack: e.rackId, pos: e.posicion, nivel: e.nivel, lado: e.lado }
+      : { zona: '', rack: '', pos: 0, nivel: null, lado: '' };
+    lugarCtx = { contenedor: 'invLugarCaja', permitirLlenos: true, alElegir: id => { lugarCtx = null; cerrarModal(); pitido(); invSetLugar(id); } };
+    abrirModal(`<div class="fila-sb"><span class="h2">¿Dónde lo encontraron?</span>${btnCerrar()}</div><div id="invLugarCaja"></div>`);
+    pintarLugar();
+  }
+
+  function invProdTexto(txt, enter) {
+    const p = buscarProducto(txt);
+    invForm.prod = p ? p.id : '';
+    invProdInfo();
+    if (p && enter) { if ($('invProd')) $('invProd').value = p.id + ' · ' + p.nombre; $('invCant').focus(); }
+    else if (enter && txt.trim()) toast('No hay un producto con ese código o nombre', 'error');
+  }
+
+  function invProdInfo() {
+    const caja = $('invProdInfo');
+    if (!caja) return;
+    const p = prodDe(invForm.prod);
+    if (!p) { caja.hidden = true; return; }
+    const f = datosInventario().find(x => x.cod === p.id) || { picking: 0, aereo: 0, calidad: 0, bloqueado: 0, sap: null, sapTotal: 0, planta: 0, dif: 0 };
+    const aqui = (invData.conteos || []).find(c => c.codigo === p.id && c.ubicacion === invForm.ubic && c.tipo === invForm.tipo);
+    $('invUm').textContent = `(${(p.unidadMedida || 'UN').toUpperCase() === 'KG' ? 'kg' : 'unidades'})`;
+    caja.hidden = false;
+    caja.innerHTML = `<span class="fuerte">${esc(p.nombre)}</span>
+      <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · Atlantic ${esc(p.id)} · Unidad ${esc(p.unidadMedida || 'UN')}</span>
+      <span class="small">SAP total <b>${f.sap ? nInv(f.sapTotal) : '—'}</b> · Picking <b>${nInv(f.picking)}</b> · Aéreo <b>${nInv(f.aereo)}</b> · Calidad <b>${nInv(f.calidad)}</b> · Bloqueado <b>${nInv(f.bloqueado)}</b> · Diferencia <b>${nInv(f.dif)}</b></span>
+      ${aqui ? `<span class="small txt-naranja">Último conteo de ${TIPOS_CONTEO.find(t => t[0] === aqui.tipo)[1].toLowerCase()} aquí: <b>${nInv(aqui.cantidad)}</b> (${esc(aqui.usuario || '—')}, ${fechaHora(aqui.fecha)}). Lo que guardes lo reemplaza.</span>` : ''}`;
+  }
+
+  function invTipo(t) {
+    invForm.tipo = t;
+    document.querySelectorAll('.inv-form .seg button').forEach((b, i) => (b.className = TIPOS_CONTEO[i][0] === t ? 'on' : ''));
+    invProdInfo();
+  }
+
+  function guardarConteo() {
+    const err = m => { const e = $('invErr'); e.textContent = m; e.hidden = false; };
+    $('invErr').hidden = true;
+    if (!sede.espPorId[invForm.ubic]) return err('Primero escanea o elige dónde lo encontraron.');
+    const p = prodDe(invForm.prod) || buscarProducto($('invProd').value);
+    if (!p) return err('Elige el producto.');
+    const v = $('invCant').value.trim();
+    const cant = Number(v.replace(',', '.'));
+    if (v === '' || !(cant >= 0)) return err('Escribe la cantidad (0 si no hay).');
+    const b = $('invOk'); b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: invForm.ubic, codigo: p.id, tipo: invForm.tipo, cantidad: cant, usuario: ses.nombre })
+      .then(c => {
+        // Reemplaza el último de ese producto + lugar + tipo
+        invData.conteos = (invData.conteos || []).filter(x => !(x.codigo === c.codigo && x.ubicacion === c.ubicacion && x.tipo === c.tipo)).concat([c]);
+        pitido();
+        toast(`${nInv(cant)} de ${p.nombre} (${TIPOS_CONTEO.find(t => t[0] === c.tipo)[1].toLowerCase()}) en ${etiqueta(sede.espPorId[c.ubicacion])}`, 'ok');
+        invForm.prod = '';
+        $('invProd').value = ''; $('invCant').value = '';
+        $('invProdInfo').hidden = true;
+        $('invTabla').innerHTML = tablaInventario();
+        b.disabled = false; b.textContent = 'Guardar conteo';
+        $('invProd').focus();
+      })
+      .catch(e => { err(e.message); b.disabled = false; b.textContent = 'Guardar conteo'; });
+  }
+
+  // Historial de un producto: conteos (quién, cuándo, dónde) y dónde está en el plano
+  function historialInventario(cod) {
+    const p = prodDe(cod);
+    const f = datosInventario().find(x => x.cod === cod);
+    abrirModal(`<div class="fila-sb"><span class="h2">${esc(p ? p.nombre : cod)}</span>${btnCerrar()}</div>
+      <span class="muted small">Nutresa ${esc(p ? p.codigoNutresa || '—' : '—')} · Atlantic ${esc(cod)}</span>
+      ${f ? `<div class="inv-res mt12">
+        <div><span class="muted small">Total SAP</span><b>${f.sap ? nInv(f.sapTotal) : '—'}</b></div>
+        <div><span class="muted small">Total planta</span><b>${nInv(f.planta)}</b></div>
+        <div><span class="muted small">Diferencia</span><b class="${f.dif ? 'txt-rojo' : 'txt-verde'}">${f.dif > 0 ? '+' : ''}${nInv(f.dif)}</b></div></div>` : ''}
+      <span class="h3 mt12">En el plano (aéreo)</span>
+      ${(() => {
+        const ls = sede.lineas.filter(l => l.productoId === cod && sede.espPorId[l.ubicacionId] && sede.espPorId[l.ubicacionId].nivel !== 0);
+        return ls.length ? `<div class="lista-senal mt8">${ls.map(l => `<div><b>${esc(l.ubicacionId)}</b><span class="muted small">${nInv(l.unidades)} · lote ${esc(l.lote || '—')} · vence ${fCorta(l.vencimiento)}</span></div>`).join('')}</div>`
+          : '<p class="muted small mt8">No hay estibas ubicadas en el plano.</p>';
+      })()}
+      <span class="h3 mt12">Conteos</span>
+      <div id="histInv" class="mt8"><div class="cargando">Cargando historial…</div></div>`);
+    llamar('bdHistorialConteos', { sedeId: ses.sedeId, codigo: cod }).then(h => {
+      if (!$('histInv')) return;
+      $('histInv').innerHTML = h.length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Fecha</th><th>Lugar</th><th>Tipo</th><th class="num">Cantidad</th><th>Quién</th></tr></thead>
+        <tbody>${h.map(c => `<tr><td class="nowrap">${fechaHora(c.fecha)}</td><td>${esc(c.ubicacion)}</td><td>${TIPOS_CONTEO.find(t => t[0] === c.tipo)[1]}</td>
+          <td class="num">${nInv(c.cantidad)}</td><td>${esc(c.usuario || '—')}</td></tr>`).join('')}</tbody></table></div>`
+        : '<p class="muted small">Todavía no hay conteos de este producto.</p>';
+    }).catch(e => { if ($('histInv')) $('histInv').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
+  }
+
+  function descargarInventarioSap() {
+    const l = filtrarInventario(datosInventario());
+    if (!l.length) return toast('No hay datos para descargar', 'error');
+    const zn = f => [...f.zonas].map(z => (sede.zonaPorId[z] || {}).nombre || z).join(', ');
+    descargarExcel(`Inventario SAP ${nombreSede(ses.sedeId)} ${hoyISO()}.xlsx`, { Inventario: l.map(f => ({
+      'Código Nutresa': f.p ? f.p.codigoNutresa : '', 'Código Atlantic': f.cod, 'Producto': f.p ? f.p.nombre : '', 'Unidad': f.p ? f.p.unidadMedida : '',
+      'Zona': zn(f), 'Inventario SAP': f.sap ? f.sap.inventario : 0, 'Calidad SAP': f.sap ? f.sap.calidad : 0, 'Bloqueado SAP': f.sap ? f.sap.bloqueado : 0,
+      'Total SAP': f.sapTotal, 'Picking': f.picking, 'Aéreo': f.aereo, 'Calidad planta': f.calidad, 'Bloqueado planta': f.bloqueado,
+      'Total planta': f.planta, 'Diferencia': f.dif, 'Último conteo': f.ult ? fechaHora(f.ult.fecha) : '', 'Contó': f.ult ? f.ult.usuario : ''
+    })) });
+  }
+
+  /* ----- Cargar el Excel de SAP ----- */
+  let sapTmp = null;   // { archivo, filas: [[...]], cab: índice de la fila de títulos }
+
+  function abrirCargaSap() {
+    if (sinPermiso('inv_sap')) return;
+    sapTmp = null;
+    abrirModal(`<div class="fila-sb"><span class="h2">Cargar Excel de SAP</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Exporta el reporte de inventario de SAP de <b>${esc(nombreSede(ses.sedeId))}</b> y súbelo aquí (Excel o CSV).
+        Reemplaza lo que estaba cargado de SAP; los conteos de planta no se tocan.</span>
+      <label for="sapArch" class="btn btn-pri btn-xl mt12" role="button" tabindex="0">Escoger archivo</label>
+      <input id="sapArch" type="file" accept=".xlsx,.xls,.csv" class="oculto">
+      <div id="sapCaja" class="mt12"></div>
+      <p id="fErr" class="error" hidden></p>`);
+    $('sapArch').addEventListener('change', ev => { const f = ev.target.files[0]; if (f) leerSap(f); });
+  }
+
+  function leerSap(f) {
+    $('sapCaja').innerHTML = '<div class="cargando">Leyendo…</div>';
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        let filas;
+        if (window.XLSX && !/\.csv$/i.test(f.name)) {
+          const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+          filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+        } else {
+          let txt = new TextDecoder('utf-8').decode(r.result);
+          if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1252').decode(r.result);   // CSV guardado desde Excel en Windows
+          const muestra = txt.split(/\r?\n/).slice(0, 15).join('\n');
+          const cuenta = ch => (muestra.match(new RegExp(ch === '\t' ? '\t' : '\\' + ch, 'g')) || []).length;
+          const sep = cuenta('\t') > cuenta(';') && cuenta('\t') > cuenta(',') ? '\t' : cuenta(';') >= cuenta(',') ? ';' : ',';
+          filas = txt.split(/\r?\n/).map(l => l.split(sep).map(c => c.replace(/^"|"$/g, '').trim()));
+        }
+        filas = filas.filter(x => x.some(c => String(c).trim() !== ''));
+        const cab = Math.max(0, filas.findIndex(x => x.filter(c => String(c).trim() && isNaN(Number(c))).length >= 3));
+        sapTmp = { archivo: f.name, filas, cab };
+        pintarSap();
+      } catch (e) { $('sapCaja').innerHTML = `<p class="error">No se pudo leer el archivo: ${esc(e.message)}</p>`; }
+    };
+    r.readAsArrayBuffer(f);
+  }
+
+  // Número de SAP: 1.234,5 · 1,234.5 · 1234,5 · 1234
+  function numSap(v) {
+    if (typeof v === 'number') return v;
+    let t = String(v || '').replace(/\s/g, '');
+    if (!t) return 0;
+    const neg = /-$/.test(t) || /^-/.test(t); t = t.replace(/-/g, '');
+    if (t.includes(',') && t.includes('.')) t = t.lastIndexOf(',') > t.lastIndexOf('.') ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+    else if (t.includes(',')) t = /,\d{3}$/.test(t) && !/,\d{1,2}$/.test(t) && t.split(',').length > 2 ? t.replace(/,/g, '') : t.replace(',', '.');
+    else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');   // 1.200 = mil doscientos (punto de miles)
+    const n = Number(t);
+    return isNaN(n) ? 0 : (neg ? -n : n);
+  }
+
+  function pintarSap() {
+    const { filas, cab } = sapTmp;
+    const tit = filas[cab].map((c, i) => String(c).trim() || `Columna ${i + 1}`);
+    const adiv = re => { const i = tit.findIndex(t => re.test(sinTilde(t))); return i; };
+    const sel = (id, i) => `<select id="${id}" class="campo"><option value="-1">— No viene —</option>${tit.map((t, k) => `<option value="${k}" ${k === i ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+    const g = sapTmp.guia || {
+      cod: adiv(/material|codigo|cod\b|sku|referencia/i),
+      inv: adiv(/libre|inventario|stock|existencia|disponible|cantidad|total/i),
+      cal: adiv(/calidad|inspecc/i),
+      blq: adiv(/bloq/i)
+    };
+    sapTmp.guia = g;
+    $('sapCaja').innerHTML = `<span class="muted small">Archivo: <b>${esc(sapTmp.archivo)}</b> · ${filas.length - cab - 1} filas. Revisa qué columna es cada cosa:</span>
+      <div class="dos mt8">
+        <div><label class="lbl" for="sapCod">Código del producto (Nutresa o Atlantic)</label>${sel('sapCod', g.cod)}</div>
+        <div><label class="lbl" for="sapInv">Inventario SAP</label>${sel('sapInv', g.inv)}</div>
+        <div><label class="lbl" for="sapCal">Calidad SAP</label>${sel('sapCal', g.cal)}</div>
+        <div><label class="lbl" for="sapBlq">Bloqueado SAP</label>${sel('sapBlq', g.blq)}</div>
+      </div>
+      <div id="sapPrev" class="mt12"></div>`;
+    ['sapCod', 'sapInv', 'sapCal', 'sapBlq'].forEach(id => $(id).addEventListener('change', () => {
+      sapTmp.guia = { cod: +$('sapCod').value, inv: +$('sapInv').value, cal: +$('sapCal').value, blq: +$('sapBlq').value };
+      prevSap();
+    }));
+    prevSap();
+  }
+
+  function filasSap() {
+    const { filas, cab, guia: g } = sapTmp;
+    const porCod = {};
+    ini.productos.forEach(p => { porCod[String(p.id)] = p; if (p.codigoNutresa) porCod[String(p.codigoNutresa)] = porCod[String(p.codigoNutresa)] || p; });
+    const ok = [], malos = [];
+    if (g.cod < 0) return { ok, malos };
+    filas.slice(cab + 1).forEach(x => {
+      const c = String(x[g.cod] ?? '').trim().replace(/\.0+$/, '').replace(/^0+(?=\d)/, '');
+      if (!c) return;
+      const p = porCod[c] || porCod[String(x[g.cod]).trim()];
+      const val = i => (i >= 0 ? numSap(x[i]) : 0);
+      if (!p) return malos.push(c);
+      ok.push({ codigo: p.id, inventario: val(g.inv), calidad: val(g.cal), bloqueado: val(g.blq) });
+    });
+    return { ok, malos };
+  }
+
+  function prevSap() {
+    const { ok, malos } = filasSap();
+    const g = sapTmp.guia;
+    const listo = g.cod >= 0 && g.inv >= 0 && ok.length;
+    $('sapPrev').innerHTML = `<div class="inv-res">
+        <div><span class="muted small">Productos encontrados</span><b class="txt-verde">${ok.length}</b></div>
+        <div><span class="muted small">Códigos que no están</span><b class="${malos.length ? 'txt-naranja' : ''}">${malos.length}</b></div></div>
+      ${malos.length ? `<span class="muted small mt8">No están en el catálogo (no se cargan): ${esc([...new Set(malos)].slice(0, 15).join(', '))}${malos.length > 15 ? '…' : ''}</span>` : ''}
+      ${ok.length ? `<div class="tabla-wrap mt8"><table class="tabla"><thead><tr><th>Atlantic</th><th>Producto</th><th class="num">Inventario</th><th class="num">Calidad</th><th class="num">Bloqueado</th></tr></thead>
+        <tbody>${ok.slice(0, 5).map(r => `<tr><td>${esc(r.codigo)}</td><td>${esc((prodDe(r.codigo) || {}).nombre || '')}</td><td class="num">${nInv(r.inventario)}</td><td class="num">${nInv(r.calidad)}</td><td class="num">${nInv(r.bloqueado)}</td></tr>`).join('')}</tbody></table></div>
+        <span class="muted small">Así se ven los primeros 5. Si los números no cuadran, cambia las columnas de arriba.</span>` : ''}
+      <button id="sapOk" class="btn btn-pri btn-xl mt12" onclick="guardarSap()" ${listo ? '' : 'disabled'}>${listo ? `Cargar ${ok.length} productos` : g.cod < 0 ? 'Elige la columna del código' : g.inv < 0 ? 'Elige la columna de inventario' : 'No hay productos para cargar'}</button>`;
+  }
+
+  function guardarSap() {
+    const { ok } = filasSap();
+    const b = $('sapOk'); b.disabled = true; b.textContent = 'Cargando…';
+    llamar('bdCargarSap', { sedeId: ses.sedeId, filas: ok, usuario: ses.nombre, archivo: sapTmp.archivo })
+      .then(r => { invData = r.inv; invSede = ses.sedeId; cerrarModal(); toast(`SAP cargado: ${r.filas} productos`, 'ok'); pintarApp(); })
+      .catch(e => { errForm(e.message); b.disabled = false; b.textContent = `Cargar ${ok.length} productos`; });
+  }
+
+  function vistaProductosTotales() {
+    return `<div class="col gap12">
+      <div class="fila-sb wrap-f gap8"><span class="h2">Productos totales</span>
         <div class="fila gap8 wrap-f">
           ${puede('reportes') ? `<button class="btn btn-sec" onclick="descargarInventario()">Descargar inventario</button>
           <button class="btn btn-sec" onclick="abrirSalidas()">Salidas y rotación</button>
@@ -4088,6 +4525,8 @@
     if (camDestino === 'flujoOrigen') return flujoOrigenCodigo(valor);
     if (camDestino === 'scanLugar' || camDestino === 'lgCod') return buscarLugar(valor);
     if (camDestino === 'prodQ' && $('prodQ')) { const pr = buscarProducto(valor); if (pr) return abrirFicha(pr.id); $('prodQ').value = valor; $('prodQ').dispatchEvent(new Event('input')); return; }
+    if (camDestino === 'invLug' && $('invLug')) { $('invLug').value = valor; return invLugarTexto(valor); }
+    if (camDestino === 'invProd' && $('invProd')) { $('invProd').value = valor; return invProdTexto(valor, true); }
     if (camDestino === 'prQ' && $('prQ')) { $('prQ').value = valor; return elegirPrTexto(valor); }
     if (camDestino === 'bpQ' && $('bpQ')) { $('bpQ').value = valor; return buscarProductoCod(valor); }
     const campo = $(camDestino);

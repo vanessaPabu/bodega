@@ -507,6 +507,30 @@
   .rt-tabla .rt-prod { min-width: 180px; }
   .rt-tabla .rt-acc { position: sticky; right: 0; background: var(--card); box-shadow: -6px 0 8px -6px rgba(0,0,0,.18); }
   .rt-tabla thead .rt-acc { background: inherit; }
+  /* Inventario contra SAP */
+  .inv-form .seg { grid-template-columns: repeat(3, 1fr); display: grid; }
+  .inv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .inv-grid .fila > :first-child { flex: 1; min-width: 0; }
+  .inv-grid2 { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+  .inv-grid2 .btn-xl { min-height: 48px; height: 48px; }
+  @media (max-width: 760px) { .inv-grid, .inv-grid2 { grid-template-columns: 1fr; } }
+  .inv-filtros { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 2fr) auto; gap: 10px; }
+  @media (max-width: 760px) { .inv-filtros { grid-template-columns: 1fr; } }
+  .inv-res { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+  .inv-res > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--card); }
+  .inv-res b { font-size: 20px; }
+  .inv-tabla { font-size: 13px; }
+  .inv-tabla th { white-space: nowrap; }
+  .inv-tabla tbody tr { cursor: pointer; }
+  .inv-tabla tbody tr:hover td { background: var(--pri-suave); }
+  .inv-tabla .inv-prod { min-width: 200px; }
+  .inv-tabla .g-sap { background: rgba(31, 95, 191, .06); }
+  .inv-tabla .inv-grupos th { text-align: center; font-size: 12px; letter-spacing: .05em; text-transform: uppercase; border-bottom: 2px solid var(--borde); }
+  .inv-tabla th.num { text-align: right; }
+  .dif { display: inline-block; min-width: 54px; padding: 2px 8px; border-radius: 999px; font-weight: 800; text-align: right; }
+  .dif-ok { background: #E6F4EA; color: #1E6B34; }
+  .dif-falta { background: #FDECEA; color: #8C1D18; }
+  .dif-sobra { background: #FFF4C2; color: #6B5300; }
   .card-aviso { border-left: 4px solid var(--pronto, #E8C21C); }
   .conf-ub { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
   .conf-q { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid var(--borde); border-radius: 12px; background: var(--card); }
@@ -586,7 +610,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-C3T6Mbwh.js"></script>
+  <script type="module" crossorigin src="./assets/index-C3DamIY_.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>
