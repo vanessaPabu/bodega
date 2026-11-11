@@ -6,6 +6,40 @@
   const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
   const pad3 = n => String(n).padStart(3, '0');
 
+  /* ----- Paginación: todas las tablas y listas largas muestran 15 por página ----- */
+  const POR_PAG = 15;
+  const pagAct = {};        // página actual de cada tabla
+  const pagRepintar = {};   // cómo se vuelve a pintar cada tabla al cambiar de página
+  function paginar(clave, lista, repintar) {
+    if (repintar) pagRepintar[clave] = repintar;
+    const pags = Math.max(1, Math.ceil(lista.length / POR_PAG));
+    const p = Math.min(Math.max(1, pagAct[clave] || 1), pags);
+    pagAct[clave] = p;
+    return { filas: lista.slice((p - 1) * POR_PAG, p * POR_PAG), barra: barraPag(clave, p, pags, lista.length) };
+  }
+  function barraPag(clave, p, pags, total) {
+    if (total <= POR_PAG) return '';
+    const ini = (p - 1) * POR_PAG + 1, fin = Math.min(p * POR_PAG, total);
+    const nums = [...new Set([1, p - 1, p, p + 1, pags])].filter(n => n >= 1 && n <= pags).sort((a, b) => a - b);
+    let botones = '', prev = 0;
+    nums.forEach(n => {
+      if (n - prev > 1) botones += '<span class="pag-sep">…</span>';
+      botones += `<button type="button" class="${n === p ? 'on' : ''}" ${n === p ? 'aria-current="page"' : ''} onclick="irPag('${clave}', ${n})">${n}</button>`;
+      prev = n;
+    });
+    return `<nav class="pag" data-pag="${clave}" aria-label="Páginas"><span class="muted small">${ini}–${fin} de ${total}</span>
+      <span class="pag-btns"><button type="button" aria-label="Página anterior" ${p === 1 ? 'disabled' : ''} onclick="irPag('${clave}', ${p - 1})">‹</button>${botones}<button type="button" aria-label="Página siguiente" ${p === pags ? 'disabled' : ''} onclick="irPag('${clave}', ${p + 1})">›</button></span></nav>`;
+  }
+  function irPag(clave, n) {
+    pagAct[clave] = n;
+    if (pagRepintar[clave]) pagRepintar[clave]();
+    // Que se vea el comienzo de la tabla
+    const nav = document.querySelector(`.pag[data-pag="${clave}"]`);
+    const caja = nav && (nav.previousElementSibling || nav);
+    if (caja && caja.getBoundingClientRect().top < 0) caja.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+  const pagInicio = (...claves) => claves.forEach(k => { pagAct[k] = 1; });
+
   const ICONOS = {
     casa: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-5 9 5v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M8 20v-6h8v6"/></svg>',
     check: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
@@ -269,7 +303,7 @@
       cal.append(d);                           // el calendario de verdad queda encima del botón (invisible)
       d.classList.add('fecha-nativa');
       d.setAttribute('aria-label', 'Abrir calendario');
-      t.value = isoATexto(d.value);
+      t.value = isoATexto(d.value); t.defaultValue = t.value;
       const avisar = cambio => {
         d.dispatchEvent(new Event('input', { bubbles: true }));
         if (cambio) d.dispatchEvent(new Event('change', { bubbles: true }));
@@ -326,27 +360,18 @@
 
   /* ================= Pantalla de ingreso ================= */
   function pintarLogin() {
-    const delRol = ini.operarios.filter(o => o.rol === lg.perfil);
-    const ops = delRol.length ? delRol : ini.operarios;
     if (!ini.sedes.some(s => s.id === lg.sedeId) && ini.sedes[0]) lg.sedeId = ini.sedes[0].id;
-
     $('app').innerHTML = `
-    <div class="login"><div class="login-caja">
+    <div class="login"><div class="login-caja login-simple">
       <div class="fila-sb"><div class="logo">${ICONOS.casa}</div>${btnTema(true)}</div>
-      <div class="col gap4"><h1 class="h1">Bodega</h1><span class="muted">Entradas y salidas por posición</span></div>
+      <div class="col gap4"><h1 class="h1">Bodega</h1><span class="muted">Entra con tu cédula y tu PIN</span></div>
 
-      <div class="seg" role="group" aria-label="Perfil">
-        <button class="${lg.perfil === 'OPERARIO' ? 'on' : ''}" onclick="lgPerfil('OPERARIO')">Operario</button>
-        <button class="${lg.perfil === 'JEFE' ? 'on' : ''}" onclick="lgPerfil('JEFE')">Jefe</button>
-      </div>
-
-      <div>
-        <label class="lbl" for="lgNombre">¿Quién eres?</label>
-        <select id="lgNombre" class="campo" onchange="lg.nombre = this.value; pinTxt = ''; pinPrimero = null; pintarPin()">
-          ${ops.length
-            ? ops.map(o => `<option ${o.nombre === lg.nombre ? 'selected' : ''}>${esc(o.nombre)}</option>`).join('')
-            : '<option value="">No hay usuarios con ese perfil</option>'}
-        </select>
+      <div class="ced-caja">
+        <label class="lbl" for="lgCed">Cédula</label>
+        <input id="lgCed" class="campo campo-grande" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Número de cédula" maxlength="15"
+          role="combobox" aria-autocomplete="list" aria-controls="cedSug" aria-expanded="false">
+        <div id="cedSug" class="ced-sug" role="listbox" hidden></div>
+        <span id="cedHola" class="small txt-verde"></span>
       </div>
 
       <div>
@@ -354,27 +379,58 @@
         <div id="pinCaja"></div>
       </div>
 
-      <div>
-        <span class="lbl">Sede</span>
-        <div class="col gap10">
-          ${ini.sedes.map(s => `
-            <button class="sede-btn ${s.id === lg.sedeId ? 'on' : ''}" onclick="lgSede('${esc(s.id)}')">
-              <span>${esc(s.nombre)}</span>
-              ${s.id === lg.sedeId ? `<span style="color:var(--pri)">${ICONOS.check}</span>` : ''}
-            </button>`).join('')}
-        </div>
-      </div>
-
-      <div class="col gap12" style="margin-top:auto">
-        <button id="btnEntrar" class="btn btn-pri btn-xl" onclick="entrar()">Entrar</button>
-        <span class="muted small centro">Tu sesión queda abierta en este equipo hasta que toques "Salir".</span>
-      </div>
+      <button id="btnEntrar" class="btn btn-pri btn-xl" onclick="entrar()">Entrar</button>
+      <span class="muted small centro">Tu sesión queda abierta en este equipo hasta que toques "Salir". La sede la cambias adentro.</span>
     </div></div>`;
+    const c = $('lgCed');
+    c.addEventListener('input', () => { c.value = c.value.replace(/\D/g, ''); pinError = ''; pintarSugCed(); });
+    c.addEventListener('focus', pintarSugCed);
+    c.addEventListener('blur', () => setTimeout(() => { if ($('cedSug')) { $('cedSug').hidden = true; c.setAttribute('aria-expanded', 'false'); } }, 180));
+    c.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); const f = document.querySelector('#lgPin .pin-c'); if (f) f.focus(); }
+      if (ev.key === 'Escape') $('cedSug').hidden = true;
+    });
     pintarPin();
+    if (!('ontouchstart' in window)) c.focus();
   }
 
-  function lgPerfil(p) { lg.nombre = $('lgNombre').value; lg.perfil = p; pinTxt = ''; pinPrimero = null; pintarLogin(); }
-  function lgSede(id) { lg.nombre = $('lgNombre').value; lg.sedeId = id; pintarLogin(); }
+
+  /* ----- Cédulas que ya entraron en este equipo (sugerencias al escribir) ----- */
+  // Solo se recuerdan en este equipo las personas que ya entraron aquí: la lista completa nunca se muestra.
+  const cedulasEquipo = () => { const l = leerLS('cedulasEquipo'); return Array.isArray(l) ? l : []; };
+  function recordarCedula(cedula, nombre) {
+    if (!cedula) return;
+    const l = cedulasEquipo().filter(x => x.cedula !== cedula);
+    l.unshift({ cedula, nombre });
+    guardarLS('cedulasEquipo', l.slice(0, 15));
+  }
+  function olvidarCedula(cedula) {
+    guardarLS('cedulasEquipo', cedulasEquipo().filter(x => x.cedula !== cedula));
+    pintarSugCed();
+  }
+  function pintarSugCed() {
+    const c = $('lgCed'), box = $('cedSug');
+    if (!c || !box) return;
+    const q = c.value.trim();
+    const l = cedulasEquipo().filter(x => !q || x.cedula.startsWith(q) || sinTilde(x.nombre).includes(sinTilde(q)));
+    const exacto = cedulasEquipo().find(x => x.cedula === q);
+    $('cedHola').textContent = exacto ? `Hola, ${exacto.nombre}` : '';
+    const ver = l.length && !(exacto && l.length === 1);
+    box.hidden = !ver;
+    c.setAttribute('aria-expanded', ver ? 'true' : 'false');
+    if (!ver) return;
+    box.innerHTML = l.map(x => `<div class="ced-op" role="option">
+        <button type="button" onmousedown="event.preventDefault()" onclick="elegirCedula('${esc(x.cedula)}')"><b>${esc(x.nombre)}</b><span class="muted small">${esc(x.cedula)}</span></button>
+        <button type="button" class="ced-quitar" onmousedown="event.preventDefault()" onclick="olvidarCedula('${esc(x.cedula)}')" aria-label="Quitar de este equipo">${ICONOS.cerrar}</button>
+      </div>`).join('');
+  }
+  function elegirCedula(cedula) {
+    $('lgCed').value = cedula;
+    $('cedSug').hidden = true;
+    pintarSugCed();
+    const f = document.querySelector('#lgPin .pin-c');
+    if (f) f.focus();
+  }
 
   /* ----- PIN de 4 números: cuatro cuadritos que se llenan con el teclado del celular o del PC ----- */
   let pinTxt = '', pinPrimero = null, pinError = '';
@@ -430,33 +486,32 @@
         : '<p class="muted small mt8">Escribe tus 4 números.</p>'}`;
     if (pinError) $('lgPin').classList.add('pin-mal');
     enlazarPin('lgPin', v => { pinTxt = v; pinError = ''; setTimeout(entrar, 80); });
-    if (!('ontouchstart' in window) || pinError || pinPrimero !== null) {
+    if ((pinError || pinPrimero !== null) && $('lgCed') && $('lgCed').value) {
       const f = document.querySelector('#lgPin .pin-c'); if (f) f.focus({ preventScroll: true });
     }
   }
 
   let entrando = false;
   function entrar() {
-    const nombre = $('lgNombre').value;
-    if (!nombre) return toast('Elige tu nombre', 'error');
-    if (!lg.sedeId) return toast('No hay sedes creadas', 'error');
+    const cedula = ($('lgCed').value || '').replace(/\D/g, '');
     if ($('lgPin')) pinTxt = pinValor('lgPin');
+    if (cedula.length < 5) { pinError = 'Escribe tu número de cédula'; pintarPin(); return $('lgCed').focus(); }
+    if (!lg.sedeId) return toast('No hay sedes creadas', 'error');
     if (pinTxt.length !== 4) { pinError = 'Escribe tu PIN de 4 números'; return pintarPin(); }
     if (entrando) return;
-    lg.nombre = nombre;
-    guardarLS('sesion', { perfil: lg.perfil, nombre: lg.nombre, sedeId: lg.sedeId });
     // Primera vez del sistema: el PIN se escribe dos veces
     if (pinPrimero) {
       if (pinPrimero !== pinTxt) { pinPrimero = null; pinTxt = ''; pinError = 'Los dos PIN no son iguales. Empieza otra vez.'; return pintarPin(); }
     }
     entrando = true;
     const b = $('btnEntrar'); b.disabled = true; b.textContent = 'Entrando…';
-    llamar('bdLogin', { nombre, pin: pinTxt, sedeId: lg.sedeId, confirmar: !!pinPrimero })
+    llamar('bdLogin', { cedula, pin: pinTxt, sedeId: lg.sedeId, confirmar: !!pinPrimero })
       .then(r => {
         entrando = false;
         if (r.primerPin) { pinPrimero = pinTxt; pinTxt = ''; b.disabled = false; b.textContent = 'Entrar'; return pintarPin(); }
         if (!r.ok) { pinTxt = ''; pinError = r.error || 'No se pudo entrar'; b.disabled = false; b.textContent = 'Entrar'; return pintarPin(); }
         pinTxt = ''; pinPrimero = null;
+        recordarCedula(cedula, r.nombre);
         iniciarSesion(r);
       })
       .catch(e => { entrando = false; pinTxt = ''; pinError = e.message; b.disabled = false; b.textContent = 'Entrar'; pintarPin(); });
@@ -468,9 +523,10 @@
     if (!ini.sedes.some(s => s.id === lg.sedeId) && ini.sedes[0]) lg.sedeId = ini.sedes[0].id;
     ses = { nombre: r.nombre, perfil: r.rol, sedeId: lg.sedeId, permisos: r.permisos || [], token: r.token, id: r.id };
     lg.perfil = r.rol; lg.nombre = r.nombre;
+    guardarLS('sesion', { perfil: lg.perfil, nombre: lg.nombre, sedeId: lg.sedeId });
     posSel = null; espSel = null; busqueda = ''; vista = 'mapa';
     return llamar('bdSede', ses.sedeId)
-      .then(d => { setSede(d); pantalla = 'app'; pintar(); })
+      .then(d => { setSede(d); pantalla = 'app'; pintar(); iniciarVivo(); })
       .catch(e => { toast(e.message, 'error'); ses = null; pantalla = 'login'; pintar(); });
   }
 
@@ -1116,7 +1172,7 @@
       <div class="ficha-prod mt12"><span class="chip">${esc(p.id)}</span><span class="nombre">${esc(p.nombre)}</span></div>
       <div id="histCaja" class="mt12"><div class="cargando">Cargando historial…</div></div>`);
     llamar('bdHistorial', pid).then(movs => {
-      historial = { pid, movs, tab: 'recorrido' };
+      historial = { pid, movs, tab: 'recorrido' }; pagInicio('histSal');
       pintarHistorial();
     }).catch(e => { $('histCaja').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   }
@@ -1143,7 +1199,8 @@
     const botones = `<div class="dos mt12"><button class="btn btn-sec" onclick="seguirEnMapa('${esc(pid)}')">Ver en el mapa</button>
         ${puede('reportes') ? '<button class="btn btn-sec" onclick="descargarHistorial()">Descargar (Excel)</button>' : ''}</div>`;
     if (historial.tab === 'salidas') {
-      $('histCaja').innerHTML = pestanas + botones + (salidas.length ? `<div class="lista-bp mt12">${salidas.map(m => salidaHtml(m, false)).join('')}</div>`
+      const pg = paginar('histSal', salidas, pintarHistorial);
+      $('histCaja').innerHTML = pestanas + botones + (salidas.length ? `<div class="lista-bp mt12">${pg.filas.map(m => salidaHtml(m, false)).join('')}</div>${pg.barra}`
         : '<p class="muted mt12">Este producto no ha tenido salidas.</p>');
       return;
     }
@@ -1206,7 +1263,7 @@
     const fin = new Date(hasta + 'T00:00:00'); fin.setDate(fin.getDate() + 1);
     $('salCaja').innerHTML = '<div class="cargando">Cargando…</div>';
     llamar('bdSalidas', { desde: new Date(desde + 'T00:00:00').toISOString(), hasta: fin.toISOString() }).then(movs => {
-      repSalidas = { movs: ordenMov(movs).reverse(), solo: repSalidas ? repSalidas.solo : false, desde, hasta };
+      repSalidas = { movs: ordenMov(movs).reverse(), solo: repSalidas ? repSalidas.solo : false, desde, hasta }; pagInicio('sal');
       pintarSalidas();
     }).catch(e => { $('salCaja').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   }
@@ -1224,10 +1281,10 @@
       </div>
       ${fuera.length ? `<span class="muted small mt8">Fuera de rotación por persona: ${Object.keys(porUsuario).map(u => `${esc(u)} ${porUsuario[u]}`).join(' · ')}</span>` : ''}
       <div class="fila-sb wrap-f gap8 mt12">
-        <label class="fila gap8 small" style="cursor:pointer"><input type="checkbox" ${solo ? 'checked' : ''} onchange="repSalidas.solo = this.checked; pintarSalidas()"> Solo fuera de rotación</label>
+        <label class="fila gap8 small" style="cursor:pointer"><input type="checkbox" ${solo ? 'checked' : ''} onchange="repSalidas.solo = this.checked; pagInicio('sal'); pintarSalidas()"> Solo fuera de rotación</label>
         <button class="btn btn-sec" onclick="descargarExcel('Salidas ' + repSalidas.desde + ' a ' + repSalidas.hasta + '.xlsx', { Salidas: filasMov(repSalidas.movs) })">Descargar (Excel)</button>
       </div>
-      <div class="lista-bp mt12">${lista.length ? lista.slice(0, 200).map(m => salidaHtml(m, true)).join('') : '<p class="muted">No hay salidas en esas fechas.</p>'}</div>`;
+      <div class="lista-bp mt12">${lista.length ? paginar('sal', lista, pintarSalidas).filas.map(m => salidaHtml(m, true)).join('') : '<p class="muted">No hay salidas en esas fechas.</p>'}</div>${lista.length ? barraPag('sal', pagAct.sal, Math.ceil(lista.length / POR_PAG), lista.length) : ''}`;
   }
 
   function filasMov(movs) {
@@ -1616,8 +1673,7 @@
           <div><label class="lbl" for="rbVen">Fecha de vencimiento</label><input id="rbVen" type="date" class="campo"></div>
         </div>
         <div class="dos">
-          <div><label class="lbl" for="rbResp">Responsable</label><select id="rbResp" class="campo">${ini.operarios.map(o =>
-            `<option ${o.nombre === (leerLS('ultResp') || ses.nombre) ? 'selected' : ''}>${esc(o.nombre)}</option>`).join('')}</select></div>
+          <div class="resp-fijo"><span class="lbl">Responsable</span><span class="resp-nom">${esc(ses.nombre)}</span></div>
           <div><label class="lbl" for="rbLote">Lote</label><input id="rbLote" class="campo" autocomplete="off"></div>
         </div>
         <label class="lbl" for="rbNov">Novedad (opcional)</label><input id="rbNov" class="campo" placeholder="Ej. 2 cajas golpeadas" autocomplete="off">
@@ -1708,7 +1764,7 @@
   // Al terminar: crea un rótulo por cada parte y guarda el producto en la factura
   async function guardarRecibido() {
     const p = prodDe(rb.codigo);
-    const recibo = $('rbRec').value, venc = $('rbVen').value, resp = $('rbResp').value;
+    const recibo = $('rbRec').value, venc = $('rbVen').value, resp = ses.nombre;
     if (!recibo) return errForm('Escribe la fecha de recibo.');
     if (!venc) return errForm('Escribe la fecha de vencimiento.');
     if (!$('rbLote').value.trim()) return errForm('Escribe el lote.');
@@ -1755,7 +1811,7 @@
         <span class="col gap4 flex1" style="min-width:0"><b>${esc(e.id)} · ${esc(e.producto)}</b>
           <span class="muted small">${e.cajas} cj · ${e.tipo === 'PESO' ? kg(e.total) : e.total + ' und'} · vence ${fCorta(e.vencimiento)}</span></span></label>`).join('')}</div>
       <div class="dos mt12">
-        <div><label class="lbl" for="ipCopias">Copias de cada uno</label><input id="ipCopias" class="campo" type="number" inputmode="numeric" min="1" max="20" value="1"></div>
+        <div><label class="lbl" for="ipCopias">Copias de cada uno <span class="muted small">(mismo código)</span></label><input id="ipCopias" class="campo" type="number" inputmode="numeric" min="1" max="20" value="1"></div>
         <div><label class="lbl" for="ipTam">Tamaño del papel</label>
           <select id="ipTam" class="campo">
             <option value="carta" ${leerLS('rtTam') !== '10x15' ? 'selected' : ''}>Hoja carta (horizontal)</option>
@@ -2109,8 +2165,8 @@
   function enlazarCalidad() {
     const q = $('cqQ'), s = $('cqSolo');
     if (!q) return;
-    q.addEventListener('input', () => { rcFiltro.q = q.value; $('calCaja').innerHTML = rcCal ? tablaRc() : ''; });
-    s.addEventListener('change', () => { rcFiltro.solo = s.checked; $('calCaja').innerHTML = rcCal ? tablaRc() : ''; });
+    q.addEventListener('input', () => { rcFiltro.q = q.value; pagInicio('cal', 'invrc'); $('calCaja').innerHTML = rcCal ? tablaRc() : ''; });
+    s.addEventListener('change', () => { rcFiltro.solo = s.checked; pagInicio('cal', 'invrc'); $('calCaja').innerHTML = rcCal ? tablaRc() : ''; });
   }
 
   // Una fila por cada línea recibida, con las columnas que usa Calidad
@@ -2131,11 +2187,12 @@
 
   function calidadHtml() {
     const filas = filasCalidad();
+    const pg = paginar('cal', filas, () => { if ($('calCaja') && rcCal) $('calCaja').innerHTML = tablaRc(); });
     return `<span class="h3 mt12">Productos recibidos (${filas.length})</span>
       <div class="tabla-wrap"><table class="tabla">
         <thead><tr><th>Factura</th><th>Proveedor</th><th>Fecha de ingreso</th><th>Código AFS</th><th>Nombre del producto</th>
           <th>Unidad de medida</th><th>Cantidad</th><th>Lote</th><th>Fecha de vencimiento</th><th>Novedad</th><th>Fotos</th><th>Link</th></tr></thead>
-        <tbody>${filas.map(({ i, r }) => `<tr>
+        <tbody>${pg.filas.map(({ i, r }) => `<tr>
           <td>${esc(r.factura)}</td><td>${esc(r.proveedor)}</td><td>${esc(r.fecha)}</td><td class="mono-c">${esc(i.codigo)}</td>
           <td class="txt">${esc(i.producto)}</td><td>${esc(i.unidad)}</td><td class="num">${nfmt(i.cantRecibida)}</td><td>${esc(i.lote)}</td>
           <td>${esc(i.vencimiento)}</td><td class="txt">${esc(i.novedad)}</td>
@@ -2144,7 +2201,7 @@
             ${puede('cal_editar') ? `<button class="link" onclick="editarLink('${i.id}')">Cambiar</button>` : ''}`
             : puede('cal_editar') ? `<button class="btn btn-sec btn-mini" onclick="editarLink('${i.id}')">+ Link</button>` : '<span class="muted">—</span>'}</td>
         </tr>`).join('') || '<tr><td colspan="12" class="muted">Sin resultados</td></tr>'}</tbody>
-      </table></div>`;
+      </table></div>${pg.barra}`;
   }
 
   const tablaRc = () => (rcTab === 'inventario' ? inventarioRcHtml() : calidadHtml());
@@ -2175,6 +2232,7 @@
   function inventarioRcHtml() {
     const filas = filasInvRecibo();
     const conDif = filas.filter(x => x.dif !== null && x.dif !== 0).length;
+    const pg = paginar('invrc', filas, () => { if ($('calCaja') && rcCal) $('calCaja').innerHTML = tablaRc(); });
     return `<div class="ficha-datos mt12">
         <div><span class="muted small">Productos</span><b>${filas.length}</b></div>
         <div><span class="muted small">Con diferencia</span><b class="${conDif ? 'txt-rojo' : ''}">${conDif}</b></div>
@@ -2183,7 +2241,7 @@
         <thead><tr><th>Factura</th><th>Proveedor</th><th>Fecha de ingreso</th><th>Código AFS</th><th>Nombre del producto</th>
           <th>Unidad de medida</th><th>Pedido</th><th>Llegó</th><th>Diferencia</th><th>Estado</th><th>Tipo</th><th>Lote</th>
           <th>Fecha de vencimiento</th><th>Novedad</th><th>Recibió</th><th>Partes</th><th>Rótulos</th><th>Fotos</th><th>Link</th></tr></thead>
-        <tbody>${filas.map(x => `<tr class="${x.est.cls === 'venc' ? 'fila-mala' : ''}">
+        <tbody>${pg.filas.map(x => `<tr class="${x.est.cls === 'venc' ? 'fila-mala' : ''}">
           <td>${esc(x.r.factura)}</td><td>${esc(x.r.proveedor)}</td><td>${esc(x.r.fecha)}</td><td class="mono-c">${esc(x.g.codigo)}</td>
           <td class="txt">${esc(x.g.producto)}</td><td>${esc(x.g.unidad)}</td><td class="num">${nfmt(x.g.factura)}</td><td class="num">${nfmt(x.g.llego)}</td>
           <td class="num ${x.dif < 0 ? 'txt-rojo' : x.dif > 0 ? 'txt-naranja' : ''}">${x.dif === null ? '—' : (x.dif > 0 ? '+' : '') + nfmt(x.dif)}</td>
@@ -2192,7 +2250,7 @@
           <td class="txt">${esc(x.rotulos.join(', '))}</td><td class="num">${x.fotos}</td>
           <td>${x.links.map(l => `<a href="${esc(l)}" target="_blank" rel="noopener" class="link-cal">Abrir</a>`).join(' ')}</td>
         </tr>`).join('') || '<tr><td colspan="19" class="muted">Sin resultados</td></tr>'}</tbody>
-      </table></div>`;
+      </table></div>${pg.barra}`;
   }
 
   function descargarInvRecibo() {
@@ -2341,9 +2399,9 @@
       if ($('mapaCont')) { $('mapaCont').innerHTML = contenidoMapa(); ajustarPlano(); }
     });
     const pq = $('prodQ');
-    if (pq) pq.addEventListener('input', () => { prodFiltro = pq.value; prodVer = 60; $('prodLista').innerHTML = listaProdHtml(); });
+    if (pq) pq.addEventListener('input', () => { prodFiltro = pq.value; pagInicio('prod'); $('prodLista').innerHTML = listaProdHtml(); });
     const ps = $('prodStock');
-    if (ps) ps.addEventListener('change', () => { prodSoloStock = ps.checked; prodVer = 60; $('prodLista').innerHTML = listaProdHtml(); });
+    if (ps) ps.addEventListener('change', () => { prodSoloStock = ps.checked; pagInicio('prod'); $('prodLista').innerHTML = listaProdHtml(); });
     const pb = $('pBus');
     if (pb) {
       const elegir = () => {
@@ -2363,89 +2421,290 @@
 
   /* ================= USUARIOS Y PERMISOS (administrador) ================= */
   let usLista = null;            // usuarios cargados
+  let pfLista = null;            // perfiles (paquetes de permisos)
+  let pfFalta = false;           // todavía no se corrió el script 21
+  let usCargando = false;
   let usEdit = null;             // usuario abierto en el editor
-  let usFiltro = { q: '', estado: 'activos' };
+  let pfEdit = null;             // perfil abierto en el editor
+  let usTab = 'usuarios';        // 'usuarios' | 'perfiles'
+  let usFiltro = { q: '', estado: 'activos', perfil: '', cargo: '' };
+  let usSel = new Set();         // usuarios marcados para ponerles perfil
   let usAbiertos = new Set();    // módulos abiertos en el acordeón
 
   const nPermisos = u => (u.permisos || []).filter(k => PERMISOS.some(p => p[0] === k)).length;
+  const perfilDe = id => (pfLista || []).find(p => p.id === id);
+  const mismosPermisos = (a, b) => {
+    const x = new Set((a || []).filter(k => PERMISOS.some(p => p[0] === k))), y = new Set((b || []).filter(k => PERMISOS.some(p => p[0] === k)));
+    return x.size === y.size && [...x].every(k => y.has(k));
+  };
+  const miPerfilId = () => ((usLista || []).find(u => u.id === ses.id) || {}).perfilId || '';
+  const barraPermisos = n => `<span class="us-perm"><span class="us-barra-p"><i style="width:${Math.round(n * 100 / PERMISOS.length)}%"></i></span>${n}/${PERMISOS.length}</span>`;
+
+  function cargarUsuarios() {
+    if (usCargando) return;
+    usCargando = true;
+    Promise.all([llamar('bdUsuarios', ses.token), llamar('bdPerfiles', ses.token).then(l => { pfFalta = false; return l; }).catch(() => { pfFalta = true; return []; })])
+      .then(([u, p]) => { usLista = u; pfLista = p; })
+      .catch(e => { usLista = []; pfLista = []; toast(e.message, 'error'); })
+      .finally(() => { usCargando = false; if (vista === 'usuarios') pintarApp(); });
+  }
 
   function vistaUsuarios() {
-    if (usLista === null) {
-      llamar('bdUsuarios', ses.token).then(l => { usLista = l; if (vista === 'usuarios') pintarApp(); })
-        .catch(e => { usLista = []; toast(e.message, 'error'); });
-      return '<div class="cargando">Cargando usuarios…</div>';
-    }
-    return usEdit ? editorUsuario() : tablaUsuarios();
+    if (usLista === null || pfLista === null) { cargarUsuarios(); return '<div class="cargando">Cargando usuarios…</div>'; }
+    if (pfEdit) return editorPerfil();
+    if (usEdit) return editorUsuario();
+    const activos = usLista.filter(u => u.activo).length;
+    return `<div class="col gap16">
+      <div class="fila-sb wrap-f gap12">
+        <div class="col gap4"><span class="h2">Usuarios y permisos</span>
+          <span class="muted small">${usTab === 'perfiles' ? 'Un perfil es un paquete de permisos: lo armas una vez y se lo pones a muchas personas.'
+            : 'Cada persona entra con su cédula y su PIN. Lo que puede hacer lo da su perfil.'}</span></div>
+        <span class="fila gap8 wrap-f">${usTab === 'perfiles'
+          ? (pfFalta ? '' : '<button class="btn btn-pri" onclick="editarPerfil()">+ Nuevo perfil</button>')
+          : `<button class="btn btn-sec" onclick="abrirCargaUsuarios()">Cargar lista</button>
+            <button class="btn btn-pri" onclick="editarUsuario()">+ Nuevo usuario</button>`}</span>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab ${usTab === 'usuarios' ? 'on' : ''}" role="tab" aria-selected="${usTab === 'usuarios'}" onclick="usTab='usuarios'; pintarApp()">Usuarios (${activos})</button>
+        <button class="tab ${usTab === 'perfiles' ? 'on' : ''}" role="tab" aria-selected="${usTab === 'perfiles'}" onclick="usTab='perfiles'; pintarApp()">Perfiles${pfFalta ? '' : ` (${pfLista.length})`}</button>
+      </div>
+      ${usTab === 'perfiles' ? tablaPerfiles() : tablaUsuarios()}
+    </div>`;
   }
 
   function filtrarUsuarios() {
     const q = sinTilde(usFiltro.q.trim());
     return usLista.filter(u => (usFiltro.estado === 'todos' || (usFiltro.estado === 'activos') === !!u.activo)
-      && (!q || sinTilde(u.nombre).includes(q)));
+      && (!usFiltro.perfil || (usFiltro.perfil === '-' ? !perfilDe(u.perfilId) : u.perfilId === usFiltro.perfil))
+      && (!usFiltro.cargo || sinTilde(u.cargo || '') === usFiltro.cargo)
+      && (!q || sinTilde(u.nombre + ' ' + (u.cargo || '')).includes(q) || String(u.cedula || '').includes(usFiltro.q.trim())));
   }
 
   function tablaUsuarios() {
     const activos = usLista.filter(u => u.activo).length;
-    const sinPin = usLista.filter(u => u.activo && !u.tienePin).length;
+    const sinPin = usLista.filter(u => u.activo && (!u.tienePin || !u.cedula)).length;
     const bloq = usLista.filter(u => u.bloqueado).length;
-    return `<div class="col gap16">
-      <div class="fila-sb wrap-f gap12">
-        <div class="col gap4"><span class="h2">Usuarios y permisos</span>
-          <span class="muted small">Cada persona entra con su nombre y su PIN. Aquí decides qué puede hacer en cada módulo.</span></div>
-        <button class="btn btn-pri" onclick="editarUsuario()">+ Nuevo usuario</button>
-      </div>
-      <div class="us-resumen">
+    const cargos = [...new Map(usLista.filter(u => u.cargo).map(u => [sinTilde(u.cargo), u.cargo])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    return `<div class="us-resumen">
         <div><span class="muted small">Activos</span><b>${activos}</b></div>
-        <div><span class="muted small">Sin PIN</span><b class="${sinPin ? 'txt-naranja' : ''}">${sinPin}</b></div>
+        <div><span class="muted small">Sin PIN o sin cédula</span><b class="${sinPin ? 'txt-naranja' : ''}">${sinPin}</b></div>
         <div><span class="muted small">Bloqueados</span><b class="${bloq ? 'txt-rojo' : ''}">${bloq}</b></div>
         <div><span class="muted small">Desactivados</span><b>${usLista.length - activos}</b></div>
       </div>
       <div class="us-barra">
-        <input id="usQ" class="campo" placeholder="Buscar por nombre" value="${esc(usFiltro.q)}" autocomplete="off">
-        <div class="seg" role="group" aria-label="Filtrar">${[['activos', 'Activos'], ['inactivos', 'Desactivados'], ['todos', 'Todos']].map(([k, t]) =>
-          `<button class="${usFiltro.estado === k ? 'on' : ''}" onclick="usFiltro.estado='${k}'; pintarApp()">${t}</button>`).join('')}</div>
+        <input id="usQ" class="campo" placeholder="Buscar por nombre, cédula o cargo" value="${esc(usFiltro.q)}" autocomplete="off" aria-label="Buscar usuario">
+        ${pfFalta ? '' : `<select id="usFPerfil" class="campo us-fsel" aria-label="Filtrar por perfil" onchange="usFiltro.perfil=this.value; usFiltrado()">
+          <option value="">Todos los perfiles</option>${pfLista.map(p => `<option value="${esc(p.id)}" ${usFiltro.perfil === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}
+          <option value="-" ${usFiltro.perfil === '-' ? 'selected' : ''}>Personalizado (sin perfil)</option></select>`}
+        <select id="usFCargo" class="campo us-fsel" aria-label="Filtrar por cargo" onchange="usFiltro.cargo=this.value; usFiltrado()">
+          <option value="">Todos los cargos</option>${cargos.map(([k, t]) => `<option value="${esc(k)}" ${usFiltro.cargo === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+        <div class="seg" role="group" aria-label="Filtrar por estado">${[['activos', 'Activos'], ['inactivos', 'Desactivados'], ['todos', 'Todos']].map(([k, t]) =>
+          `<button class="${usFiltro.estado === k ? 'on' : ''}" onclick="usFiltro.estado='${k}'; pagInicio('us'); pintarApp()">${t}</button>`).join('')}</div>
       </div>
-      <div id="usTabla">${filasUsuarios()}</div>
-    </div>`;
+      <div id="usTabla">${filasUsuarios()}</div>`;
   }
+
+  function usFiltrado() { pagInicio('us'); if ($('usTabla')) $('usTabla').innerHTML = filasUsuarios(); }
+  function usMarcar(id, on) { on ? usSel.add(id) : usSel.delete(id); usFiltrado2(); }
+  function usMarcarTodos(on) { filtrarUsuarios().forEach(u => (on ? usSel.add(u.id) : usSel.delete(u.id))); usFiltrado2(); }
+  function usFiltrado2() { if ($('usTabla')) $('usTabla').innerHTML = filasUsuarios(); }
 
   function filasUsuarios() {
     const l = filtrarUsuarios();
+    const pg = paginar('us', l, usFiltrado2);
     const estado = u => !u.activo ? '<span class="tag">Desactivado</span>' : u.bloqueado ? '<span class="tag venc">Bloqueado</span>' : '<span class="tag ok">Activo</span>';
     const pin = u => u.tienePin ? '<span class="us-pin ok">Asignado</span>' : '<span class="us-pin no">Sin PIN</span>';
-    const barra = u => { const n = nPermisos(u); return `<span class="us-perm"><span class="us-barra-p"><i style="width:${Math.round(n * 100 / PERMISOS.length)}%"></i></span>${n}/${PERMISOS.length}</span>`; };
-    return `<div class="tabla-wrap us-tabla-wrap"><table class="tabla us-tabla">
-      <thead><tr><th>Usuario</th><th>Perfil</th><th>Estado</th><th>PIN</th><th>Permisos</th><th>Último ingreso</th><th class="us-acc"></th></tr></thead>
-      <tbody>${l.length ? l.map(u => `<tr onclick="editarUsuario('${esc(u.id)}')" class="${u.activo ? '' : 'us-off'}">
-          <td><span class="us-nom"><span class="us-ini" aria-hidden="true">${esc((u.nombre || '?').trim().charAt(0).toUpperCase())}</span>
+    const perfilTxt = u => { const p = perfilDe(u.perfilId); return p ? esc(p.nombre) : pfFalta ? (u.rol === 'JEFE' ? 'Jefe' : 'Operario') : '<span class="muted">Personalizado</span>'; };
+    const todosMarcados = l.length && l.every(u => usSel.has(u.id));
+    const sel = [...usSel].filter(id => usLista.some(u => u.id === id));
+    const bulk = sel.length && !pfFalta ? `<div class="us-bulk" role="region" aria-label="Seleccionados">
+        <b>${sel.length} seleccionado${sel.length === 1 ? '' : 's'}</b>
+        <select id="usBulkPf" class="campo" aria-label="Perfil para los seleccionados"><option value="">Escoge el perfil…</option>
+          ${pfLista.map(p => `<option value="${esc(p.id)}">${esc(p.nombre)}</option>`).join('')}</select>
+        <button id="usBulkOk" class="btn btn-pri" onclick="asignarPerfilSel()">Poner perfil</button>
+        <button class="link" onclick="usSel.clear(); usFiltrado2()">Quitar selección</button></div>` : '';
+    const todosMovil = pfFalta || !l.length ? '' : `<label class="us-todos"><input type="checkbox" class="us-chk" ${todosMarcados ? 'checked' : ''} onchange="usMarcarTodos(this.checked)"> Marcar los ${l.length} del filtro</label>`;
+    return `${bulk}${todosMovil}<div class="tabla-wrap us-tabla-wrap"><table class="tabla us-tabla">
+      <thead><tr><th>${pfFalta ? '' : `<input type="checkbox" class="us-chk" ${todosMarcados ? 'checked' : ''} onchange="usMarcarTodos(this.checked)" aria-label="Marcar los ${l.length} del filtro" title="Marcar los ${l.length} del filtro"> `}Usuario</th><th>Cédula</th><th>Perfil</th><th>Estado</th><th>PIN</th><th>Permisos</th><th>Último ingreso</th><th class="us-acc"></th></tr></thead>
+      <tbody>${pg.filas.length ? pg.filas.map(u => `<tr onclick="editarUsuario('${esc(u.id)}')" class="${u.activo ? '' : 'us-off'} ${usSel.has(u.id) ? 'us-marcado' : ''}">
+          <td><span class="us-nom">${pfFalta ? '' : `<input type="checkbox" class="us-chk" ${usSel.has(u.id) ? 'checked' : ''} onclick="event.stopPropagation()" onchange="usMarcar('${esc(u.id)}', this.checked)" aria-label="Marcar a ${esc(u.nombre)}">`}
+            <span class="us-ini" aria-hidden="true">${esc((u.nombre || '?').trim().charAt(0).toUpperCase())}</span>
             <span class="col gap4" style="min-width:0"><b>${esc(u.nombre)}${u.id === ses.id ? ' <span class="muted small">(tú)</span>' : ''}</b>
-              <span class="us-movil muted small">${u.rol === 'JEFE' ? 'Jefe' : 'Operario'} · ${nPermisos(u)}/${PERMISOS.length} permisos${u.tienePin ? '' : ' · <b class="txt-naranja">sin PIN</b>'}${u.bloqueado ? ' · <b class="txt-rojo">bloqueado</b>' : ''}${u.activo ? '' : ' · desactivado'}</span></span></span></td>
-          <td>${u.rol === 'JEFE' ? 'Jefe' : 'Operario'}${(u.permisos || []).includes('usuarios') ? ' <span class="muted small">· admin</span>' : ''}</td>
-          <td>${estado(u)}</td><td>${pin(u)}</td><td>${barra(u)}</td>
+              ${u.cargo ? `<span class="muted small">${esc(u.cargo)}</span>` : ''}
+              <span class="us-movil muted small">${u.cedula ? 'C.C. ' + esc(u.cedula) : '<b class="txt-naranja">sin cédula</b>'} · ${perfilTxt(u)}${u.tienePin ? '' : ' · <b class="txt-naranja">sin PIN</b>'}${u.bloqueado ? ' · <b class="txt-rojo">bloqueado</b>' : ''}${u.activo ? '' : ' · desactivado'}</span></span></span></td>
+          <td>${u.cedula ? esc(u.cedula) : '<span class="tag amar">Sin cédula</span>'}</td>
+          <td>${perfilTxt(u)}</td>
+          <td>${estado(u)}</td><td>${pin(u)}</td><td>${barraPermisos(nPermisos(u))}</td>
           <td class="muted small">${u.ultimaVez ? fechaHora(u.ultimaVez) : 'Nunca'}</td>
           <td class="us-acc"><button class="btn btn-sec btn-mini" onclick="event.stopPropagation(); editarUsuario('${esc(u.id)}')">Editar</button></td>
-        </tr>`).join('') : `<tr><td colspan="7" class="muted">No hay usuarios con ese filtro.</td></tr>`}</tbody></table></div>`;
+        </tr>`).join('') : `<tr><td colspan="8" class="muted">No hay usuarios con ese filtro.</td></tr>`}</tbody></table></div>${pg.barra}`;
+  }
+
+  function asignarPerfilSel() {
+    const pf = $('usBulkPf').value, ids = [...usSel].filter(id => usLista.some(u => u.id === id));
+    if (!pf) return toast('Escoge el perfil que les vas a poner', 'error');
+    const b = $('usBulkOk'); b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdAsignarPerfil', { token: ses.token, ids, perfilId: pf }).then(r => {
+      usLista = r.usuarios; pfLista = r.perfiles; usSel.clear();
+      toast(`Perfil ${perfilDe(pf).nombre} puesto a ${r.actualizados} persona${r.actualizados === 1 ? '' : 's'}`, 'ok');
+      if (ids.includes(ses.id)) revisarSesion();
+      pintarApp();
+    }).catch(e => { toast(e.message, 'error'); b.disabled = false; b.textContent = 'Poner perfil'; });
   }
 
   function enlazarUsuarios() {
     const q = $('usQ');
-    if (q) q.addEventListener('input', () => { usFiltro.q = q.value; $('usTabla').innerHTML = filasUsuarios(); });
+    if (q) q.addEventListener('input', () => { usFiltro.q = q.value; usFiltrado(); });
     if ($('usPin')) enlazarPin('usPin', null);
     if ($('usPermCaja')) marcarIndeterminados();
   }
 
+  /* ----- Perfiles ----- */
+  function tablaPerfiles() {
+    if (pfFalta) return `<div class="card col gap8 card-aviso"><span class="h3">Falta un paso en Supabase</span>
+      <span>Para crear perfiles corre el script <b>21_perfiles.sql</b> en Supabase → SQL Editor, y vuelve a entrar a Usuarios.</span></div>`;
+    const pg = paginar('pf', pfLista, pintarApp);
+    return `<div class="card col gap8 pf-ayuda">
+        <span><b>¿Cómo se usa?</b> 1) Crea el perfil con sus permisos (por ejemplo <i>Montacarguista</i>). 2) En la pestaña <b>Usuarios</b> marca a las personas
+          y dale <b>Poner perfil</b>. Si después cambias el perfil, se actualiza para todos los que lo tienen.</span></div>
+      <div class="tabla-wrap"><table class="tabla us-tabla pf-tabla">
+        <thead><tr><th>Perfil</th><th>Tipo</th><th>Permisos</th><th>Personas</th><th class="us-acc"></th></tr></thead>
+        <tbody>${pg.filas.length ? pg.filas.map(p => `<tr onclick="editarPerfil('${esc(p.id)}')">
+          <td><span class="col gap4"><b>${esc(p.nombre)}${p.id === miPerfilId() ? ' <span class="muted small">(el tuyo)</span>' : ''}</b>
+            ${p.descripcion ? `<span class="muted small">${esc(p.descripcion)}</span>` : ''}
+            <span class="us-movil muted small">${nPermisos(p)}/${PERMISOS.length} permisos · ${p.usuarios} persona${p.usuarios === 1 ? '' : 's'}</span></span></td>
+          <td>${p.rol === 'JEFE' ? 'Jefe' : 'Operario'}</td>
+          <td>${barraPermisos(nPermisos(p))}</td>
+          <td><button class="link" onclick="event.stopPropagation(); usTab='usuarios'; usFiltro.perfil='${esc(p.id)}'; usFiltro.estado='activos'; pagInicio('us'); pintarApp()">${p.usuarios} persona${p.usuarios === 1 ? '' : 's'}</button></td>
+          <td class="us-acc"><button class="btn btn-sec btn-mini" onclick="event.stopPropagation(); editarPerfil('${esc(p.id)}')">Editar</button></td>
+        </tr>`).join('') : '<tr><td colspan="5" class="muted">Todavía no hay perfiles. Crea el primero con «+ Nuevo perfil».</td></tr>'}</tbody></table></div>${pg.barra}`;
+  }
+
+  function editarPerfil(id) {
+    const p = id ? perfilDe(id) : null;
+    pfEdit = p ? { id: p.id, nombre: p.nombre, descripcion: p.descripcion || '', rol: p.rol, permisos: [...p.permisos], usuarios: p.usuarios }
+      : { id: '', nombre: '', descripcion: '', rol: 'OPERARIO', permisos: [], usuarios: 0 };
+    usAbiertos = new Set(p ? [] : ['plano']);
+    pintarApp();
+    window.scrollTo(0, 0);
+    if (!p && $('pfNom')) $('pfNom').focus();
+  }
+
+  function editorPerfil() {
+    const p = pfEdit, nuevo = !p.id;
+    return `<div class="col gap16 us-editor">
+      <div class="fila gap12"><button class="btn btn-sec" onclick="pfEdit=null; pintarApp()">← Perfiles</button>
+        <div class="col gap4"><span class="h2">${nuevo ? 'Nuevo perfil' : esc(p.nombre)}</span>
+          ${nuevo ? '' : `<span class="muted small">Lo tienen ${p.usuarios} persona${p.usuarios === 1 ? '' : 's'}</span>`}</div></div>
+      <div class="us-ed-grid">
+        <section class="card col gap12">
+          <span class="h3">Datos</span>
+          <div><label class="lbl" for="pfNom">Nombre del perfil</label>
+            <input id="pfNom" class="campo" value="${esc(p.nombre)}" autocomplete="off" oninput="pfEdit.nombre=this.value" placeholder="Ej. Montacarguista"></div>
+          <div><label class="lbl" for="pfDesc">Descripción (opcional)</label>
+            <input id="pfDesc" class="campo" value="${esc(p.descripcion)}" autocomplete="off" oninput="pfEdit.descripcion=this.value" placeholder="Ej. Ubica y mueve estibas"></div>
+          <div><span class="lbl">Tipo</span>
+            <div class="seg" role="group" aria-label="Tipo">
+              <button class="${p.rol === 'OPERARIO' ? 'on' : ''}" onclick="pfEdit.rol='OPERARIO'; pintarApp()">Operario</button>
+              <button class="${p.rol === 'JEFE' ? 'on' : ''}" onclick="pfEdit.rol='JEFE'; pintarApp()">Jefe</button></div>
+            <span class="muted small">El tipo Jefe ve el resumen con indicadores en Inicio.</span></div>
+          ${pfLista.length ? `<div><label class="lbl" for="pfCopia">Copiar los permisos de otro perfil</label>
+            <select id="pfCopia" class="campo" onchange="if (this.value) { pfEdit.permisos = [...perfilDe(this.value).permisos]; repintarPermisos(); this.value=''; }">
+              <option value="">Escoge uno para copiarlo…</option>${pfLista.filter(x => x.id !== p.id).map(x => `<option value="${esc(x.id)}">${esc(x.nombre)}</option>`).join('')}</select></div>` : ''}
+          ${!nuevo && p.usuarios ? `<div class="alerta-fefo">Al guardar, a las <b>${p.usuarios} persona${p.usuarios === 1 ? '' : 's'}</b> con este perfil se les actualizan los permisos.</div>` : ''}
+        </section>
+        <section class="card col gap12">
+          <div class="fila-sb wrap-f gap8"><span class="h3">Permisos</span>
+            <span class="fila gap12"><button class="link" onclick="usPreset('todos')">Todos</button>
+              <button class="link" onclick="usPreset('ninguno')">Ninguno</button></span></div>
+          <span class="muted small">Ver el plano y buscar productos lo pueden hacer todos. Prende el módulo completo o abre cada uno para escoger acción por acción.</span>
+          <div id="usPermCaja">${acordeonPermisos()}</div>
+        </section>
+      </div>
+      <p id="usErr" class="error" hidden></p>
+      <div class="us-pie">
+        <span class="muted small" id="usCuenta">${nPermisos(p)} de ${PERMISOS.length} permisos</span>
+        <span class="fila gap8 wrap-f">${nuevo ? '' : `<button class="btn btn-sal" onclick="borrarPerfil()">Eliminar perfil</button>`}
+          <button class="btn btn-sec" onclick="pfEdit=null; pintarApp()">Cancelar</button>
+          <button id="pfOk" class="btn btn-pri" onclick="guardarPerfil()">${nuevo ? 'Crear perfil' : 'Guardar cambios'}</button></span>
+      </div>
+    </div>`;
+  }
+
+  function guardarPerfil() {
+    const p = pfEdit;
+    const err = m => { const e = $('usErr'); e.textContent = m; e.hidden = false; e.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
+    p.nombre = $('pfNom').value.trim(); p.descripcion = $('pfDesc').value.trim();
+    if (!p.nombre) return err('Escribe el nombre del perfil.');
+    if (!nPermisos(p)) return err('Prende al menos un permiso.');
+    const b = $('pfOk'); b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdGuardarPerfil', { token: ses.token, id: p.id, nombre: p.nombre, descripcion: p.descripcion, rol: p.rol, permisos: p.permisos }).then(r => {
+      usLista = r.usuarios; pfLista = r.perfiles; pfEdit = null; usTab = 'perfiles';
+      toast(p.id ? `Perfil guardado${r.actualizados ? ` · ${r.actualizados} persona${r.actualizados === 1 ? '' : 's'} actualizada${r.actualizados === 1 ? '' : 's'}` : ''}`
+        : 'Perfil creado. Ahora pónselo a las personas en la pestaña Usuarios.', 'ok');
+      if (p.id && p.id === miPerfilId()) revisarSesion();
+      pintarApp(); window.scrollTo(0, 0);
+    }).catch(e => { err(e.message); b.disabled = false; b.textContent = p.id ? 'Guardar cambios' : 'Crear perfil'; });
+  }
+
+  function borrarPerfil() {
+    const p = pfEdit;
+    abrirModal(`<div class="fila-sb"><span class="h2">¿Eliminar el perfil ${esc(p.nombre)}?</span>${btnCerrar()}</div>
+      <span class="mt12">${p.usuarios ? `Las <b>${p.usuarios} persona${p.usuarios === 1 ? '' : 's'}</b> que lo tienen conservan sus permisos y quedan como <b>Personalizado</b>.` : 'Nadie lo tiene puesto.'}</span>
+      <p id="fErr" class="error" hidden></p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">No</button>
+        <button id="pfBorrarOk" class="btn btn-sal btn-xl" onclick="confirmarBorrarPerfil()">Sí, eliminar</button></div>`);
+  }
+  function confirmarBorrarPerfil() {
+    const b = $('pfBorrarOk'); b.disabled = true;
+    llamar('bdBorrarPerfil', { token: ses.token, id: pfEdit.id }).then(r => {
+      usLista = r.usuarios; pfLista = r.perfiles; pfEdit = null; usTab = 'perfiles';
+      if (usFiltro.perfil && !perfilDe(usFiltro.perfil)) usFiltro.perfil = '';
+      cerrarModal(); toast('Perfil eliminado', 'ok'); pintarApp();
+    }).catch(e => { errForm(e.message); b.disabled = false; });
+  }
+
+  /* ----- Editor de usuario ----- */
+  function perfilInicial() {
+    const p = perfilDe('PF_OPERARIO') || (pfLista || []).find(x => x.rol === 'OPERARIO' && !x.permisos.includes('usuarios'));
+    return p || null;
+  }
+
   function editarUsuario(id) {
     const u = id ? usLista.find(x => x.id === id) : null;
-    usEdit = u ? { id: u.id, nombre: u.nombre, rol: u.rol, activo: u.activo, permisos: [...(u.permisos || [])], tienePin: u.tienePin, bloqueado: u.bloqueado, ultimaVez: u.ultimaVez }
-      : { id: '', nombre: '', rol: 'OPERARIO', activo: true, permisos: [...PERM_OPERARIO], tienePin: false };
-    usAbiertos = new Set(u ? [] : ['plano']);
+    const pi = perfilInicial();
+    usEdit = u ? { id: u.id, nombre: u.nombre, cedula: u.cedula || '', cargo: u.cargo || '', rol: u.rol, activo: u.activo, permisos: [...(u.permisos || [])], perfilId: perfilDe(u.perfilId) ? u.perfilId : '', tienePin: u.tienePin, bloqueado: u.bloqueado, ultimaVez: u.ultimaVez }
+      : { id: '', nombre: '', cedula: '', cargo: '', rol: pi ? pi.rol : 'OPERARIO', activo: true, permisos: pi ? [...pi.permisos] : [...PERM_OPERARIO], perfilId: pi ? pi.id : '', tienePin: false };
+    usAbiertos = new Set();
     pintarApp();
     window.scrollTo(0, 0);
     if (!u && $('usNom')) $('usNom').focus();
   }
 
+  const notaPerfil = () => usEdit.perfilId
+    ? 'Tiene los permisos de este perfil. Si cambias alguno a mano, queda como Personalizado.'
+    : 'Personalizado: sus permisos se escogen a mano abajo.';
+
+  function usElegirPerfil(id) {
+    usEdit.perfilId = id;
+    const p = perfilDe(id);
+    if (p) { usEdit.permisos = [...p.permisos]; usEdit.rol = p.rol; }
+    repintarPermisos();
+  }
+
   function editorUsuario() {
     const u = usEdit, nuevo = !u.id, yo = u.id === ses.id;
+    const campoPerfil = pfFalta || !pfLista.length
+      ? `<div><span class="lbl">Perfil</span>
+          <div class="seg" role="group" aria-label="Perfil">
+            <button class="${u.rol === 'OPERARIO' ? 'on' : ''}" onclick="usRol('OPERARIO')">Operario</button>
+            <button class="${u.rol === 'JEFE' ? 'on' : ''}" onclick="usRol('JEFE')">Jefe</button>
+          </div></div>`
+      : `<div><label class="lbl" for="usPerfil">Perfil</label>
+          <select id="usPerfil" class="campo" onchange="usElegirPerfil(this.value)">
+            ${pfLista.map(p => `<option value="${esc(p.id)}" ${u.perfilId === p.id ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}
+            <option value="" ${!u.perfilId ? 'selected' : ''}>Personalizado (permisos a mano)</option></select>
+          <span class="muted small" id="usPerfilNota">${notaPerfil()}</span></div>`;
     return `<div class="col gap16 us-editor">
       <div class="fila-sb wrap-f gap8">
         <div class="fila gap12"><button class="btn btn-sec" onclick="usEdit=null; pintarApp()">← Usuarios</button>
@@ -2457,11 +2716,12 @@
           <span class="h3">Datos</span>
           <div><label class="lbl" for="usNom">Nombre (así aparece al entrar)</label>
             <input id="usNom" class="campo" value="${esc(u.nombre)}" autocomplete="off" oninput="usEdit.nombre=this.value"></div>
-          <div><span class="lbl">Perfil</span>
-            <div class="seg" role="group" aria-label="Perfil">
-              <button class="${u.rol === 'OPERARIO' ? 'on' : ''}" onclick="usRol('OPERARIO')">Operario</button>
-              <button class="${u.rol === 'JEFE' ? 'on' : ''}" onclick="usRol('JEFE')">Jefe</button>
-            </div></div>
+          <div><label class="lbl" for="usCed">Cédula (con ella entra a la app)</label>
+            <input id="usCed" class="campo" inputmode="numeric" maxlength="12" value="${esc(u.cedula || '')}" autocomplete="off"
+              oninput="this.value=this.value.replace(/\D/g,''); usEdit.cedula=this.value" placeholder="Solo números"></div>
+          <div><label class="lbl" for="usCargo">Cargo</label>
+            <input id="usCargo" class="campo" value="${esc(u.cargo || '')}" autocomplete="off" oninput="usEdit.cargo=this.value" placeholder="Ej. Auxiliar de bodega"></div>
+          ${campoPerfil}
           <div><span class="lbl">${nuevo ? 'PIN de 4 números' : 'Cambiar PIN'}</span>
             <div class="fila gap8 wrap-f">${pinCajas('usPin')}
               <button class="btn btn-sec" onclick="usGenerarPin()">Generar</button>
@@ -2477,9 +2737,8 @@
         <section class="card col gap12">
           <div class="fila-sb wrap-f gap8"><span class="h3">Permisos</span>
             <span class="fila gap12"><button class="link" onclick="usPreset('todos')">Todos</button>
-              <button class="link" onclick="usPreset('operario')">Los de operario</button>
               <button class="link" onclick="usPreset('ninguno')">Ninguno</button></span></div>
-          <span class="muted small">Ver el plano y buscar productos lo pueden hacer todos. Abre cada módulo para escoger acción por acción.</span>
+          <span class="muted small">Ver el plano y buscar productos lo pueden hacer todos. Abre un módulo solo si quieres ajustar algo puntual.</span>
           <div id="usPermCaja">${acordeonPermisos()}</div>
         </section>
       </div>
@@ -2492,8 +2751,13 @@
     </div>`;
   }
 
+  // Permisos del editor abierto (perfil o usuario)
+  const permEd = () => pfEdit || usEdit;
+  // ¿Se le puede quitar "usuarios"? No, si es uno mismo o su propio perfil
+  const usuariosFijo = () => pfEdit ? (!!pfEdit.id && pfEdit.id === miPerfilId()) : usEdit.id === ses.id;
+
   function acordeonPermisos() {
-    const u = usEdit, yo = u.id === ses.id;
+    const u = permEd(), fijoU = usuariosFijo();
     return `<div class="acc-lista">${MODULOS.map(m => {
       const n = m.p.filter(p => u.permisos.includes(p[0])).length;
       const abierto = usAbiertos.has(m.k);
@@ -2508,9 +2772,9 @@
             ${n === m.p.length ? 'checked' : ''} onchange="usModulo('${m.k}', this.checked)" aria-label="Todo el módulo ${m.t}"><span></span></span>
         </div>
         <div class="acc-panel" id="acc-${m.k}" ${abierto ? '' : 'hidden'}>${m.p.map(([k, t, d]) => {
-          const fijo = yo && k === 'usuarios';
+          const fijo = fijoU && k === 'usuarios';
           return `<label class="perm-fila ${fijo ? 'fijo' : ''}">
-            <span class="col gap4"><b>${t}</b><span class="muted small">${d}${fijo ? ' · no te lo puedes quitar' : ''}</span></span>
+            <span class="col gap4"><b>${t}</b><span class="muted small">${d}${fijo ? (pfEdit ? ' · es tu perfil, no se lo puedes quitar' : ' · no te lo puedes quitar') : ''}</span></span>
             <span class="switch"><input type="checkbox" ${u.permisos.includes(k) ? 'checked' : ''} ${fijo ? 'disabled' : ''}
               onchange="usPerm('${k}', this.checked)"><span></span></span></label>`;
         }).join('')}</div>
@@ -2522,32 +2786,43 @@
     document.querySelectorAll('.usMod').forEach(c => { const n = +c.dataset.n, t = +c.dataset.t; c.indeterminate = n > 0 && n < t; });
   }
   function repintarPermisos() {
-    if (usEdit.id === ses.id && !usEdit.permisos.includes('usuarios')) usEdit.permisos.push('usuarios');
+    const u = permEd();
+    if (usuariosFijo() && !u.permisos.includes('usuarios')) u.permisos.push('usuarios');
+    // Si al usuario le cambian permisos a mano y ya no son los del perfil, queda como Personalizado
+    if (!pfEdit && usEdit.perfilId) {
+      const p = perfilDe(usEdit.perfilId);
+      if (!p || !mismosPermisos(p.permisos, usEdit.permisos)) {
+        usEdit.perfilId = '';
+        if ($('usPerfil')) $('usPerfil').value = '';
+      }
+    }
+    if ($('usPerfilNota')) $('usPerfilNota').textContent = notaPerfil();
     $('usPermCaja').innerHTML = acordeonPermisos();
     marcarIndeterminados();
-    $('usCuenta').textContent = `${nPermisos(usEdit)} de ${PERMISOS.length} permisos`;
+    $('usCuenta').textContent = `${nPermisos(u)} de ${PERMISOS.length} permisos`;
   }
   function usAcc(k) { usAbiertos.has(k) ? usAbiertos.delete(k) : usAbiertos.add(k); repintarPermisos(); }
   function usPerm(k, on) {
-    usEdit.permisos = usEdit.permisos.filter(x => x !== k);
-    if (on) usEdit.permisos.push(k);
+    const u = permEd();
+    u.permisos = u.permisos.filter(x => x !== k);
+    if (on) u.permisos.push(k);
     repintarPermisos();
   }
   function usModulo(mk, on) {
+    const u = permEd();
     const ks = MODULOS.find(m => m.k === mk).p.map(p => p[0]);
-    usEdit.permisos = usEdit.permisos.filter(x => !ks.includes(x));
-    if (on) usEdit.permisos.push(...ks);
+    u.permisos = u.permisos.filter(x => !ks.includes(x));
+    if (on) u.permisos.push(...ks);
     usAbiertos.add(mk);
     repintarPermisos();
   }
   function usPreset(cual) {
-    usEdit.permisos = cual === 'todos' ? PERMISOS.map(p => p[0]) : cual === 'operario' ? [...PERM_OPERARIO] : [];
+    permEd().permisos = cual === 'todos' ? PERMISOS.map(p => p[0]) : cual === 'operario' ? [...PERM_OPERARIO] : [];
     repintarPermisos();
   }
   function usRol(r) {
     if (usEdit.rol === r) return;
     usEdit.rol = r;
-    // Al cambiar el perfil se sugieren sus permisos; se pueden ajustar uno por uno
     usEdit.permisos = r === 'JEFE' ? PERMISOS.map(p => p[0]) : [...PERM_OPERARIO];
     const pin = pinValor('usPin');
     pintarApp();
@@ -2558,17 +2833,149 @@
     $('usPin').classList.add('pin-ver');
   }
 
+  /* ----- Cargar la lista de usuarios (cédula, nombre, cargo) ----- */
+  let usCarga = null;   // { filas: [{ cedula, nombre, cargo, rol }], malas }
+  let ucCrudo = null;   // lo último que se pegó o subió (para volver a pintar)
+  let ucPerfil = '_cargo';
+  // Perfil que le toca a un cargo cuando se elige "Según el cargo"
+  function perfilPorCargo(cargo) {
+    const jefe = cargoEsJefe(cargo), l = pfLista || [];
+    return jefe ? (perfilDe('PF_JEFE') || l.find(p => p.rol === 'JEFE' && !p.permisos.includes('usuarios')))
+      : (perfilDe('PF_OPERARIO') || l.find(p => p.rol === 'OPERARIO'));
+  }
+  const perfilCarga = f => ucPerfil === '_cargo' ? perfilPorCargo(f.cargo) : perfilDe(ucPerfil);
+  const cargoEsJefe = c => /jefe|coordinador|supervisor|l[ií]der|director|gerente/i.test(c || '');
+
+  function abrirCargaUsuarios() {
+    usCarga = null; ucCrudo = null; ucPerfil = '_cargo';
+    abrirModal(`<div class="fila-sb"><span class="h2">Cargar lista de usuarios</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Copia de Excel las columnas <b>cédula, nombre y cargo</b> y pégalas aquí (una fila por persona), o sube el archivo.
+        A los nuevos se les pone de <b>PIN los últimos 4 números de su cédula</b>. Si la cédula ya existe, solo se actualiza el nombre y el cargo.</span>
+      <textarea id="ucTxt" class="campo ls-txt mt8" rows="6" spellcheck="false" placeholder="1045678901	Ana Torres	Auxiliar de bodega&#10;72123456	Pedro Gómez	Jefe de bodega"></textarea>
+      <div class="fila gap8 mt8 wrap-f"><label for="ucArch" class="btn btn-sec" role="button" tabindex="0">O subir archivo (Excel o CSV)</label>
+        <input id="ucArch" type="file" accept=".xlsx,.xls,.csv" class="oculto"></div>
+      ${pfFalta || !pfLista.length ? '' : `<label class="lbl mt8" for="ucPerfil">Perfil para los nuevos</label>
+        <select id="ucPerfil" class="campo" onchange="ucPerfil=this.value; pagInicio('uc'); if (ucCrudo) leerListaUsuarios(ucCrudo)">
+          <option value="_cargo">Según el cargo (jefes → ${esc((perfilPorCargo('jefe') || {}).nombre || 'Jefe')}, los demás → ${esc((perfilPorCargo('') || {}).nombre || 'Operario')})</option>
+          ${pfLista.map(p => `<option value="${esc(p.id)}">${esc(p.nombre)} (a todos)</option>`).join('')}</select>`}
+      <div id="ucPrev" class="mt12"></div>
+      <p id="fErr" class="error" hidden></p>`);
+    $('ucTxt').addEventListener('input', () => { pagInicio('uc'); leerListaUsuarios($('ucTxt').value.split(/\r?\n/).map(l => l.split(/\t|;/))); });
+    $('ucArch').addEventListener('change', ev => { const f = ev.target.files[0]; if (f) leerArchivoFilas(f).then(leerListaUsuarios).catch(e => errForm(e.message)); });
+    $('ucTxt').focus();
+  }
+
+  // Lee un Excel/CSV como filas (arreglo de arreglos)
+  function leerArchivoFilas(f) {
+    return new Promise((ok, mal) => {
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          if (window.XLSX && !/\.csv$/i.test(f.name)) {
+            const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+            return ok(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' }));
+          }
+          let txt = new TextDecoder('utf-8').decode(r.result);
+          if (txt.includes('�')) txt = new TextDecoder('windows-1252').decode(r.result);
+          const m = txt.split(/\r?\n/).slice(0, 15).join('\n');
+          const n = ch => (m.split(ch).length - 1);
+          const sep = n('\t') > n(';') && n('\t') > n(',') ? '\t' : n(';') >= n(',') ? ';' : ',';
+          ok(txt.split(/\r?\n/).map(l => l.split(sep).map(c => c.replace(/^"|"$/g, '').trim())));
+        } catch (e) { mal(new Error('No se pudo leer el archivo: ' + e.message)); }
+      };
+      r.onerror = () => mal(new Error('No se pudo leer el archivo'));
+      r.readAsArrayBuffer(f);
+    });
+  }
+
+  // Busca qué columna es la cédula (la que tiene números de 5 a 12 cifras); nombre y cargo por título o por orden
+  function leerListaUsuarios(filas) {
+    ucCrudo = filas;
+    filas = (filas || []).map(x => x.map(c => String(c ?? '').trim())).filter(x => x.some(Boolean));
+    const caja = $('ucPrev');
+    if (!filas.length) { caja.innerHTML = ''; return; }
+    const esCed = v => /^\d{5,12}$/.test(String(v).replace(/[.\s,-]/g, ''));
+    const nCol = Math.max(...filas.map(x => x.length));
+    let iCed = 0, mejor = -1;
+    for (let k = 0; k < nCol; k++) { const c = filas.filter(x => esCed(x[k] || '')).length; if (c > mejor) { mejor = c; iCed = k; } }
+    const tit = filas[0].map(t => sinTilde(t));
+    const conTitulo = !esCed(filas[0][iCed] || '');
+    let iNom = conTitulo ? tit.findIndex(t => /NOMBRE/.test(t)) : -1;
+    let iCargo = conTitulo ? tit.findIndex(t => /CARGO|PUESTO|ROL/.test(t)) : -1;
+    const otras = [...Array(nCol).keys()].filter(k => k !== iCed);
+    if (iNom < 0) iNom = otras.find(k => k !== iCargo);
+    if (iCargo < 0) iCargo = otras.find(k => k !== iNom);
+    const existentes = new Set((usLista || []).map(u => u.cedula).filter(Boolean));
+    const vistas = new Set();
+    const ok = [], malas = [];
+    (conTitulo ? filas.slice(1) : filas).forEach(x => {
+      const cedula = String(x[iCed] || '').replace(/\D/g, '');
+      const nombre = (x[iNom] || '').replace(/\s+/g, ' ').trim();
+      const cargo = iCargo !== undefined ? (x[iCargo] || '').trim() : '';
+      if (!esCed(cedula)) return malas.push(`${x.join(' · ')} (cédula no válida)`);
+      if (!nombre) return malas.push(`${cedula} (falta el nombre)`);
+      if (vistas.has(cedula)) return malas.push(`${cedula} (repetida en la lista)`);
+      vistas.add(cedula);
+      const rol = cargoEsJefe(cargo) ? 'JEFE' : 'OPERARIO';
+      ok.push({ cedula, nombre, cargo, rol, existe: existentes.has(cedula) });
+    });
+    usCarga = { filas: ok };
+    const nuevos = ok.filter(f => !f.existe).length;
+    const pg = paginar('uc', ok, () => leerListaUsuarios(ucCrudo));
+    const usaPerfiles = !pfFalta && pfLista && pfLista.length;
+    caja.innerHTML = `<div class="inv-res">
+        <div><span class="muted small">Nuevos</span><b class="txt-verde">${nuevos}</b></div>
+        <div><span class="muted small">Ya existen (se actualizan)</span><b>${ok.length - nuevos}</b></div>
+        <div><span class="muted small">Con problema</span><b class="${malas.length ? 'txt-naranja' : ''}">${malas.length}</b></div></div>
+      ${ok.length ? `<div class="tabla-wrap mt8"><table class="tabla"><thead><tr><th>Cédula</th><th>Nombre</th><th>Cargo</th><th>Perfil</th><th>PIN</th></tr></thead>
+        <tbody>${pg.filas.map(f => `<tr><td>${esc(f.cedula)}</td><td>${esc(f.nombre)}</td><td>${esc(f.cargo || '—')}</td>
+          <td>${f.existe ? '<span class="muted small">No cambia</span>' : usaPerfiles ? esc((perfilCarga(f) || {}).nombre || 'Personalizado') : f.rol === 'JEFE' ? 'Jefe' : 'Operario'}</td>
+          <td>${f.existe ? '<span class="muted small">No cambia</span>' : `<b>${f.cedula.slice(-4)}</b>`}</td></tr>`).join('')}</tbody></table></div>${pg.barra}` : ''}
+      ${malas.length ? `<div class="alerta-fefo mt8"><b>No se cargan (${malas.length}):</b><br>${malas.slice(0, 20).map(esc).join('<br>')}</div>` : ''}
+      <span class="muted small mt8">${usaPerfiles ? (ucPerfil === '_cargo' ? 'Según el cargo: si dice jefe, coordinador, supervisor, líder, director o gerente le toca el perfil de jefe; a los demás el de operario. ' : '')
+        + 'Después lo puedes cambiar a varios a la vez en Usuarios con «Poner perfil».'
+        : 'El perfil sale del cargo: si dice jefe, coordinador, supervisor, líder, director o gerente queda como <b>Jefe</b> (con todos los permisos menos Usuarios); los demás como <b>Operario</b>. Después lo puedes cambiar a cada uno.'}</span>
+      <button id="ucOk" class="btn btn-pri btn-xl mt12" onclick="guardarListaUsuarios()" ${ok.length ? '' : 'disabled'}>${ok.length ? `Cargar ${ok.length} usuario${ok.length === 1 ? '' : 's'}` : 'No hay usuarios para cargar'}</button>`;
+  }
+
+  function guardarListaUsuarios() {
+    if (!usCarga || !usCarga.filas.length) return;
+    const todos = PERMISOS.map(p => p[0]).filter(k => k !== 'usuarios');
+    const filas = usCarga.filas.map(f => {
+      const p = !pfFalta ? perfilCarga(f) : null;
+      return p ? { cedula: f.cedula, nombre: f.nombre, cargo: f.cargo, rol: p.rol, permisos: p.permisos, perfilId: p.id }
+        : { cedula: f.cedula, nombre: f.nombre, cargo: f.cargo, rol: f.rol, permisos: f.rol === 'JEFE' ? todos : PERM_OPERARIO };
+    });
+    const b = $('ucOk'); b.disabled = true; b.textContent = 'Cargando…';
+    llamar('bdCargarUsuarios', { token: ses.token, filas }).then(r => {
+      usLista = r.usuarios;
+      if (!pfFalta) llamar('bdPerfiles', ses.token).then(p => { pfLista = p; }).catch(() => {});
+      llamar('bdInicio').then(d => { ini.operarios = d.operarios; }).catch(() => {});
+      abrirModal(`<div class="fila-sb"><span class="h2">Lista cargada</span>${btnCerrar()}</div>
+        <div class="inv-res mt12">
+          <div><span class="muted small">Creados</span><b class="txt-verde">${r.creados}</b></div>
+          <div><span class="muted small">Actualizados</span><b>${r.actualizados}</b></div>
+          <div><span class="muted small">No se pudieron</span><b class="${r.errores.length ? 'txt-rojo' : ''}">${r.errores.length}</b></div></div>
+        ${r.errores.length ? `<div class="alerta-fefo mt8">${r.errores.map(e => `${esc(e.cedula || '')} ${esc(e.nombre || '')}: <b>${esc(e.error)}</b>`).join('<br>')}</div>` : ''}
+        <span class="mt12">Los nuevos entran con su <b>cédula</b> y de PIN los <b>últimos 4 números de su cédula</b>. Recomiéndales cambiarlo: tú se lo cambias en Usuarios.</span>
+        <button class="btn btn-pri btn-xl mt16" onclick="cerrarModal(); pintarApp()">Listo</button>`);
+    }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Cargar usuarios'; });
+  }
+
   function guardarUsuario() {
     const u = usEdit, pin = pinValor('usPin');
     const err = m => { const e = $('usErr'); e.textContent = m; e.hidden = false; e.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
     u.nombre = $('usNom').value;
+    u.cedula = ($('usCed').value || '').replace(/\D/g, '');
     if (!u.nombre.trim()) return err('Escribe el nombre.');
+    if (u.cedula.length < 5) return err('Escribe la cédula (solo números). Con ella entra a la app.');
     if (!u.id && pin.length !== 4) return err('Ponle un PIN de 4 números.');
     if (pin && pin.length !== 4) return err('El PIN deben ser 4 números.');
     const b = $('usOk'); b.disabled = true; b.textContent = 'Guardando…';
-    llamar('bdGuardarUsuario', { token: ses.token, id: u.id, nombre: u.nombre.trim(), rol: u.rol, activo: u.activo, permisos: u.permisos, pin })
+    llamar('bdGuardarUsuario', { token: ses.token, id: u.id, nombre: u.nombre.trim(), cedula: u.cedula, cargo: (u.cargo || '').trim(), rol: u.rol, activo: u.activo, permisos: u.permisos, perfilId: u.perfilId || null, pin })
       .then(l => {
         usLista = l; usEdit = null;
+        if (!pfFalta) llamar('bdPerfiles', ses.token).then(p => { pfLista = p; }).catch(() => {});
         llamar('bdInicio').then(d => { ini.operarios = d.operarios; }).catch(() => {});
         toast(u.id ? 'Cambios guardados' : `Usuario creado. Su PIN es ${pin}`, 'ok');
         if (u.id === ses.id) revisarSesion();
@@ -2587,8 +2994,8 @@
   }
   function irVista(v) {
     if (!vistaPermitida(v)) return toast('No tienes permiso para entrar ahí', 'error');
-    if (v === 'usuarios') { usLista = null; usEdit = null; }
-    if (v === 'rotulo') { sinImp = null; rotulos = null; }
+    if (v === 'usuarios') { usLista = null; pfLista = null; usEdit = null; pfEdit = null; usSel.clear(); }
+    if (v === 'rotulo') { sinImp = null; rotulos = null; piLista = null; }
     if (v === 'productos') invData = null;
     vista = v; pintarApp();
   }
@@ -2621,10 +3028,6 @@
 
   function vistaMapa() {
     let h = '';
-    if (ini.sedes.length > 1) {
-      h += `<div class="tabs">${ini.sedes.map(s =>
-        `<button class="tab ${s.id === ses.sedeId ? 'on' : ''}" onclick="verSede('${esc(s.id)}')">${esc(s.nombre)}</button>`).join('')}</div>`;
-    }
     if (!sede.zonas.length) {
       return h + `<div class="card col gap12 mt12"><span class="h3">Esta sede no tiene plano todavía</span>
         <span class="muted">El plano de la Bodega 12C está en la primera sede.${puede('config') ? ' Aquí puedes crear zonas y racks a mano.' : ''}</span>
@@ -2871,7 +3274,7 @@
   /* ================= Buscar productos ================= */
   let prodSel = '';
 
-  let prodFiltro = '', prodSoloStock = true, prodVer = 60;
+  let prodFiltro = '', prodSoloStock = true;
 
   /* ================= PRODUCTOS: Inventario · Inventario por productos · Productos totales ================= */
   let prodTab = 'inventario';
@@ -2929,12 +3332,11 @@
             ${campoConCamara('<input id="invProd" class="campo" list="dlProductos" autocomplete="off" spellcheck="false" placeholder="Escanea, escribe o elige">', 'invProd')}</div>
         </div>
         <div id="invProdInfo" class="info" hidden></div>
-        <div class="inv-grid2">
-          <div><span class="lbl">3. ¿Qué es?</span>
-            <div class="seg" role="group" aria-label="Tipo de conteo">${TIPOS_CONTEO.map(([k, t]) =>
-              `<button class="${invForm.tipo === k ? 'on' : ''}" onclick="invTipo('${k}')">${t}</button>`).join('')}</div></div>
-          <div><label class="lbl" for="invCant">4. Cantidad <span id="invUm" class="muted small">(unidades)</span></label>
-            <input id="invCant" class="campo" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>
+        <span class="lbl">3. Cantidades <span id="invUm" class="muted small">(unidades)</span></span>
+        <div class="inv-grid3">
+          ${TIPOS_CONTEO.map(([k, t]) => `<div><label class="lbl" for="invC${k}">${t}</label>
+            <input id="invC${k}" class="campo inv-cant" type="number" inputmode="decimal" min="0" step="any" value="0" data-tipo="${k}">
+            <span id="invU${k}" class="muted small"></span></div>`).join('')}
           <button id="invOk" class="btn btn-ent-solido btn-xl" onclick="guardarConteo()">Guardar conteo</button>
         </div>
         <p id="invErr" class="error" hidden></p>
@@ -2962,6 +3364,7 @@
     const m = {};
     const fila = cod => m[cod] || (m[cod] = { cod, p: prodDe(cod), sap: null, picking: 0, aereo: 0, calidad: 0, bloqueado: 0, zonas: new Set(), ult: null });
     const zonaDe = ubic => { const e = sede.espPorId[ubic]; const r = e && sede.rackPorId[e.rackId]; return r ? r.zonaId : ''; };
+    ini.productos.forEach(p => { if (p.activo !== false) fila(p.id); });   // todos, aunque no tengan nada
     (invData.sap || []).forEach(x => (fila(x.codigo).sap = x));
     sede.lineas.forEach(l => {
       const e = sede.espPorId[l.ubicacionId];
@@ -2994,7 +3397,11 @@
       if (!pal.length) return true;
       const t = sinTilde(`${f.cod} ${f.p ? f.p.codigoNutresa + ' ' + f.p.nombre : ''}`);
       return pal.every(w => t.includes(w));
-    }).sort((a, b) => (a.p ? a.p.nombre : a.cod).localeCompare(b.p ? b.p.nombre : b.cod));
+    }).sort((a, b) => {
+      // Primero los que tienen algo (SAP o planta), después el resto del catálogo
+      const da = a.sap || a.planta || a.calidad ? 0 : 1, db = b.sap || b.planta || b.calidad ? 0 : 1;
+      return da - db || (a.p ? a.p.nombre : a.cod).localeCompare(b.p ? b.p.nombre : b.cod);
+    });
   }
 
   function tablaInventario() {
@@ -3002,7 +3409,8 @@
     if (!todos.length) return '<p class="muted">Todavía no hay datos: carga el Excel de SAP o registra un conteo.</p>';
     const con = todos.filter(f => f.dif).length;
     const difCls = d => !d ? 'dif-ok' : d < 0 ? 'dif-falta' : 'dif-sobra';
-    const filas = l.slice(0, 500).map(f => `<tr onclick="historialInventario('${esc(f.cod)}')">
+    const pg = paginar('inv', l, () => { if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); });
+    const filas = pg.filas.map(f => `<tr onclick="historialInventario('${esc(f.cod)}')">
         <td>${esc(f.p ? f.p.codigoNutresa || '—' : '—')}</td>
         <td>${esc(f.cod)}</td>
         <td class="inv-prod">${esc(f.p ? f.p.nombre : 'Producto no está en el catálogo')}</td>
@@ -3018,7 +3426,7 @@
         <td class="num fuerte">${nInv(f.planta)}</td>
         <td class="num"><span class="dif ${difCls(f.dif)}">${f.dif > 0 ? '+' : ''}${nInv(f.dif)}</span></td>
       </tr>`).join('');
-    return `<div class="muted small">${l.length} de ${todos.length} productos · <b class="${con ? 'txt-rojo' : ''}">${con}</b> con diferencia${l.length > 500 ? ' · se muestran 500, usa los filtros' : ''}</div>
+    return `<div class="muted small">${l.length} de ${todos.length} productos · <b class="${con ? 'txt-rojo' : ''}">${con}</b> con diferencia</div>
       <div class="tabla-wrap mt8"><table class="tabla inv-tabla">
         <thead>
           <tr class="inv-grupos"><th colspan="4"></th><th colspan="4" class="g-sap">SAP</th><th colspan="5">Planta (conteo + plano)</th><th></th></tr>
@@ -3027,12 +3435,12 @@
             <th class="num">Picking</th><th class="num">Aéreo</th><th class="num">Calidad</th><th class="num">Bloqueado</th><th class="num">Total</th>
             <th class="num">Diferencia</th></tr>
         </thead>
-        <tbody>${filas || '<tr><td colspan="14" class="muted">No hay productos con ese filtro.</td></tr>'}</tbody></table></div>`;
+        <tbody>${filas || '<tr><td colspan="14" class="muted">No hay productos con ese filtro.</td></tr>'}</tbody></table></div>${pg.barra}`;
   }
 
   function enlazarInventario() {
     if (!$('invTabla')) return;
-    const repintar = () => { $('invTabla').innerHTML = tablaInventario(); };
+    const repintar = () => { pagInicio('inv'); $('invTabla').innerHTML = tablaInventario(); };
     $('invZona').addEventListener('change', () => { invF.zona = $('invZona').value; repintar(); });
     $('invQ').addEventListener('input', () => { invF.q = $('invQ').value; repintar(); });
     $('invDif').addEventListener('change', () => { invF.soloDif = $('invDif').checked; repintar(); });
@@ -3044,7 +3452,14 @@
     if (pr) {
       pr.addEventListener('input', () => invProdTexto(pr.value));
       pr.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); invProdTexto(pr.value, true); } });
-      $('invCant').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); guardarConteo(); } });
+      document.querySelectorAll('.inv-cant').forEach((c, i, todos) => {
+        c.addEventListener('focus', () => c.select());
+        c.addEventListener('keydown', ev => {
+          if (ev.key !== 'Enter') return;
+          ev.preventDefault();
+          if (todos[i + 1]) todos[i + 1].focus(); else guardarConteo();
+        });
+      });
       if (invForm.prod) { pr.value = invForm.prod; invProdTexto(invForm.prod); }
     }
   }
@@ -3092,7 +3507,7 @@
     const p = buscarProducto(txt);
     invForm.prod = p ? p.id : '';
     invProdInfo();
-    if (p && enter) { if ($('invProd')) $('invProd').value = p.id + ' · ' + p.nombre; $('invCant').focus(); }
+    if (p && enter) { if ($('invProd')) $('invProd').value = p.id + ' · ' + p.nombre; $('invCPICKING').focus(); }
     else if (enter && txt.trim()) toast('No hay un producto con ese código o nombre', 'error');
   }
 
@@ -3102,19 +3517,16 @@
     const p = prodDe(invForm.prod);
     if (!p) { caja.hidden = true; return; }
     const f = datosInventario().find(x => x.cod === p.id) || { picking: 0, aereo: 0, calidad: 0, bloqueado: 0, sap: null, sapTotal: 0, planta: 0, dif: 0 };
-    const aqui = (invData.conteos || []).find(c => c.codigo === p.id && c.ubicacion === invForm.ubic && c.tipo === invForm.tipo);
+    TIPOS_CONTEO.forEach(([k]) => {
+      const c = (invData.conteos || []).find(x => x.codigo === p.id && x.ubicacion === invForm.ubic && x.tipo === k);
+      const u = $('invU' + k);
+      if (u) u.textContent = c ? `Último aquí: ${nInv(c.cantidad)} (${c.usuario || '—'})` : '';
+    });
     $('invUm').textContent = `(${(p.unidadMedida || 'UN').toUpperCase() === 'KG' ? 'kg' : 'unidades'})`;
     caja.hidden = false;
     caja.innerHTML = `<span class="fuerte">${esc(p.nombre)}</span>
       <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · Atlantic ${esc(p.id)} · Unidad ${esc(p.unidadMedida || 'UN')}</span>
-      <span class="small">SAP total <b>${f.sap ? nInv(f.sapTotal) : '—'}</b> · Picking <b>${nInv(f.picking)}</b> · Aéreo <b>${nInv(f.aereo)}</b> · Calidad <b>${nInv(f.calidad)}</b> · Bloqueado <b>${nInv(f.bloqueado)}</b> · Diferencia <b>${nInv(f.dif)}</b></span>
-      ${aqui ? `<span class="small txt-naranja">Último conteo de ${TIPOS_CONTEO.find(t => t[0] === aqui.tipo)[1].toLowerCase()} aquí: <b>${nInv(aqui.cantidad)}</b> (${esc(aqui.usuario || '—')}, ${fechaHora(aqui.fecha)}). Lo que guardes lo reemplaza.</span>` : ''}`;
-  }
-
-  function invTipo(t) {
-    invForm.tipo = t;
-    document.querySelectorAll('.inv-form .seg button').forEach((b, i) => (b.className = TIPOS_CONTEO[i][0] === t ? 'on' : ''));
-    invProdInfo();
+      <span class="small">SAP total <b>${f.sap ? nInv(f.sapTotal) : '—'}</b> · Picking <b>${nInv(f.picking)}</b> · Aéreo <b>${nInv(f.aereo)}</b> · Calidad <b>${nInv(f.calidad)}</b> · Bloqueado <b>${nInv(f.bloqueado)}</b> · Diferencia <b>${nInv(f.dif)}</b></span>`;
   }
 
   function guardarConteo() {
@@ -3123,18 +3535,23 @@
     if (!sede.espPorId[invForm.ubic]) return err('Primero escanea o elige dónde lo encontraron.');
     const p = prodDe(invForm.prod) || buscarProducto($('invProd').value);
     if (!p) return err('Elige el producto.');
-    const v = $('invCant').value.trim();
-    const cant = Number(v.replace(',', '.'));
-    if (v === '' || !(cant >= 0)) return err('Escribe la cantidad (0 si no hay).');
+    const cantidades = {};
+    for (const [k, t] of TIPOS_CONTEO) {
+      const v = $('invC' + k).value.trim().replace(',', '.');
+      const n = Number(v);
+      if (v === '' || !(n >= 0)) { $('invC' + k).focus(); return err(`Llena ${t.toLowerCase()} (0 si no hay).`); }
+      cantidades[k] = n;
+    }
     const b = $('invOk'); b.disabled = true; b.textContent = 'Guardando…';
-    llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: invForm.ubic, codigo: p.id, tipo: invForm.tipo, cantidad: cant, usuario: ses.nombre })
-      .then(c => {
-        // Reemplaza el último de ese producto + lugar + tipo
-        invData.conteos = (invData.conteos || []).filter(x => !(x.codigo === c.codigo && x.ubicacion === c.ubicacion && x.tipo === c.tipo)).concat([c]);
+    llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: invForm.ubic, codigo: p.id, cantidades, usuario: ses.nombre })
+      .then(lista => {
+        // Reemplaza el último de ese producto + lugar en cada tipo
+        lista.forEach(c => { invData.conteos = (invData.conteos || []).filter(x => !(x.codigo === c.codigo && x.ubicacion === c.ubicacion && x.tipo === c.tipo)).concat([c]); });
         pitido();
-        toast(`${nInv(cant)} de ${p.nombre} (${TIPOS_CONTEO.find(t => t[0] === c.tipo)[1].toLowerCase()}) en ${etiqueta(sede.espPorId[c.ubicacion])}`, 'ok');
+        toast(`${p.nombre} en ${etiqueta(sede.espPorId[invForm.ubic])}: picking ${nInv(cantidades.PICKING)} · calidad ${nInv(cantidades.CALIDAD)} · bloqueado ${nInv(cantidades.BLOQUEADO)}`, 'ok');
         invForm.prod = '';
-        $('invProd').value = ''; $('invCant').value = '';
+        $('invProd').value = '';
+        TIPOS_CONTEO.forEach(([k]) => { $('invC' + k).value = '0'; $('invU' + k).textContent = ''; });
         $('invProdInfo').hidden = true;
         $('invTabla').innerHTML = tablaInventario();
         b.disabled = false; b.textContent = 'Guardar conteo';
@@ -3161,11 +3578,13 @@
       })()}
       <span class="h3 mt12">Conteos</span>
       <div id="histInv" class="mt8"><div class="cargando">Cargando historial…</div></div>`);
-    llamar('bdHistorialConteos', { sedeId: ses.sedeId, codigo: cod }).then(h => {
+    pagInicio('histInv');
+    llamar('bdHistorialConteos', { sedeId: ses.sedeId, codigo: cod }).then(function pintar(h) {
       if (!$('histInv')) return;
+      const pg = paginar('histInv', h, () => pintar(h));
       $('histInv').innerHTML = h.length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Fecha</th><th>Lugar</th><th>Tipo</th><th class="num">Cantidad</th><th>Quién</th></tr></thead>
-        <tbody>${h.map(c => `<tr><td class="nowrap">${fechaHora(c.fecha)}</td><td>${esc(c.ubicacion)}</td><td>${TIPOS_CONTEO.find(t => t[0] === c.tipo)[1]}</td>
-          <td class="num">${nInv(c.cantidad)}</td><td>${esc(c.usuario || '—')}</td></tr>`).join('')}</tbody></table></div>`
+        <tbody>${pg.filas.map(c => `<tr><td class="nowrap">${fechaHora(c.fecha)}</td><td>${esc(c.ubicacion)}</td><td>${TIPOS_CONTEO.find(t => t[0] === c.tipo)[1]}</td>
+          <td class="num">${nInv(c.cantidad)}</td><td>${esc(c.usuario || '—')}</td></tr>`).join('')}</tbody></table></div>${pg.barra}`
         : '<p class="muted small">Todavía no hay conteos de este producto.</p>';
     }).catch(e => { if ($('histInv')) $('histInv').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   }
@@ -3333,8 +3752,8 @@
     }).sort((a, b) => (!!tot[b.id]) - (!!tot[a.id]) || a.nombre.localeCompare(b.nombre));
     const total = lista.length;
     if (!total) return `<p class="muted">${prodSoloStock && !palabras.length ? 'Todavía no hay productos guardados en esta sede.' : 'No hay productos con ese código o nombre.'}</p>`;
-    lista = lista.slice(0, prodVer);
-    return `<span class="muted small">${total} producto${total === 1 ? '' : 's'}</span>` + lista.map(p => {
+    const pg = paginar('prod', lista, () => { if ($('prodLista')) $('prodLista').innerHTML = listaProdHtml(); });
+    return `<span class="muted small">${total} producto${total === 1 ? '' : 's'}</span>` + pg.filas.map(p => {
       const ls = fefo(tot[p.id] || []);
       const unds = ls.reduce((a, l) => a + l.unidades, 0);
       return `<div class="prod-card">
@@ -3353,7 +3772,7 @@
           ${ls.length ? `<button class="btn btn-sec" onclick="seguirEnMapa('${esc(p.id)}')">Ver en el mapa</button>` : ''}
         </div>
       </div>`;
-    }).join('') + (total > prodVer ? `<button class="btn btn-sec" onclick="prodVer += 60; $('prodLista').innerHTML = listaProdHtml()">Ver más (${total - prodVer} más)</button>` : '');
+    }).join('') + pg.barra;
   }
 
   /* ================= Identificador del producto (rótulo) ================= */
@@ -3397,16 +3816,21 @@
           <div><label class="lbl" for="rtRec">Fecha de recibo</label><input id="rtRec" class="campo" type="date" value="${esc(leerLS('ultRecibo') || hoyISO())}"></div>
           <div><label class="lbl" for="rtVen">Fecha de vencimiento</label><input id="rtVen" class="campo" type="date"></div>
         </div>
-        <label class="lbl" for="rtResp">Responsable</label>
-        <select id="rtResp" class="campo"><option value="">Elige…</option>${responsables.map(n =>
-          `<option ${n === ultResp ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+        <div class="resp-fijo"><span class="lbl">Responsable</span><span class="resp-nom">${esc(ses.nombre)}</span></div>
         <p id="fErr" class="error" hidden></p>
-        <button id="rtOk" class="btn btn-pri btn-xl mt12" onclick="crearRotulo()">Guardar rótulo</button>
+        <div class="rt-iguales mt12">
+          <div><label class="lbl" for="rtN">¿Cuántas estibas iguales?</label>
+            <div class="paso-num"><button type="button" class="btn btn-sec" onclick="rtNPaso(-1)" aria-label="Una menos">−</button>
+              <input id="rtN" class="campo" type="number" inputmode="numeric" min="1" max="50" value="1" oninput="rtNTexto()">
+              <button type="button" class="btn btn-sec" onclick="rtNPaso(1)" aria-label="Una más">+</button></div>
+            <span class="muted small">Cada estiba sale con su propio código de barras.</span></div>
+          <button id="rtOk" class="btn btn-pri btn-xl" onclick="crearRotulo()">Guardar rótulo</button>
+        </div>
       </div>
 
       <div class="col gap12">
+        ${panelPorImprimir()}
         <div class="card col gap8" id="tandaCaja">${tandaHtml()}</div>
-        <div id="sinImpCaja">${sinImpHtml()}</div>
       </div>
       </div>
 
@@ -3443,20 +3867,13 @@
       <button class="btn btn-ent btn-xl" onclick="elegirImpresion()">Terminé: elegir cuáles imprimir</button>`;
   }
 
-  function sinImpHtml() {
-    if (!sinImp || !sinImp.length) return '';
-    return `<div class="card col gap8 card-aviso">
-      <div class="fila-sb wrap-f gap8"><div class="col gap4"><span class="h3">Pendientes por imprimir (${sinImp.length})</span>
-        <span class="muted small">Mercancía cargada sin código de barras. Imprime su rótulo y pégalo en la estiba.</span></div>
-        <button class="btn btn-pri" onclick="elegirSinImp()">Elegir e imprimir</button></div>
-      <div class="lista-bp">${sinImp.slice(0, 5).map(e => `<div class="estiba"><span class="chip">${esc(e.id)}</span>
-        <span class="col gap4 flex1" style="min-width:0"><b>${esc(e.producto)}</b>
-          <span class="muted small">${e.ubicacion ? 'En ' + esc(e.ubicacion) : 'Sin lugar'} · ${e.cajas} cj · vence ${fCorta(e.vencimiento)}${e.loteOrigen ? ' · lote viejo ' + esc(e.loteOrigen) : ''}</span></span></div>`).join('')}
-        ${sinImp.length > 5 ? `<span class="muted small">y ${sinImp.length - 5} más…</span>` : ''}</div>
-    </div>`;
-  }
+  // Rótulos que nunca se han impreso (los de "Cargar sin código de barras" y los que se guardaron sin imprimir)
+  const noImpreso = e => e.estado !== 'ANULADA' && (e.vecesImpreso === 0 || (e.sinImprimir && !e.vecesImpreso));
 
+  // Imprimir varios de una vez: los que faltan por imprimir en el filtro de la tabla
   function elegirSinImp() {
+    sinImp = filtrarRotulos().filter(noImpreso);
+    if (!sinImp.length) return toast('No hay rótulos sin imprimir con ese filtro', 'error');
     abrirModal(`<div class="fila-sb"><span class="h2">¿Cuáles imprimo?</span>${btnCerrar()}</div>
       <span class="muted small mt8">Están en el orden en que se cargaron. Tip: imprímelos por fila para pegarlos recorriendo la bodega.</span>
       <div class="fila gap8 mt12 wrap-f"><button class="btn btn-sec" onclick="marcarTodos(true)">Marcar todos</button>
@@ -3466,7 +3883,7 @@
         <span class="col gap4 flex1" style="min-width:0"><b>${esc(e.id)} · ${esc(e.producto)}</b>
           <span class="muted small">${e.ubicacion ? esc(e.ubicacion) : 'Sin lugar'} · ${e.cajas} cj · vence ${fCorta(e.vencimiento)}</span></span></label>`).join('')}</div>
       <div class="dos mt12">
-        <div><label class="lbl" for="rtCopias">Copias de cada uno</label><input id="rtCopias" class="campo" type="number" inputmode="numeric" min="1" max="20" value="1"></div>
+        <div><label class="lbl" for="rtCopias">Copias de cada uno <span class="muted small">(mismo código)</span></label><input id="rtCopias" class="campo" type="number" inputmode="numeric" min="1" max="20" value="1"></div>
         <div><label class="lbl" for="rtTam">Tamaño del papel</label>
           <select id="rtTam" class="campo">
             <option value="carta" ${leerLS('rtTam') !== '10x15' ? 'selected' : ''}>Hoja carta (horizontal)</option>
@@ -3484,23 +3901,9 @@
     const tam = $('rtTam').value;
     guardarLS('rtTam', tam);
     cerrarModal();
-    imprimirRotulo(lista, copias, tam);
-    window.__porMarcar = lista.map(e => e.id);
-    abrirModal(`<div class="fila-sb"><span class="h2">¿Salieron bien?</span>${btnCerrar()}</div>
-      <span class="mt12">Se mandaron ${lista.length} rótulo${lista.length === 1 ? '' : 's'} a imprimir. Si salieron bien, salen de la lista de pendientes.</span>
-      <p id="fErr" class="error" hidden></p>
-      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">No, los dejo pendientes</button>
-        <button id="miOk" class="btn btn-pri btn-xl" onclick="marcarImpresos()">Sí, salieron bien</button></div>`);
-  }
-
-  function marcarImpresos() {
-    const ids = window.__porMarcar || [];
-    const b = $('miOk'); b.disabled = true; b.textContent = 'Guardando…';
-    llamar('bdMarcarImpresos', ids).then(() => {
-      sinImp = (sinImp || []).filter(e => !ids.includes(e.id));
-      cerrarModal(); toast(`${ids.length} rótulo${ids.length === 1 ? '' : 's'} marcados como impresos`, 'ok');
-      if ($('sinImpCaja')) $('sinImpCaja').innerHTML = sinImpHtml();
-    }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Sí, salieron bien'; });
+    imprimirRotulo(lista, copias, tam);   // queda registrado quién y cuándo imprimió
+    const ids = lista.filter(e => e.sinImprimir).map(e => e.id);
+    if (ids.length) llamar('bdMarcarImpresos', ids).then(() => lista.forEach(e => { e.sinImprimir = false; })).catch(() => {});
   }
 
   function limpiarTanda() {
@@ -3599,10 +4002,8 @@
     pintarRtTipo();
     enlazarRotulos();
     if (rotulos === null) cargarRotulos();
-    if (sinImp === null) {
-      sinImp = [];
-      llamar('bdSinImprimir').then(l => { sinImp = l; if ($('sinImpCaja')) $('sinImpCaja').innerHTML = sinImpHtml(); }).catch(() => { sinImp = null; });
-    }
+    if (piLista === null) cargarPorImprimir();
+    enlazarPorImprimir();
   }
 
   /* ----- Tabla de rótulos ----- */
@@ -3623,7 +4024,7 @@
       if (rtF.estado === 'ubicado' && e.estado !== 'UBICADA') return false;
       if (rtF.estado === 'salio' && e.estado !== 'SALIDA') return false;
       if (rtF.estado === 'anulado' && e.estado !== 'ANULADA') return false;
-      if (rtF.estado === 'sinimp' && !(e.vecesImpreso === 0 || e.sinImprimir)) return false;
+      if (rtF.estado === 'sinimp' && !noImpreso(e)) return false;
       if (!pal.length) return true;
       const t = sinTilde(`${e.id} ${e.codigo} ${e.codigoNutresa} ${e.producto} ${e.ubicacion} ${e.creadoPor} ${e.responsable}`);
       return pal.every(w => t.includes(w));
@@ -3640,9 +4041,10 @@
     if (rotulos === null) return '<div class="cargando">Cargando rótulos…</div>';
     const l = filtrarRotulos();
     const cant2 = e => e.tipo === 'PESO' ? `${kg(e.total)}<br><span class="muted small">${e.cajas} cavas</span>` : `${e.cajas} cj<br><span class="muted small">${e.total} und</span>`;
-    const filas = l.slice(0, 400).map(e => {
+    const pg = paginar('rt', l, () => { if ($('rtLista')) $('rtLista').innerHTML = listaRotulos(); });
+    const filas = pg.filas.map(e => {
       const st = estadoRotulo(e), i = rotulos.indexOf(e);
-      const nunca = e.vecesImpreso === 0;
+      const nunca = noImpreso(e);
       return `<tr>
         <td>${fechaHora(e.creado).replace(' · ', '<br><span class="muted small">') + '</span>'}</td>
         <td><b class="nowrap">${esc(e.id)}</b></td>
@@ -3655,16 +4057,19 @@
         <td>${impresoHtml(e)}</td>
         <td>${e.ultimoImpresor ? `${esc(e.ultimoImpresor)}<br><span class="muted small nowrap">${fechaHora(e.ultimaImpresion)}</span>` : '<span class="muted">—</span>'}</td>
         <td>${esc(e.creadoPor || '—')}${e.responsable && e.responsable !== e.creadoPor ? `<br><span class="muted small">Resp.: ${esc(e.responsable)}</span>` : ''}</td>
-        <td class="rt-acc">${e.estado === 'ANULADA' ? '' : `<button class="btn ${nunca ? 'btn-pri' : 'btn-sec'} btn-mini" onclick="reimprimir(${i})">${nunca ? 'Imprimir' : 'Reimprimir'}</button>`}</td>
+        <td class="rt-acc"><span class="rt-acc-btns">${e.estado === 'ANULADA' ? '' : `<button class="btn ${nunca ? 'btn-pri' : 'btn-sec'} btn-mini" onclick="reimprimir(${i})">${nunca ? 'Imprimir' : 'Reimprimir'}</button>`}
+          ${puede('rotular') && e.estado !== 'ANULADA' ? `<button class="btn btn-sec btn-mini" onclick="duplicarRotulo(${i})" title="Otra estiba con la misma información y otro código">Duplicar</button>` : ''}</span></td>
       </tr>`;
     }).join('');
-    const sinImp2 = rotulos.filter(e => e.vecesImpreso === 0 || e.sinImprimir).length;
+    const sinImp2 = rotulos.filter(noImpreso).length;
     const falta = rotulos.filter(e => e.estado === 'PENDIENTE').length;
-    return `<div class="muted small">${l.length} de ${rotulos.length} rótulo${rotulos.length === 1 ? '' : 's'} · <b class="txt-naranja">${falta}</b> falta${falta === 1 ? '' : 'n'} por ubicar · <b>${sinImp2}</b> sin imprimir${l.length > 400 ? ' · se muestran los 400 más recientes, usa los filtros' : ''}</div>
+    return `<div class="fila-sb wrap-f gap8"><span class="muted small">${l.length} de ${rotulos.length} rótulo${rotulos.length === 1 ? '' : 's'} · <b class="txt-naranja">${falta}</b> falta${falta === 1 ? '' : 'n'} por ubicar ·
+        <button class="link" onclick="rtF.estado='sinimp'; $('rtfEst').value='sinimp'; pagInicio('rt'); $('rtLista').innerHTML = listaRotulos()"><b>${sinImp2}</b> sin imprimir</button></span>
+</div>
       <div class="tabla-wrap mt8"><table class="tabla rt-tabla">
         <thead><tr><th>Creado</th><th>Rótulo</th><th>Códigos</th><th>Producto</th><th>Cantidad</th><th>Vence</th>
           <th>Estado</th><th>Sede</th><th>Impreso</th><th>Último que imprimió</th><th>Registró</th><th class="rt-acc"></th></tr></thead>
-        <tbody>${filas || '<tr><td colspan="12" class="muted">No hay rótulos con ese filtro.</td></tr>'}</tbody></table></div>`;
+        <tbody>${filas || '<tr><td colspan="12" class="muted">No hay rótulos con ese filtro.</td></tr>'}</tbody></table></div>${pg.barra}`;
   }
 
   function cargarRotulos() {
@@ -3672,15 +4077,20 @@
     rtF.hasta = $('rtfHasta') ? $('rtfHasta').value : rtF.hasta;
     rotulos = null;
     if ($('rtLista')) $('rtLista').innerHTML = listaRotulos();
-    llamar('bdEtiquetasTabla', { desde: rtF.desde, hasta: rtF.hasta })
-      .then(l => { rotulos = l; if ($('rtLista')) $('rtLista').innerHTML = listaRotulos(); })
+    // Los que faltan por imprimir siempre salen en la tabla, aunque sean de antes de la fecha elegida
+    Promise.all([llamar('bdEtiquetasTabla', { desde: rtF.desde, hasta: rtF.hasta }), llamar('bdSinImprimir').catch(() => [])])
+      .then(([l, pend]) => {
+        const ya = new Set(l.map(e => e.id));
+        rotulos = l.concat(pend.filter(e => !ya.has(e.id)).map(e => Object.assign({ sede: '' }, e)));
+        if ($('rtLista')) $('rtLista').innerHTML = listaRotulos();
+      })
       .catch(e => { rotulos = []; if ($('rtLista')) $('rtLista').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   }
 
   function enlazarRotulos() {
     if (!$('rtfQ')) return;
-    $('rtfQ').addEventListener('input', () => { rtF.q = $('rtfQ').value; $('rtLista').innerHTML = listaRotulos(); });
-    $('rtfEst').addEventListener('change', () => { rtF.estado = $('rtfEst').value; $('rtLista').innerHTML = listaRotulos(); });
+    $('rtfQ').addEventListener('input', () => { rtF.q = $('rtfQ').value; pagInicio('rt'); $('rtLista').innerHTML = listaRotulos(); });
+    $('rtfEst').addEventListener('change', () => { rtF.estado = $('rtfEst').value; pagInicio('rt'); $('rtLista').innerHTML = listaRotulos(); });
     ['rtfDesde', 'rtfHasta'].forEach(id => $(id).addEventListener('change', () => { if (textoAIso(isoATexto($(id).value))) cargarRotulos(); }));
   }
 
@@ -3705,7 +4115,7 @@
   function crearRotulo() {
     const p = buscarProducto($('rtCod').value);
     if (!p) return errForm('Producto no encontrado. Elígelo de la lista o escanéalo.');
-    const datos = { codigo: p.id, tipo: rt.tipo, recibo: $('rtRec').value, vencimiento: $('rtVen').value, responsable: $('rtResp').value, usuario: ses.nombre };
+    const datos = { codigo: p.id, tipo: rt.tipo, recibo: $('rtRec').value, vencimiento: $('rtVen').value, responsable: ses.nombre, usuario: ses.nombre };
     if (rt.tipo === 'NORMAL') {
       const cajas = num($('rtCajas').value), undx = num($('rtUnd').value);
       if (!(cajas > 0)) return errForm('Escribe el número de cajas.');
@@ -3723,18 +4133,79 @@
     if (!datos.responsable) return errForm('Elige el responsable.');
     guardarLS('ultResp', datos.responsable);
     guardarLS('ultRecibo', datos.recibo);
+    const n = Math.max(1, Math.min(50, Math.floor(Number($('rtN') ? $('rtN').value : 1)) || 1));
     const b = $('rtOk');
-    b.disabled = true; b.textContent = 'Guardando…';
-    llamar('bdCrearEtiqueta', datos).then(e => {
+    b.disabled = true; b.textContent = n > 1 ? `Guardando 1 de ${n}…` : 'Guardando…';
+    crearIguales(datos, n, b).then(creados => {
+      const e = creados[creados.length - 1];
       if (rt.tipo === 'NORMAL') p.undPorCaja = Number(e.embalaje) || p.undPorCaja;
-      tanda.push(Object.assign({ imprimir: true }, e)); guardarTanda();
-      if (rotulos) rotulos = [Object.assign({ sede: '' }, e)].concat(rotulos);
       pitido();
-      toast(`Rótulo ${e.id} guardado. Sigue con el siguiente.`, 'ok');
+      toast(n > 1 ? `${n} rótulos guardados (${creados[0].id} a ${e.id}), cada uno con su código. Sigue con el siguiente.`
+        : `Rótulo ${e.id} guardado. Sigue con el siguiente.`, 'ok');
       pintarApp();
       if (colaRot) return siguienteCola(e);
       if ($('rtCod')) $('rtCod').focus();
     }).catch(err => { errForm(err.message); b.disabled = false; b.textContent = 'Guardar rótulo'; });
+  }
+
+  // Crea n rótulos con la misma información; cada uno con su propio identificador (E000123, E000124…)
+  async function crearIguales(datos, n, boton) {
+    const creados = [];
+    try {
+      for (let k = 0; k < n; k++) {
+        if (boton && n > 1) boton.textContent = `Guardando ${k + 1} de ${n}…`;
+        const e = await llamar('bdCrearEtiqueta', datos);
+        creados.push(e);
+        tanda.push(Object.assign({ imprimir: true }, e));
+        if (rotulos) rotulos = [Object.assign({ sede: '' }, e)].concat(rotulos);
+        if (piLista && !piLista.some(x => x.id === e.id)) piLista.push(Object.assign({ sede: '', vecesImpreso: 0, creado: new Date().toISOString() }, e));
+      }
+      pintarPorImprimir();
+    } catch (err) {
+      if (creados.length) { guardarTanda(); throw new Error(`Se guardaron ${creados.length} de ${n}. ${err.message}`); }
+      throw err;
+    }
+    guardarTanda();
+    return creados;
+  }
+
+  function rtNPaso(d) { const c = $('rtN'); c.value = Math.max(1, Math.min(50, (Number(c.value) || 1) + d)); rtNTexto(); }
+  function rtNTexto() {
+    const n = Math.max(1, Math.min(50, Math.floor(Number($('rtN').value)) || 1));
+    if ($('rtOk') && !$('rtOk').disabled) $('rtOk').textContent = n > 1 ? `Guardar ${n} rótulos` : 'Guardar rótulo';
+  }
+
+  // Duplicar desde la tabla: más estibas con la misma información de un rótulo que ya existe
+  function duplicarRotulo(i) {
+    const e = rotulos[i];
+    if (!e) return;
+    abrirModal(`<div class="fila-sb"><span class="h2">Más estibas iguales</span>${btnCerrar()}</div>
+      <div class="info mt12"><span class="fuerte">${esc(e.producto)}</span>
+        <span class="muted small">Igual a ${esc(e.id)}: ${e.tipo === 'PESO' ? kg(e.total) + ' en ' + e.cajas + ' cavas' : e.cajas + ' cj × ' + e.embalaje + ' = ' + e.total + ' und'} · recibo ${fCorta(e.recibo)} · vence ${fCorta(e.vencimiento)}</span></div>
+      <label class="lbl mt12" for="dupN">¿Cuántas estibas más?</label>
+      <div class="paso-num"><button type="button" class="btn btn-sec" onclick="$('dupN').value=Math.max(1,(+$('dupN').value||1)-1)">−</button>
+        <input id="dupN" class="campo" type="number" inputmode="numeric" min="1" max="50" value="1">
+        <button type="button" class="btn btn-sec" onclick="$('dupN').value=Math.min(50,(+$('dupN').value||1)+1)">+</button></div>
+      <span class="muted small">Cada una sale con su propio código de barras y queda en <b>Rótulos de esta tanda</b> para imprimir.</span>
+      <p id="fErr" class="error" hidden></p>
+      <button id="dupOk" class="btn btn-pri btn-xl mt16" onclick="confirmarDuplicar(${i})">Crear e imprimir</button>`);
+  }
+
+  function confirmarDuplicar(i) {
+    const e = rotulos[i];
+    const n = Math.max(1, Math.min(50, Math.floor(Number($('dupN').value)) || 1));
+    const datos = { codigo: e.codigo, tipo: e.tipo, recibo: e.recibo, vencimiento: e.vencimiento, responsable: ses.nombre, usuario: ses.nombre };
+    if (e.tipo === 'PESO') Object.assign(datos, { numCavas: e.numCavas || e.cajas, pesoCava: e.pesoCava || 0, pesoEstiba: e.pesoEstiba || 0,
+      pesoBascula: e.pesoBascula || (Number(e.total) + (Number(e.pesoEstiba) || 0) + (Number(e.pesoCava) || 0) * (Number(e.numCavas || e.cajas) || 0)) });
+    else Object.assign(datos, { cajas: e.cajas, undXCaja: e.embalaje });
+    const b = $('dupOk'); b.disabled = true;
+    crearIguales(datos, n, b).then(creados => {
+      cerrarModal(); pitido();
+      if ($('rtLista')) $('rtLista').innerHTML = listaRotulos();
+      if ($('tandaCaja')) $('tandaCaja').innerHTML = tandaHtml();
+      imprimirRotulo(creados, 1, leerLS('rtTam') || 'carta');
+      toast(`${creados.length} rótulo${creados.length === 1 ? '' : 's'} nuevo${creados.length === 1 ? '' : 's'}: ${creados.map(x => x.id).join(', ')}`, 'ok');
+    }).catch(err => { errForm(err.message); b.disabled = false; b.textContent = 'Crear e imprimir'; });
   }
 
   // Al terminar: se marcan los que se van a imprimir
@@ -3747,7 +4218,7 @@
         <span class="col gap4 flex1" style="min-width:0"><b>${esc(e.id)} · ${esc(e.producto)}</b>
           <span class="muted small">${e.cajas} cj · ${e.tipo === 'PESO' ? kg(e.total) : e.total + ' und'} · vence ${fCorta(e.vencimiento)}</span></span></label>`).join('')}</div>
       <div class="dos mt12">
-        <div><label class="lbl" for="rtCopias">Copias de cada uno</label><input id="rtCopias" class="campo" type="number" inputmode="numeric" min="1" max="20" value="1"></div>
+        <div><label class="lbl" for="rtCopias">Copias de cada uno <span class="muted small">(mismo código)</span></label><input id="rtCopias" class="campo" type="number" inputmode="numeric" min="1" max="20" value="1"></div>
         <div><label class="lbl" for="rtTam">Tamaño del papel</label>
           <select id="rtTam" class="campo">
             <option value="carta" ${leerLS('rtTam') !== '10x15' ? 'selected' : ''}>Hoja carta (horizontal)</option>
@@ -3827,9 +4298,10 @@
     if (!ids.length || !ses) return;
     llamar('bdRegistrarImpresion', { ids, usuario: ses.nombre }).then(() => {
       const ahora = new Date().toISOString();
-      [rotulos, tanda, sinImp].forEach(arr => (arr || []).forEach(e => {
+      // Cada objeto una sola vez (la misma fila puede estar en varias listas)
+      new Set([...(rotulos || []), ...(tanda || []), ...(sinImp || [])]).forEach(e => {
         if (ids.includes(e.id)) { e.vecesImpreso = (e.vecesImpreso || 0) + 1; e.ultimoImpresor = ses.nombre; e.ultimaImpresion = ahora; }
-      }));
+      });
       if ($('rtLista') && rotulos) $('rtLista').innerHTML = listaRotulos();
     }).catch(() => { /* sin señal: no se cuenta esta impresión */ });
   }
@@ -4133,8 +4605,7 @@
       </div>
       <div class="dos">
         <div><label class="lbl" for="cmLote">Lote o rótulo viejo <span class="muted small">(opcional)</span></label><input id="cmLote" class="campo" autocomplete="off"></div>
-        <div><label class="lbl" for="cmResp">Responsable</label>
-          <select id="cmResp" class="campo">${ini.operarios.map(o => `<option ${o.nombre === ultResp ? 'selected' : ''}>${esc(o.nombre)}</option>`).join('')}</select></div>
+        <div class="resp-fijo"><span class="lbl">Responsable</span><span class="resp-nom">${esc(ses.nombre)}</span></div>
       </div>
       <p id="fErr" class="error" hidden></p>
       <button id="cmOk" class="btn btn-ent-solido btn-xl mt12" onclick="guardarCargaManual()">Guardar y dejar en ${esc(etiqueta(esp))}</button>`);
@@ -4193,7 +4664,7 @@
     const esp = sede.espPorId[espSel];
     const p = buscarProducto($('cmProd').value);
     if (!p) return errForm('Elige el producto de la lista.');
-    const d = { codigo: p.id, tipo: cm.tipo, vencimiento: $('cmVen').value, recibo: $('cmRec').value, responsable: $('cmResp').value,
+    const d = { codigo: p.id, tipo: cm.tipo, vencimiento: $('cmVen').value, recibo: $('cmRec').value, responsable: ses.nombre,
       loteOrigen: $('cmLote').value.trim(), ubicacionId: esp.id, sedeId: ses.sedeId, usuario: ses.nombre };
     if (cm.tipo === 'NORMAL') {
       const c = num($('cmCajas').value), u = num($('cmUnd').value);
@@ -4584,6 +5055,207 @@
 
   function selEsp(id) { espSel = (id && id !== espSel) ? id : null; pintarApp(); if (espSel) proponerEnEspacio(espSel); }
 
+  /* ================= Por imprimir: la persona del PC imprime lo que llenan en planta ================= */
+  let piLista = null;                 // rótulos que nadie ha impreso (de todos)
+  const piF = { quien: '', q: '' };
+  const quienHizo = e => e.creadoPor || e.responsable || 'Sin nombre';
+  const haceRato = iso => {
+    const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    return !iso ? '' : m < 1 ? 'ahora' : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : fCorta(String(iso).slice(0, 10));
+  };
+
+  function cargarPorImprimir() {
+    return llamar('bdPorImprimir').then(l => { piLista = l; pintarPorImprimir(); })
+      .catch(() => { if (piLista === null) { piLista = []; pintarPorImprimir(); } });
+  }
+
+  // Filtrados y en orden: por persona y del más viejo al más nuevo (así se entregan por persona)
+  function filtrarPorImprimir() {
+    const pal = sinTilde(piF.q.trim()).split(/\s+/).filter(Boolean);
+    return (piLista || []).filter(e => (!piF.quien || quienHizo(e) === piF.quien)
+      && (!pal.length || pal.every(w => sinTilde(`${e.id} ${e.codigo} ${e.codigoNutresa} ${e.producto}`).includes(w))))
+      .sort((a, b) => quienHizo(a).localeCompare(quienHizo(b)) || String(a.creado).localeCompare(String(b.creado)));
+  }
+
+  function panelPorImprimir() {
+    const tam = leerLS('rtTam') === '10x15' ? '10x15' : 'carta';
+    return `<section class="card col gap8 pi-card" aria-label="Por imprimir">
+      <div class="fila-sb gap8"><span class="h3">Por imprimir <span class="pi-n" id="piN">${piLista ? piLista.length : '…'}</span></span>
+        <span class="pi-vivo" id="piVivo" title="Se actualiza solo cuando alguien guarda un rótulo">${vivoOk ? '● En vivo' : ''}</span></div>
+      <div class="pi-filtros">
+        <select id="piQuien" class="campo" aria-label="Filtrar por persona">${opcionesQuien()}</select>
+        <input id="piQ" class="campo" placeholder="Buscar producto o rótulo" value="${esc(piF.q)}" autocomplete="off" aria-label="Buscar en por imprimir">
+      </div>
+      <div id="piCaja">${listaPorImprimir()}</div>
+      <div class="pi-pie">
+        <select id="piTam" class="campo" aria-label="Tamaño del papel">
+          <option value="carta" ${tam === 'carta' ? 'selected' : ''}>Hoja carta</option>
+          <option value="10x15" ${tam === '10x15' ? 'selected' : ''}>Etiqueta 15×10</option></select>
+        <span id="piBtnCaja">${botonPorImprimir()}</span>
+      </div>
+    </section>`;
+  }
+
+  function opcionesQuien() {
+    const cuenta = {};
+    (piLista || []).forEach(e => { const q = quienHizo(e); cuenta[q] = (cuenta[q] || 0) + 1; });
+    if (piF.quien && !cuenta[piF.quien]) piF.quien = '';
+    return `<option value="">Todas las personas</option>` + Object.keys(cuenta).sort().map(q =>
+      `<option value="${esc(q)}" ${piF.quien === q ? 'selected' : ''}>${esc(q)} (${cuenta[q]})</option>`).join('');
+  }
+
+  function listaPorImprimir() {
+    if (piLista === null) return '<div class="cargando">Cargando…</div>';
+    const l = filtrarPorImprimir();
+    if (!l.length) return `<p class="muted small pi-vacio">${piLista.length ? 'Nada con ese filtro.' : 'Todo está impreso. Lo que guarden en planta aparece aquí solo.'}</p>`;
+    let grupo = '';
+    return `<div class="pi-lista">${l.map(e => {
+      const q = quienHizo(e), cab = q !== grupo ? `<div class="pi-grupo">${esc(q)}</div>` : '';
+      grupo = q;
+      return `${cab}<div class="pi-fila">
+        <span class="col flex1" style="min-width:0"><b class="pi-prod">${esc(e.id)} · ${esc(e.producto)}</b>
+          <span class="muted small">${e.tipo === 'PESO' ? kg(e.total) : e.cajas + ' cj · ' + e.total + ' und'} · vence ${fCorta(e.vencimiento)} · ${haceRato(e.creado)}</span></span>
+        <button class="btn btn-sec btn-mini" onclick="imprimirUnoPendiente('${esc(e.id)}')" aria-label="Imprimir ${esc(e.id)}">Imprimir</button>
+      </div>`;
+    }).join('')}</div>`;
+  }
+
+  function botonPorImprimir() {
+    const n = piLista ? filtrarPorImprimir().length : 0;
+    return `<button class="btn btn-pri" ${n ? '' : 'disabled'} onclick="imprimirPendientes()">${n ? `Imprimir ${piF.quien || piF.q ? 'estos' : 'todo'} (${n})` : 'Imprimir todo'}</button>`;
+  }
+
+  function pintarPorImprimir() {
+    if (!$('piCaja')) return;
+    $('piCaja').innerHTML = listaPorImprimir();
+    $('piBtnCaja').innerHTML = botonPorImprimir();
+    $('piN').textContent = piLista ? piLista.length : '…';
+    if (document.activeElement !== $('piQuien')) $('piQuien').innerHTML = opcionesQuien();
+  }
+
+  function enlazarPorImprimir() {
+    if (!$('piQ')) return;
+    $('piQ').addEventListener('input', () => { piF.q = $('piQ').value; pintarPorImprimir(); });
+    $('piQuien').addEventListener('change', () => { piF.quien = $('piQuien').value; pintarPorImprimir(); });
+    $('piTam').addEventListener('change', () => guardarLS('rtTam', $('piTam').value));
+  }
+
+  function imprimirPendientes() {
+    const l = filtrarPorImprimir();
+    if (l.length) imprimirDeCola(l);
+  }
+  function imprimirUnoPendiente(id) {
+    const e = (piLista || []).find(x => x.id === id);
+    if (e) imprimirDeCola([e]);
+  }
+  function imprimirDeCola(l) {
+    const tam = $('piTam') ? $('piTam').value : (leerLS('rtTam') || 'carta');
+    guardarLS('rtTam', tam);
+    imprimirRotulo(l, 1, tam);   // registra quién y cuándo imprimió
+    const ids = new Set(l.map(e => e.id));
+    piLista = piLista.filter(e => !ids.has(e.id));
+    pintarPorImprimir();
+    toast(`${l.length} rótulo${l.length === 1 ? '' : 's'} enviado${l.length === 1 ? '' : 's'} a la impresora`, 'ok');
+  }
+
+  /* ================= En vivo: lo que hace otra persona aparece enseguida ================= */
+  let vivoOk = false, vivoIniciado = false, vivoTimer = null, vivoPend = false;
+  const vivoCambios = new Set();
+  const TABLAS_SEDE = ['inventario', 'movimientos', 'espacios', 'sede_config', 'etiquetas'];
+
+  function iniciarVivo() {
+    if (vivoIniciado) return;
+    vivoIniciado = true;
+    const conectar = () => llamar('escucharCambios', (tabla, estado) => {
+      if (tabla === '_estado') {
+        const antes = vivoOk;
+        vivoOk = estado === 'SUBSCRIBED';
+        if ($('piVivo')) $('piVivo').textContent = vivoOk ? '● En vivo' : '';
+        if (vivoOk && !antes) cambioVivo('*');            // al reconectar trae lo que pasó mientras tanto
+        if (estado === 'CHANNEL_ERROR' || estado === 'TIMED_OUT') setTimeout(conectar, 10000);
+        return;
+      }
+      cambioVivo(tabla);
+    }).catch(() => setTimeout(conectar, 15000));
+    conectar();
+    // Respaldo: si el canal en vivo no está conectado, se revisa cada 20 segundos
+    setInterval(() => { if (!vivoOk && !document.hidden) cambioVivo('*'); }, 20000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) cambioVivo('*'); });
+    // Lo que quedó esperando (porque la persona estaba escribiendo) se pinta cuando termina
+    document.addEventListener('focusout', () => setTimeout(() => { if (vivoPend) repintarVivo(); }, 300));
+    setInterval(() => { if (vivoPend) repintarVivo(); }, 5000);
+  }
+
+  function cambioVivo(tabla) {
+    vivoCambios.add(tabla);
+    clearTimeout(vivoTimer);
+    vivoTimer = setTimeout(aplicarVivo, 600);   // varios cambios seguidos se traen de una sola vez
+  }
+
+  // ¿La persona está llenando algo? Entonces no se le borra lo que escribió
+  const ID_FILTROS = ['scan', 'busca', 'prodQ', 'invQ', 'rtfQ', 'cqQ', 'usQ', 'piQ', 'pBus'];
+  function ocupado() {
+    if (!$('modal').hidden || colocando || flujo) return true;
+    const a = document.activeElement;
+    if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && !ID_FILTROS.includes(a.id)) return true;
+    return [...document.querySelectorAll('#app main input, #app main textarea')].some(el =>
+      !ID_FILTROS.includes(el.id) && !el.closest('.pi-card') &&
+      ((el.type === 'checkbox' || el.type === 'radio') ? el.checked !== el.defaultChecked : el.type !== 'file' && el.value !== el.defaultValue));
+  }
+
+  async function aplicarVivo() {
+    if (!ses || pantalla !== 'app') { vivoCambios.clear(); return; }
+    const t = new Set(vivoCambios); vivoCambios.clear();
+    const hay = (...xs) => t.has('*') || xs.some(x => t.has(x));
+    const tareas = [];
+    if (hay(...TABLAS_SEDE)) tareas.push(llamar('bdSede', ses.sedeId).then(setSede).catch(() => {}));
+    if (hay('productos')) tareas.push(llamar('bdInicio').then(d => { ini.productos = d.productos; ini.operarios = d.operarios;
+      $('dlProductos').innerHTML = d.productos.map(p => `<option value="${esc(p.id + ' · ' + p.nombre)}">`).join(''); }).catch(() => {}));
+    if (vista === 'rotulo' && hay('etiquetas')) {
+      tareas.push(cargarPorImprimir());
+      if (rotulos) tareas.push(Promise.all([llamar('bdEtiquetasTabla', { desde: rtF.desde, hasta: rtF.hasta }), llamar('bdSinImprimir').catch(() => [])])
+        .then(([l, pend]) => { const ya = new Set(l.map(e => e.id)); rotulos = l.concat(pend.filter(e => !ya.has(e.id)).map(e => Object.assign({ sede: '' }, e))); })
+        .catch(() => {}));
+    }
+    if (vista === 'recibidor' && hay('recepciones', 'recepcion_items', 'evidencias', 'etiquetas')) {
+      if (rcTab === 'recibir') {
+        if (rcLista) tareas.push(llamar('bdRecepciones', {}).then(l => { rcLista = l; }).catch(() => {}));
+        if (rcAct && rcAct.id) tareas.push(llamar('bdRecepcion', rcAct.id).then(r => { if (rcAct && rcAct.id === r.id) rcAct = r; }).catch(() => {}));
+      } else if (rcCal) tareas.push(llamar('bdCalidad', { desde: rcFiltro.desde, hasta: rcFiltro.hasta }).then(d => { rcCal = d; }).catch(() => {}));
+    }
+    if (vista === 'productos' && prodTab === 'inventario' && invData && hay('inv_conteos', 'inv_sap', 'inv_sap_cargas', ...TABLAS_SEDE))
+      tareas.push(llamar('bdInventarioGeneral', ses.sedeId).then(d => { invData = d; }).catch(() => {}));
+    if (vista === 'usuarios' && usLista && !usEdit && !pfEdit && hay('operarios'))
+      tareas.push(Promise.all([llamar('bdUsuarios', ses.token), pfFalta ? Promise.resolve(pfLista) : llamar('bdPerfiles', ses.token)])
+        .then(([u, p]) => { usLista = u; pfLista = p; }).catch(() => {}));
+    await Promise.all(tareas);
+    vivoPend = true;
+    repintarVivo();
+  }
+
+  // Pinta lo nuevo: solo la parte que cambió cuando hay formularios en la pantalla
+  function repintarVivo() {
+    if (!ses || pantalla !== 'app') return;
+    if (vista === 'rotulo') {                                         // el formulario de arriba no se toca
+      pintarPorImprimir();
+      if ($('rtLista') && rotulos) $('rtLista').innerHTML = listaRotulos();
+      vivoPend = false; return;
+    }
+    if (vista === 'productos' && prodTab === 'inventario') {
+      if ($('invTabla') && invData) $('invTabla').innerHTML = tablaInventario();
+      vivoPend = false; return;
+    }
+    if (vista === 'productos' && $('prodLista')) { $('prodLista').innerHTML = listaProdHtml(); vivoPend = false; return; }
+    if (vista === 'recibidor' && rcTab !== 'recibir' && $('calCaja')) { if (rcCal) $('calCaja').innerHTML = tablaRc(); vivoPend = false; return; }
+    if (vista === 'usuarios' && !usEdit && !pfEdit && usTab === 'usuarios' && $('usTabla')) { $('usTabla').innerHTML = filasUsuarios(); vivoPend = false; return; }
+    if (vista === 'usuarios' && (usEdit || pfEdit)) { vivoPend = false; return; }
+    if (ocupado()) return;                                            // se pinta cuando termine de escribir
+    const y = window.scrollY;
+    pintarApp();
+    window.scrollTo(0, y);
+    vivoPend = false;
+  }
+
   // Trae lo último en segundo plano por si otra persona movió algo
   function refrescar() {
     llamar('bdSede', ses.sedeId).then(d => {
@@ -4938,6 +5610,7 @@
 
   function zonaConfig(z) {
     const racks = sede.racks.filter(r => r.zonaId === z.id);
+    const pg = paginar('rk_' + z.id, racks, pintarApp);
     return `<section class="card col gap10" style="border-left:6px solid ${esc(z.color)}">
       <div class="fila-sb wrap-f">
         <span class="h3">${esc(z.nombre)}</span>
@@ -4949,7 +5622,7 @@
       </div>
       ${racks.length ? `<div class="tabla"><table>
         <thead><tr><th>Rack</th><th>Código</th><th>Posiciones</th><th>Niveles</th><th></th></tr></thead>
-        <tbody>${racks.map(r => `<tr>
+        <tbody>${pg.filas.map(r => `<tr>
           <td class="fuerte">${esc(r.nombre)}</td>
           <td class="muted">${esc(r.id)}</td>
           <td>${r.posiciones - r.omitidas.length}${r.omitidas.length ? ` <span class="muted small">(${r.omitidas.length} quitadas)</span>` : ''}</td>
@@ -4957,7 +5630,7 @@
           <td><div class="fila gap8"><button class="btn btn-sec" onclick="formRack('${esc(r.id)}')">Editar</button>
             <button class="btn btn-sec" onclick="abrirRackModal('${esc(r.id)}')">Niveles</button>
             <button class="btn btn-sec" onclick="pedirEtiquetasRack('${esc(r.id)}')">Etiquetas</button></div></td>
-        </tr>`).join('')}</tbody></table></div>` : '<span class="muted small">Sin racks.</span>'}
+        </tr>`).join('')}</tbody></table></div>${pg.barra}` : '<span class="muted small">Sin racks.</span>'}
     </section>`;
   }
 
@@ -5094,6 +5767,7 @@
     $('modal').hidden = true;
     form = null; flujo = null; lugarCtx = null;
     if ($('scan') && !('ontouchstart' in window)) $('scan').focus({ preventScroll: true });
+    if (vivoPend) setTimeout(repintarVivo, 50);
   }
   function errForm(t) { const p = $('fErr'); if (p) { p.textContent = t; p.hidden = false; } else toast(t, 'error'); }
 
