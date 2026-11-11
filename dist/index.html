@@ -444,6 +444,30 @@
   .pi-vacio { padding: 6px 2px; }
   .pi-pie { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 8px; }
   .pi-pie .btn { width: 100%; height: 42px; }
+  /* Cíclico */
+  .seg.seg-c { display: inline-flex; flex-wrap: wrap; width: auto; max-width: 100%; }
+  .seg.seg-c button { padding: 0 14px; height: 40px; white-space: nowrap; font-size: 14px; }
+  .cic-filtros { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; }
+  .cic-filtros .inv-buscar { flex: 1 1 240px; }
+  .cic-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .cic-grid { grid-template-columns: 1fr; } }
+  .cic-nuevo { border: 2px solid var(--pri); }
+  .cn-pegar { width: 100%; justify-content: flex-start; }
+  .cic-plista { max-height: 230px; overflow-y: auto; border: 1px solid var(--borde); border-radius: 10px; margin-top: 4px; }
+  .cic-persona { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--borde); cursor: pointer; }
+  .cic-persona:last-child { border-bottom: none; }
+  .cic-persona.on { background: var(--pri-suave); }
+  .cic-codigos { display: flex; flex-wrap: wrap; gap: 6px; max-height: 200px; overflow-y: auto; margin-top: 4px; }
+  .cic-cod { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 4px 4px 10px; border-radius: 999px; background: var(--pri-suave); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cic-cod button { flex-shrink: 0; width: 26px; height: 26px; border: none; border-radius: 50%; background: transparent; color: var(--txt); font-size: 18px; line-height: 1; cursor: pointer; }
+  .cic-cod button:hover { background: rgba(0,0,0,.08); }
+  .cic-lista tbody tr { cursor: pointer; }
+  .cic-lista tr.cic-sel td { background: var(--pri-suave); }
+  .cic-nota { display: block; font-weight: 400; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cic-avance, .cic-progreso { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; }
+  .cic-progreso .us-barra-p { width: 220px; max-width: 50vw; }
+  .cic-cab { border-left: 6px solid var(--pri); }
+  tr.cic-pend td { background: color-mix(in srgb, var(--amar, #F9A825) 6%, transparent); }
   /* Paginación */
   .pag { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
   .pag-btns { display: inline-flex; gap: 4px; flex-wrap: wrap; }
@@ -670,7 +694,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-CtEeAocZ.js"></script>
+  <script type="module" crossorigin src="./assets/index-JLxYUVXT.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>

@@ -4,7 +4,7 @@
  * - Con señal siempre se trae la versión nueva; sin señal se usa la guardada.
  * - Los datos (Supabase) no pasan por aquí: los maneja la app (src/offline.js).
  */
-const VERSION = 'bodega-v1';
+const VERSION = 'bodega-v2';
 const BASE = self.registration.scope;
 
 async function guardarTodo() {
