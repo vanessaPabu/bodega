@@ -453,6 +453,8 @@
   @media (max-width: 760px) { .cic-grid { grid-template-columns: 1fr; } }
   .cic-nuevo { border: 2px solid var(--pri); }
   .cn-pegar { width: 100%; justify-content: flex-start; }
+  .cn-sap-ok { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--pri-suave); }
+  .cn-mano summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--pri); padding: 4px 0; }
   .cic-plista { max-height: 230px; overflow-y: auto; border: 1px solid var(--borde); border-radius: 10px; margin-top: 4px; }
   .cic-persona { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--borde); cursor: pointer; }
   .cic-persona:last-child { border-bottom: none; }
@@ -468,6 +470,26 @@
   .cic-progreso .us-barra-p { width: 220px; max-width: 50vw; }
   .cic-cab { border-left: 6px solid var(--pri); }
   tr.cic-pend td { background: color-mix(in srgb, var(--amar, #F9A825) 6%, transparent); }
+  /* Reconfirmación */
+  .cic-cab-rc { border-left-color: var(--rojo, #C62828); }
+  .ra-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--card); }
+  .ra-fila.ra-ok { background: var(--seg); }
+  .ra-fila.ra-quitada { opacity: .8; border-style: dashed; }
+  .ra-fila > .col { flex: 1 1 260px !important; }
+  .ra-acc { display: flex; gap: 6px; flex-wrap: wrap; }
+  @media (max-width: 600px) { .ra-acc { width: 100%; } .ra-acc .btn { flex: 1; } }
+  .ra-n { display: block; }
+  .chip-btn { border: 1px solid var(--borde2, var(--borde)); background: var(--card); color: var(--txt); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .chip-btn:hover { border-color: var(--pri); }
+  .caja.caja-ancha { max-width: 980px; }
+  .cic-volver { align-self: flex-start; }
+  .cic-tipo-sel { width: auto; height: 40px; font-size: 14px; padding-top: 0; padding-bottom: 0; }
+  .cic-cab-rcc { border-left-color: #E65100; }
+  .tag.rc-inv { background: #EDE7F6; color: #4527A0; border-color: #D1C4E9; }
+  .tag.rc-cic { background: #FFF3E0; color: #E65100; border-color: #FFE0B2; }
+  [data-tema="oscuro"] .tag.rc-inv { background: #311B92; color: #D1C4E9; border-color: #4527A0; }
+  [data-tema="oscuro"] .tag.rc-cic { background: #4E2600; color: #FFCC80; border-color: #7A3E00; }
+  .inv-tabla .g-rc { background: color-mix(in srgb, #E65100 7%, transparent); }
   /* Paginación */
   .pag { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
   .pag-btns { display: inline-flex; gap: 4px; flex-wrap: wrap; }
@@ -559,6 +581,7 @@
   .rt-tabla { font-size: 13px; }
   .rt-tabla th { white-space: nowrap; }
   .rt-tabla td { vertical-align: top; }
+  .rt-tabla .rt-chk { width: 32px; padding-right: 0; }
   .rt-tabla .rt-prod { min-width: 180px; }
   .rt-tabla .rt-acc { position: sticky; right: 0; background: var(--card); box-shadow: -6px 0 8px -6px rgba(0,0,0,.18); }
   .rt-tabla thead .rt-acc { background: var(--bg); z-index: 2; }
@@ -685,16 +708,16 @@
   .link-cal { font-weight: 600; margin-right: 8px; }
   .btn-cerrar-fac { width: 100%; min-height: 60px; font-size: 18px; font-weight: 700; margin-top: 4px; }
 
-  /* Espacio abajo para el sello "Powered by Netlify" del plan gratis: así nunca tapa botones */
-  :root { --sello: 78px; }
+  /* Antes había un espacio abajo para el sello de Netlify. En GitHub Pages no hay sello: sin espacio extra */
+  :root { --sello: 0px; }
   .wrap { padding-bottom: calc(28px + var(--sello)); }
   .caja, .modal .caja { padding-bottom: calc(18px + var(--sello) + env(safe-area-inset-bottom)); }
-  .us-pie { bottom: calc(var(--sello) - 8px); }
+  .us-pie { bottom: max(0px, calc(var(--sello) - 8px)); }
   .esc-pie { padding-bottom: calc(22px + var(--sello) + env(safe-area-inset-bottom)); }
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-JLxYUVXT.js"></script>
+  <script type="module" crossorigin src="./assets/index-ehzAgEgf.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>
