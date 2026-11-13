@@ -7313,7 +7313,7 @@
         <div class="esc-laser"></div>
         <div class="esc-leido" id="escLeido" hidden></div>
       </div>
-      <div class="esc-pie">
+      <div class="esc-pie" id="escPie">
         <div class="esc-estado" id="escEstado">Abriendo la cámara…</div>
         <div class="esc-acciones">
           <button type="button" class="esc-chip" id="escZoom" onclick="zoomEscaner()" hidden>Zoom 1x</button>
@@ -7335,7 +7335,7 @@
     try {
       esc_.stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }   // más liviano: lee igual y no se pega en equipos sencillos
       });
     } catch (e) {
       return sinCamara(e && e.name === 'NotAllowedError'
@@ -7399,7 +7399,7 @@
     let w = mr.width * (1 + 2 * extra) / s, h = mr.height * (1 + 2 * extra) / s;
     x = Math.max(0, x); y = Math.max(0, y);
     w = Math.min(v.videoWidth - x, w); h = Math.min(v.videoHeight - y, h);
-    const escala = Math.min(1, 1000 / w);
+    const escala = Math.min(1, 800 / w);
     const c = esc_.canvas;
     c.width = Math.round(w * escala); c.height = Math.round(h * escala);
     const ctx = c.getContext('2d', { willReadFrequently: true });
@@ -7433,22 +7433,36 @@
       }
     } catch (e) {}
     if (texto && String(texto).trim()) return exitoEscaner(String(texto).trim());
-    esc_.timer = setTimeout(cicloEscaner, esc_.detector ? 60 : 90);
+    esc_.timer = setTimeout(cicloEscaner, esc_.detector ? 80 : 140);
   }
 
+  // Leyó: sigue solo de una vez. Si el equipo se queda pegado, abajo queda el botón grande para usar el código (o leer otro).
   function exitoEscaner(texto) {
     esc_.leyendo = false;
+    clearTimeout(esc_.timer);
+    esc_.leido = texto;
     try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
     const ov = $('escaner');
     if (ov) ov.classList.add('esc-ok');
     const l = $('escLeido');
     if (l) { l.textContent = texto; l.hidden = false; }
-    if ($('escEstado')) $('escEstado').textContent = 'Código leído';
-    setTimeout(() => {
-      try { cerrarEscaner(); } catch (e) { const o = $('escaner'); if (o) o.remove(); }
-      try { codigoLeido(texto); } catch (e) { toast('Código leído: ' + texto + '. No se pudo abrir: ' + (e.message || e), 'error'); }
-    }, 350);
+    const pie = $('escPie');
+    if (pie) pie.innerHTML = `<div class="esc-estado">Código leído</div>
+      <button type="button" class="btn btn-ent-solido btn-xl esc-usar" onclick="usarLeido()">✓ Usar ${esc(texto)}</button>
+      <button type="button" class="esc-chip" onclick="leerOtraVez()">Leer otro</button>`;
+    setTimeout(usarLeido, 150);
   }
+  function usarLeido() {
+    const t = esc_.leido;
+    if (!t) return;
+    esc_.leido = null;
+    document.removeEventListener('keydown', teclaEscaner, true);
+    const ov = $('escaner');
+    if (ov) ov.remove();
+    try { codigoLeido(t); } catch (e) { toast('Código leído: ' + t + '. No se pudo abrir: ' + (e.message || e), 'error'); }
+    setTimeout(() => { try { pararCamara(); } catch (e) {} }, 0);   // la cámara se apaga después, para no frenar
+  }
+  function leerOtraVez() { esc_.leido = null; const d = camDestino; cerrarEscaner(); abrirEscaner(d); }
 
   function escribirEnEscaner() {
     const f = $('escManual');
@@ -7508,7 +7522,7 @@
     const ov = $('escaner');
     if (ov) ov.remove();          // primero se quita la pantalla, así nunca se queda pegada en "Código leído"
     try { pararCamara(); } catch (e) {}
-    esc_.tec = ''; clearTimeout(esc_.tecT);
+    esc_.tec = ''; clearTimeout(esc_.tecT); esc_.leido = null;
   }
 
   /* ----- Radiofrecuencia / pistola (RT40S y similares): el lector escribe el código como si fuera un teclado -----
