@@ -4,7 +4,7 @@
  * - Con señal siempre se trae la versión nueva; sin señal se usa la guardada.
  * - Los datos (Supabase) no pasan por aquí: los maneja la app (src/offline.js).
  */
-const VERSION = 'bodega-v2';
+const VERSION = 'bodega-v3';
 const BASE = self.registration.scope;
 
 async function guardarTodo() {
@@ -35,7 +35,8 @@ async function redPrimero(req, espera) {
   const cache = await caches.open(VERSION);
   try {
     const res = await Promise.race([
-      fetch(req),
+      // no-cache: siempre le pregunta al servidor si hay versión nueva (si no cambió, igual es rápido)
+      fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }),
       new Promise((_, mal) => setTimeout(() => mal(new Error('lento')), espera))
     ]);
     if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone());

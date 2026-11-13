@@ -223,6 +223,8 @@
   .pr { position: absolute; display: flex; gap: 1px; }
   .pr.V { flex-direction: column-reverse; width: 20px; }
   .pr.H { flex-direction: row; height: 20px; }
+  .pr.V.inv { flex-direction: column; }   /* el 1 arriba (solo el dibujo) */
+  .pr.H.inv { flex-direction: row-reverse; }
   .pc { flex: 1; min-width: 0; min-height: 0; padding: 1px; border: 1px solid var(--borde2); border-radius: 2px; background: var(--card); display: flex; flex-direction: column; gap: 1px; }
   .pc .franja { flex: 1; display: flex; gap: 1px; min-height: 1px; }
   .pc .franja i { flex: 1; }
@@ -490,6 +492,54 @@
   [data-tema="oscuro"] .tag.rc-inv { background: #311B92; color: #D1C4E9; border-color: #4527A0; }
   [data-tema="oscuro"] .tag.rc-cic { background: #4E2600; color: #FFCC80; border-color: #7A3E00; }
   .inv-tabla .g-rc { background: color-mix(in srgb, #E65100 7%, transparent); }
+  /* Espacios bloqueados (aire acondicionado, columna…) */
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ec-td { width: 40px; text-align: center; }
+  .ec-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--borde); background: transparent; color: var(--muted); font-size: 15px; line-height: 1; }
+  .ec-btn:hover { color: var(--pri); border-color: var(--pri); }
+  .ec-lugar { border: 1px solid var(--borde); border-radius: 10px; padding: 10px 12px; }
+  .ec-otro, .ec-conf { background: var(--seg); border-radius: 8px; padding: 8px 10px; }
+  tr.ec-anulado td { opacity: .55; text-decoration: line-through; }
+  tr.ec-anulado td .tag { text-decoration: none; }
+  i.multi { box-shadow: inset 0 0 0 1.5px rgba(0,0,0,.6); }
+  .leyenda i.multi { box-shadow: inset 0 0 0 2px rgba(0,0,0,.6); }
+  .fr-cupo { font-weight: 600; font-size: 11px; color: var(--muted); }
+  .fr-prod { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .fr-prod::before { content: '• '; }
+  .e-bloq { background: repeating-linear-gradient(45deg, #5f6b78 0 2px, #c9d1da 2px 4px) !important; }
+  .fr-esp.fr-bloq { border-left-color: #5f6b78; background: repeating-linear-gradient(45deg, transparent 0 6px, rgba(95,107,120,.12) 6px 12px); }
+  /* Editor del plano */
+  .ed { display: flex; flex-direction: column; gap: 10px; }
+  .ed-barra { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--borde); border-radius: 12px; background: var(--card); position: sticky; top: 0; z-index: 6; }
+  .ed-herr { height: 40px; padding: 0 14px; border: 1px solid var(--borde2); border-radius: 10px; background: var(--card); color: var(--txt); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .ed-herr.on { background: var(--pri); border-color: var(--pri); color: #fff; }
+  .ed-sin { color: #B26A00; font-weight: 700; font-size: 13px; }
+  .ed-cuerpo { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 12px; align-items: start; }
+  .ed-wrap { overflow: auto; max-height: calc(100vh - 210px); border: 1px solid var(--borde); border-radius: 12px; background: var(--card); }
+  .ed-sizer { position: relative; }
+  .ed-lienzo { position: absolute; left: 0; top: 0; transform-origin: 0 0; touch-action: none; user-select: none;
+    background-color: var(--card); background-image: linear-gradient(var(--borde) 1px, transparent 1px), linear-gradient(90deg, var(--borde) 1px, transparent 1px);
+    background-size: 50px 50px; --er: #c9d1da; --er-l: #8a96a3; }
+  .ed-lienzo.dibujando { cursor: crosshair; }
+  .ed-lienzo [data-k] { cursor: move; }
+  .ed-fondo { position: absolute; pointer-events: none; z-index: 0; }
+  .ed-fondo.activo { pointer-events: auto; z-index: 20; outline: 2px dashed var(--pri); cursor: move; }
+  .ez { position: absolute; border: 2px solid; border-radius: 6px; z-index: 1; }
+  .ez.parte { border-style: dashed; }
+  .ez.sel { box-shadow: 0 0 0 3px var(--pri); }
+  .ez-lbl { position: absolute; z-index: 5; padding: 2px 8px; border-radius: 6px; background: var(--card); border: 1px solid var(--borde2); font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .ez-lbl.sel { border-color: var(--pri); color: var(--pri); }
+  .er { position: absolute; z-index: 3; border: 1px solid #6b7785; border-radius: 2px; }
+  .er.sel { outline: 3px solid var(--pri); outline-offset: 1px; }
+  .er-n { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 800; color: var(--muted); white-space: nowrap; pointer-events: none; }
+  .em { position: absolute; z-index: 4; height: 6px; background: #4a5563; border-radius: 3px; transform-origin: 0 50%; }
+  .em.sel { background: var(--pri); }
+  .ed-h { position: absolute; z-index: 21; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--pri); cursor: nwse-resize !important; }
+  .ed-prev { position: absolute; z-index: 22; border: 2px dashed var(--pri); background: rgba(30,100,200,.08); pointer-events: none; }
+  .ed-prev.linea { height: 4px; border: none; background: var(--pri); transform-origin: 0 50%; }
+  .ed-panel { position: sticky; top: 62px; display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 90px); overflow: auto; }
+  .ed-guia { margin: 4px 0 6px 18px; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+  .sede-fila { padding: 8px 0; border-top: 1px solid var(--borde); }
   /* Paginación */
   .pag { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
   .pag-btns { display: inline-flex; gap: 4px; flex-wrap: wrap; }
@@ -717,7 +767,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-ehzAgEgf.js"></script>
+  <script type="module" crossorigin src="./assets/index-_VoBEhvG.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>

@@ -167,7 +167,7 @@
   const etiqueta = e => e.nivel === 0 ? 'Picking ' + e.lado : e.codigo;
 
   function leyenda() {
-    return `<div class="leyenda">${[['vacio','Vacío'],['ocupado','Más de 30 días'],['pronto','16 a 30 días'],['vencido','15 días o menos / vencido']]
+    return `<div class="leyenda">${[['vacio','Vacío'],['ocupado','Más de 30 días'],['pronto','16 a 30 días'],['vencido','15 días o menos / vencido'],['ocupado multi','Varios productos en el espacio']]
       .map(([c, t]) => `<span><i class="e-${c}"></i>${t}</span>`).join('')}</div>`;
   }
   function btnTema(claro) {
@@ -255,6 +255,7 @@
     sede.espPorId = {};
     sede.rackPorId = {};
     sede.zonaPorId = {};
+    sede.bloqueos = d.bloqueos || {};
     d.lineas.forEach(l => (sede.porUbic[l.ubicacionId] = sede.porUbic[l.ubicacionId] || []).push(l));
     d.espacios.forEach(e => {
       sede.espPorId[e.id] = e;
@@ -615,6 +616,7 @@
     enlazarCalidad();
     enlazarUsuarios();
     enlazarInventario();
+    if (vista === 'config' && cfgTab === 'editor') enlazarEditor();
     ajustarPlano();
     dibujarCodigos($('app'));
     if (misma) {
@@ -767,9 +769,10 @@
       ${lados.length ? `<span class="lbl mt12">Lado</span>
       <div class="elige-grid">${lados.map(l => {
         const idL = `${lugar.rack}-P${pad3(lugar.pos)}-${lugar.nivel === 0 ? 'PK' : lugar.nivel}${l}`;
-        const lleno = ctx && !ctx.permitirLlenos && lineasDe(idL).length > 0;
-        return boton(l === lugar.lado, l + (l === 'C' || l === 'D' ? ' <small>fondo</small>' : '') + (lleno ? ' <small>lleno</small>' : ''),
-          `lugarSet('lado','${l}')`, lleno ? 'disabled title="Este espacio ya tiene producto"' : '');
+        const lleno = ctx && !ctx.permitirLlenos && sinCupo(idL);
+        const cupo = ctx && !lleno && cupoTxt(idL);
+        return boton(l === lugar.lado, l + (l === 'C' || l === 'D' ? ' <small>fondo</small>' : '') + (lleno ? ' <small>lleno</small>' : cupo ? ` <small>${cupo}</small>` : ''),
+          `lugarSet('lado','${l}')`, lleno ? `disabled title="Este espacio ya tiene ${maxEsp()} productos"` : '');
       }).join('')}</div>` : ''}
 
       ${ctx ? `<div class="mt16"><button class="btn btn-pri btn-xl" style="width:100%" onclick="lugarUsar()" ${cod && lugar.lado ? '' : 'disabled'}>
@@ -788,11 +791,19 @@
     });
   }
 
-  // ¿El espacio ya tiene producto? (no se puede poner otro encima)
-  function espacioLleno(id) {
+  // Cuántos productos caben en un espacio (Configuración → Ajustes)
+  const maxEsp = () => Math.max(1, Math.round(Number(ini && ini.parametros && ini.parametros.max_productos_espacio)) || 3);
+  // ¿Ya no cabe otro producto en el espacio? (si es el mismo producto y lote que ya está, se suma y sí cabe)
+  function sinCupo(id, m) {
     const ls = lineasDe(id);
-    if (!ls.length) return false;
-    toast(`El espacio ${id} ya está lleno (${ls.map(l => l.nombre).join(', ')}). Elige uno vacío.`, 'error');
+    if (m && ls.some(l => l.productoId === m.productoId && (l.lote || '') === (m.lote || ''))) return false;
+    return ls.length >= maxEsp();
+  }
+  const cupoTxt = id => { const n = lineasDe(id).length; return n ? `${n}/${maxEsp()}` : ''; };
+  function espacioLleno(id, m) {
+    if (!sinCupo(id, m)) return false;
+    const ls = lineasDe(id);
+    toast(`El espacio ${id} ya tiene ${ls.length} producto${ls.length === 1 ? '' : 's'} (${ls.map(l => l.nombre).join(', ')}) y el máximo es ${maxEsp()}. Elige otro.`, 'error');
     return true;
   }
 
@@ -805,7 +816,7 @@
     // Si el nivel tiene un solo lado, se elige solo
     if (campo === 'nivel') {
       const l = espaciosDe(lugar.rack, lugar.pos).filter(e => e.nivel === valor);
-      if (l.length === 1 && !(lugarCtx && !lugarCtx.permitirLlenos && lineasDe(l[0].id).length)) lugar.lado = l[0].lado;
+      if (l.length === 1 && !(lugarCtx && !lugarCtx.permitirLlenos && sinCupo(l[0].id))) lugar.lado = l[0].lado;
     }
     pintarLugar();
   }
@@ -1065,7 +1076,7 @@
   // Lugar elegido en el selector (o escaneado) para ingresar o recibir el traslado
   function flujoLugarElegido(id) {
     if (flujo.linea && id === flujo.linea.ubicacionId) return toast('El destino es el mismo lugar de origen', 'error');
-    if (espacioLleno(id)) return;
+    if (espacioLleno(id, flujo.linea)) return;
     flujo.destino = id;
     flujo.paso = 'confirmar';
     pintarFicha();
@@ -1516,7 +1527,9 @@
       <div class="card col gap4">
         <div class="fila-sb wrap-f gap8"><div class="col gap4"><span class="h2">Factura ${esc(r.factura)}</span>
           <span class="muted small">${esc(r.proveedor)} · Ingreso ${fFecha(r.fecha)}${r.recibidoPor ? ' · Recibe ' + esc(r.recibidoPor) : ''}</span></div>
-          ${abierta ? '<span class="tag">Abierta</span>' : '<span class="tag ok">Cerrada</span>'}</div>
+          <span class="fila gap8 wrap-f">${abierta ? '<span class="tag">Abierta</span>' : '<span class="tag ok">Cerrada</span>'}
+            ${puede('rc_facturas') ? `<button class="btn btn-sec btn-mini" onclick="editarFactura()">Editar datos</button>
+              <button class="btn btn-sec btn-mini txt-rojo" onclick="borrarFactura()">Eliminar factura</button>` : ''}</span></div>
         <div class="ficha-datos mt8">
           <div><span class="muted small">Productos</span><b>${todos.length}</b></div>
           <div><span class="muted small">Por recibir</span><b class="${pend.length ? 'txt-naranja' : ''}">${pend.length}</b></div>
@@ -1859,12 +1872,68 @@
     }).catch(e => toast(e.message, 'error'));
   }
 
-  // Corregir lo escrito (no las cantidades: esas ya tienen rótulo)
+  // Datos de la factura: número, proveedor y fecha
+  function editarFactura() {
+    if (sinPermiso('rc_facturas')) return;
+    const r = rcAct, provs = [...new Set((rcLista || []).map(x => x.proveedor))];
+    abrirModal(`<div class="fila-sb"><span class="h2">Editar datos de la factura</span>${btnCerrar()}</div>
+      <div class="mt12"><label class="lbl" for="efFac">Número de factura</label><input id="efFac" class="campo" autocomplete="off" value="${esc(r.factura)}"></div>
+      <div class="mt12"><label class="lbl" for="efProv">Proveedor</label><input id="efProv" class="campo" list="dlProvE" autocomplete="off" value="${esc(r.proveedor)}">
+        <datalist id="dlProvE">${provs.map(p => `<option value="${esc(p)}">`).join('')}</datalist></div>
+      <div class="mt12"><label class="lbl" for="efFecha">Fecha de ingreso</label><input id="efFecha" type="date" class="campo" value="${esc(r.fecha || '')}"></div>
+      <span class="muted small mt8">Lo recibido, los rótulos y las fotos se quedan igual.</span>
+      <p id="fErr" class="error" hidden></p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+        <button id="efOk" class="btn btn-pri btn-xl" onclick="guardarDatosFactura()">Guardar</button></div>`);
+  }
+  function guardarDatosFactura() {
+    const factura = $('efFac').value.trim(), proveedor = $('efProv').value.trim(), fecha = $('efFecha').value;
+    if (!factura) return errForm('Escribe el número de la factura.');
+    if (!proveedor) return errForm('Escribe el proveedor.');
+    if (!fecha) return errForm('Elige la fecha de ingreso.');
+    const b = $('efOk'); b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdGuardarRecepcion', { id: rcAct.id, factura, proveedor, fecha }).then(r => {
+      rcAct = r; rcLista = null; cerrarModal(); toast('Datos de la factura guardados', 'ok'); pintarApp();
+    }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Guardar'; });
+  }
+
+  // Eliminar una factura creada por error
+  function borrarFactura() {
+    if (sinPermiso('rc_facturas')) return;
+    const r = rcAct, rot = r.items.reduce((n, i) => n + (i.etiquetas || []).length, 0), fotos = r.evidencias || 0;
+    abrirModal(`<div class="fila-sb"><span class="h2">¿Eliminar la factura ${esc(r.factura)}?</span>${btnCerrar()}</div>
+      <span class="mt12">${esc(r.proveedor)} · ${fFecha(r.fecha)}. Se borra todo lo de esta factura:</span>
+      <ul class="small mt8"><li>${r.items.length} producto${r.items.length === 1 ? '' : 's'} (lo que debía llegar y lo recibido)</li>
+        <li>${fotos} foto${fotos === 1 ? '' : 's'}</li>
+        <li>${rot} rótulo${rot === 1 ? '' : 's'}: quedan <b>anulados</b> (si ya los imprimiste, bota el papel)</li></ul>
+      <span class="small mt8">Si alguno de sus rótulos ya se ubicó en el plano, no se puede eliminar: corrige solo lo que está mal con <b>Editar datos</b> o <b>Corregir</b>.</span>
+      <label class="lbl mt12" for="bfConf">Para confirmar, escribe el número de la factura</label>
+      <input id="bfConf" class="campo" autocomplete="off" placeholder="${esc(r.factura)}">
+      <p id="fErr" class="error" hidden></p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">No</button>
+        <button id="bfOk" class="btn btn-sal btn-xl" onclick="confirmarBorrarFactura()">Sí, eliminar</button></div>`);
+    $('bfConf').focus();
+  }
+  function confirmarBorrarFactura() {
+    if ($('bfConf').value.trim().toUpperCase() !== String(rcAct.factura).trim().toUpperCase()) return errForm('El número no coincide con el de la factura.');
+    const b = $('bfOk'); b.disabled = true; b.textContent = 'Eliminando…';
+    const fac = rcAct.factura;
+    llamar('bdBorrarRecepcion', { id: rcAct.id, usuario: ses.nombre }).then(() => {
+      rcAct = null; rcLista = null; cerrarModal(); toast(`Factura ${fac} eliminada`, 'ok'); pintarApp();
+    }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Sí, eliminar'; });
+  }
+
+  // Corregir lo escrito: producto, vencimiento, lote, novedad y cantidad de factura
+  // (la cantidad que llegó ya tiene rótulo: esa se corrige en Rotular → Editar)
   function corregirItem(id) {
     if (sinPermiso('rc_corregir')) return;
     const i = rcAct.items.find(x => x.id === id);
     abrirModal(`<div class="fila-sb"><span class="h2">Corregir</span>${btnCerrar()}</div>
-      <span class="muted small mt8">${esc(i.codigo)} · ${esc(i.producto)} · ${nfmt(i.cantRecibida)} ${esc(i.unidad || '')}</span>
+      <span class="muted small mt8">${esc(i.codigo)} · ${esc(i.producto)} · ${nfmt(i.cantRecibida)} ${esc(i.unidad || '')}${i.etiquetas.length ? ' · rótulos ' + i.etiquetas.map(esc).join(', ') : ''}</span>
+      <div class="mt12"><label class="lbl" for="ciProd">Producto</label>
+        ${campoConCamara(`<input id="ciProd" class="campo" list="dlProductos" autocomplete="off" spellcheck="false" value="${esc(i.codigo + ' · ' + i.producto)}">`, 'ciProd')}</div>
+      <div class="mt12"><label class="lbl" for="ciVen">Vencimiento</label><input id="ciVen" class="campo" type="date" value="${esc(i.vencimiento || '')}"></div>
+      ${i.etiquetas.length ? '<span class="muted small mt4">Si cambias el producto o el vencimiento, sus rótulos también se corrigen y quedan para volver a imprimir. Para cambiar cuánto llegó, ve a Rotular → Editar.</span>' : ''}
       <div class="mt12"><label class="lbl" for="ciFac">Cantidad en factura (${esc(i.unidad || '')})</label>
         <input id="ciFac" class="campo" type="number" inputmode="decimal" step="any" min="0" value="${i.cantFactura === null ? '' : i.cantFactura}"></div>
       <div class="mt12"><label class="lbl" for="ciLote">Lote</label><input id="ciLote" class="campo" value="${esc(i.lote)}" autocomplete="off"></div>
@@ -1874,14 +1943,35 @@
         <button id="ciOk" class="btn btn-pri btn-xl" onclick="guardarCorreccion('${id}')">Guardar</button></div>`);
   }
 
-  function guardarCorreccion(id) {
+  async function guardarCorreccion(id) {
     const i = rcAct.items.find(x => x.id === id);
     if (!$('ciLote').value.trim()) return errForm('Escribe el lote.');
-    llamar('bdGuardarItem', { id, recepcionId: rcAct.id, codigo: i.codigo, tipo: i.tipo, partes: i.partes, etiquetas: i.etiquetas,
-      unidad: i.unidad, cantFactura: $('ciFac').value, cantRecibida: i.cantRecibida, lote: $('ciLote').value,
-      vencimiento: i.vencimiento, novedad: $('ciNov').value })
-      .then(r => { rcAct = r; cerrarModal(); toast('Corregido', 'ok'); pintarApp(); })
-      .catch(e => errForm(e.message));
+    const p = buscarProducto($('ciProd').value.split(' · ')[0]) || buscarProducto($('ciProd').value);
+    if (!p) return errForm('Escribe o escanea el producto correcto.');
+    const venc = $('ciVen').value || null;
+    const cambiaProd = p.id !== i.codigo, cambiaVen = (venc || '') !== (i.vencimiento || '');
+    const b = $('ciOk'); b.disabled = true; b.textContent = 'Guardando…';
+    try {
+      // Primero los rótulos (si alguno ya está ubicado con el producto equivocado, no se cambia nada)
+      let corregidos = [];
+      if ((cambiaProd || cambiaVen) && i.etiquetas.length) {
+        const motivo = `Corrección en la factura ${rcAct.factura}: ${[cambiaProd ? `producto ${i.codigo} → ${p.id}` : '', cambiaVen ? `vence ${i.vencimiento || '—'} → ${venc || '—'}` : ''].filter(Boolean).join(' · ')}`;
+        for (const et of i.etiquetas) {
+          corregidos.push(await llamar('bdEditarEtiqueta', { etiquetaId: et, codigo: cambiaProd ? p.id : undefined, vencimiento: cambiaVen ? venc : undefined, motivo, usuario: ses.nombre }));
+        }
+      }
+      const r = await llamar('bdGuardarItem', { id, recepcionId: rcAct.id, codigo: p.id, tipo: i.tipo, partes: i.partes, etiquetas: i.etiquetas,
+        unidad: i.unidad, cantFactura: $('ciFac').value, cantRecibida: i.cantRecibida, lote: $('ciLote').value,
+        vencimiento: venc, novedad: $('ciNov').value });
+      rcAct = r; pintarApp();
+      if (corregidos.length) {
+        window.rcCorregidos = corregidos;
+        abrirModal(`<div class="fila-sb"><span class="h2">Corregido</span>${btnCerrar()}</div>
+          <span class="mt12">${corregidos.length === 1 ? 'El rótulo quedó' : `Los ${corregidos.length} rótulos quedaron`} con los datos nuevos. Imprímel${corregidos.length === 1 ? 'o' : 'os'} y cámbial${corregidos.length === 1 ? 'o' : 'os'} en la estiba.</span>
+          <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Después</button>
+            <button class="btn btn-pri btn-xl" onclick="cerrarModal(); imprimirRotulo(rcCorregidos, 1, leerLS('rtTam') || 'carta')">Imprimir ahora</button></div>`);
+      } else { cerrarModal(); toast('Corregido', 'ok'); }
+    } catch (e) { errForm(e.message); b.disabled = false; b.textContent = 'Guardar'; }
   }
 
   // Otra línea del mismo producto (otro vencimiento): arranca un borrador nuevo de ese producto
@@ -2430,7 +2520,7 @@
 
   window.addEventListener('resize', () => {
     if (pantalla === 'app' && esAncho() !== anchoPrevio && $('modal').hidden) pintarApp();
-    else ajustarPlano();
+    else { ajustarPlano(); if ($('edLienzo')) edAjustar(); }
   });
 
   /* ================= USUARIOS Y PERMISOS (administrador) ================= */
@@ -2575,8 +2665,8 @@
 
   /* ----- Perfiles ----- */
   function tablaPerfiles() {
-    if (pfFalta) return `<div class="card col gap8 card-aviso"><span class="h3">Falta un paso en Supabase</span>
-      <span>Para crear perfiles corre el script <b>21_perfiles.sql</b> en Supabase → SQL Editor, y vuelve a entrar a Usuarios.</span></div>`;
+    if (pfFalta) return `<div class="card col gap8 card-aviso"><span class="h3">Los perfiles no están disponibles</span>
+      <span>Pídele al administrador del sistema que active los perfiles.</span></div>`;
     const pg = paginar('pf', pfLista, pintarApp);
     return `<div class="card col gap8 pf-ayuda">
         <span><b>¿Cómo se usa?</b> 1) Crea el perfil con sus permisos (por ejemplo <i>Montacarguista</i>). 2) En la pestaña <b>Usuarios</b> marca a las personas
@@ -3044,8 +3134,8 @@
     let h = '';
     if (!sede.zonas.length) {
       return h + `<div class="card col gap12 mt12"><span class="h3">Esta sede no tiene plano todavía</span>
-        <span class="muted">El plano de la Bodega 12C está en la primera sede.${puede('config') ? ' Aquí puedes crear zonas y racks a mano.' : ''}</span>
-        ${puede('config') ? `<button class="btn btn-pri" onclick="irVista('config')">Crear zonas</button>` : ''}</div>`;
+        <span class="muted">${puede('config') ? 'Dibújalo en Configuración → Editor del plano: zonas, filas y paredes.' : 'Pídele a quien maneja el plano que lo dibuje.'}</span>
+        ${puede('config') ? `<button class="btn btn-pri" onclick="cfgTab='editor'; irVista('config')">Dibujar el plano</button>` : ''}</div>`;
     }
     if (esJefe()) h += kpis();
     h += `<div class="fila-sb wrap-f gap8 mt12">${leyenda()}
@@ -3137,7 +3227,7 @@
         let celdas = '';
         for (let p = inicio; p < inicio + t.pos && p <= r.posiciones; p++) celdas += celdaHtml(r, p, 'pc');
         inicio += t.pos;
-        return `<div class="pr V" style="left:${t.x}px;top:${t.y}px;width:${t.ancho || grueso}px;height:${t.largo}px">${num ? `<span class="fila-lbl">F${Number(num)}</span>` : ''}${celdas}</div>`;
+        return `<div class="pr V${r.invertida ? ' inv' : ''}" style="left:${t.x}px;top:${t.y}px;width:${t.ancho || grueso}px;height:${t.largo}px">${num ? `<span class="fila-lbl">F${Number(num)}</span>` : ''}${celdas}</div>`;
       }).join('');
     }
     const grueso = r.fondo === 'D' ? 44 : 20; // doble fondo se dibuja más ancho
@@ -3148,7 +3238,7 @@
       r.pasillos.filter(k => k === p).forEach(() => celdas += '<span class="pasillo" aria-hidden="true"></span>');
     }
     const num = (r.id.match(/F(\d+)$/) || [])[1];
-    return `<div class="pr ${o}" style="left:${x}px;top:${y}px;${tam}">${num ? `<span class="fila-lbl">F${Number(num)}</span>` : ''}${celdas}</div>`;
+    return `<div class="pr ${o}${r.invertida ? ' inv' : ''}" style="left:${x}px;top:${y}px;${tam}">${num ? `<span class="fila-lbl">F${Number(num)}</span>` : ''}${celdas}</div>`;
   }
 
   // Una posición: una franja por nivel (arriba el más alto), cada franja dividida en A / B
@@ -3169,10 +3259,15 @@
       return `<button class="${clase} sin ${sel} ${dim}" onclick="abrirPos('${esc(r.id)}', ${p})" aria-label="${nombre}, sin niveles" title="${nombre}">${clase === 'pos' ? p : ''}</button>`;
     }
     const niveles = [...new Set(esps.map(e => e.nivel))].sort((a, b) => b - a);
-    return `<button class="${clase} ${sel} ${dim}" onclick="abrirPos('${esc(r.id)}', ${p})" aria-label="${nombre}" title="${nombre}">
+    // Al pasar el mouse (o dejar el dedo) se ve qué hay en cada espacio
+    const det = [...esps].sort((a, b) => b.nivel - a.nivel || a.lado.localeCompare(b.lado))
+      .map(e => { const ls = lineasDe(e.id); return ls.length ? `${etiqueta(e)}: ${ls.map(l => l.nombre).join(' + ')}` : ''; })
+      .filter(Boolean);
+    const tit = esc(r.nombre + ' · posición ' + p + (det.length ? '\n' + det.join('\n') : ' · vacía'));
+    return `<button class="${clase} ${sel} ${dim}" onclick="abrirPos('${esc(r.id)}', ${p})" aria-label="${tit}" title="${tit}">
       ${niveles.map(n => `<span class="franja ${n === 0 ? 'pk' : ''}">${esps.filter(e => e.nivel === n)
         .sort((a, b) => a.lado.localeCompare(b.lado))
-        .map(e => `<i class="e-${estadoDe(lineasDe(e.id))}"></i>`).join('')}</span>`).join('')}
+        .map(e => `<i class="e-${sede.bloqueos[e.id] ? 'bloq' : estadoDe(lineasDe(e.id))}${lineasDe(e.id).length > 1 ? ' multi' : ''}"></i>`).join('')}</span>`).join('')}
     </button>`;
   }
 
@@ -3445,17 +3540,18 @@
         <td class="num">${nInv(f.bloqueado)}</td>
         <td class="num fuerte">${nInv(f.planta)}</td>
         <td class="num"><span class="dif ${difCls(f.dif)}">${f.dif > 0 ? '+' : ''}${nInv(f.dif)}</span></td>
+        <td class="ec-td">${f.ult && puede('inv_contar') ? btnEditarConteo(f) : ''}</td>
       </tr>`).join('');
     return `<div class="muted small">${l.length} de ${todos.length} productos · <b class="${con ? 'txt-rojo' : ''}">${con}</b> con diferencia</div>
       <div class="tabla-wrap mt8"><table class="tabla inv-tabla">
         <thead>
-          <tr class="inv-grupos"><th colspan="4"></th><th colspan="4" class="g-sap">SAP</th><th colspan="5">Planta (conteo + plano)</th><th></th></tr>
+          <tr class="inv-grupos"><th colspan="4"></th><th colspan="4" class="g-sap">SAP</th><th colspan="5">Planta (conteo + plano)</th><th></th><th></th></tr>
           <tr><th>Cód. Nutresa</th><th>Cód. Atlantic</th><th>Producto</th><th>Unidad</th>
             <th class="num g-sap">Inventario</th><th class="num g-sap">Calidad</th><th class="num g-sap">Bloqueado</th><th class="num g-sap">Total</th>
             <th class="num">Picking</th><th class="num">Aéreo</th><th class="num">Calidad</th><th class="num">Bloqueado</th><th class="num">Total</th>
-            <th class="num">Diferencia</th></tr>
+            <th class="num">Diferencia</th><th><span class="sr">Corregir</span></th></tr>
         </thead>
-        <tbody>${filas || '<tr><td colspan="14" class="muted">No hay productos con ese filtro.</td></tr>'}</tbody></table></div>${pg.barra}`;
+        <tbody>${filas || '<tr><td colspan="15" class="muted">No hay productos con ese filtro.</td></tr>'}</tbody></table></div>${pg.barra}`;
   }
 
   function enlazarInventario() {
@@ -3642,7 +3738,7 @@
       if (!$('histInv')) return;
       const pg = paginar('histInv', h, () => pintar(h));
       $('histInv').innerHTML = h.length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Fecha</th><th>Lugar</th><th>Tipo</th><th class="num">Cantidad</th><th>Quién</th></tr></thead>
-        <tbody>${pg.filas.map(c => `<tr><td class="nowrap">${fechaHora(c.fecha)}</td><td>${esc(c.ubicacion)}</td><td>${TIPOS_CONTEO.find(t => t[0] === c.tipo)[1]}</td>
+        <tbody>${pg.filas.map(c => `<tr class="${c.anulado ? 'ec-anulado' : ''}"><td class="nowrap">${fechaHora(c.fecha)}</td><td>${esc(c.ubicacion)}</td><td>${TIPOS_CONTEO.find(t => t[0] === c.tipo)[1]}${tagAnulado(c)}</td>
           <td class="num">${nInv(c.cantidad)}</td><td>${esc(c.usuario || '—')}</td></tr>`).join('')}</tbody></table></div>${pg.barra}`
         : '<p class="muted small">Todavía no hay conteos de este producto.</p>';
     }).catch(e => { if ($('histInv')) $('histInv').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
@@ -4398,20 +4494,21 @@
             <td class="small g-rc">${esc(f.rc.ult.usuario || '—')}<span class="muted"> · ${fechaHora(f.rc.ult.fecha)}</span></td>`
           : f.rc ? `<td class="g-rc small muted" colspan="4">Pendiente · ${esc(f.rc.asignados)}</td>` : '<td class="g-rc" colspan="4"></td>') : ''}
         <td class="small">${f.ult ? `${esc(f.ult.usuario || '—')}<span class="muted"> · ${fechaHora(f.ult.fecha)}</span>` : '—'}</td>
+        ${contar ? `<td class="ec-td">${f.contado ? btnEditarConteo(f) : ''}</td>` : ''}
       </tr>`).join('');
     const hechos = todos.filter(f => f.listo).length, conDif = todos.filter(f => f.contado && f.dif).length;
-    const cols = (veSap ? 16 : 11) + (conRc ? 4 : 0) + (conAntes ? 2 : 0);
+    const cols = (veSap ? 16 : 11) + (conRc ? 4 : 0) + (conAntes ? 2 : 0) + (contar ? 1 : 0);
     return `<div class="muted small">${l.length} de ${todos.length} productos · <b>${hechos}</b> ${rc ? 'reconfirmados' : 'contados'} · <b class="${todos.length - hechos ? 'txt-naranja' : ''}">${todos.length - hechos}</b> pendientes${veSap ? ` · <b class="${conDif ? 'txt-rojo' : ''}">${conDif}</b> con diferencia` : ''}</div>
       <div class="tabla-wrap mt8"><table class="tabla inv-tabla">
         <thead>
-          <tr class="inv-grupos"><th colspan="5"></th>${veSap ? '<th colspan="4" class="g-sap">SAP' + (c && c.archivo ? ' (Excel del cíclico)' : '') + '</th>' : ''}<th colspan="5">${veSap ? (rc ? 'Planta (lo reconfirmado + plano)' : 'Planta (conteo del cíclico + plano)') : 'Lo contado'}</th>${veSap ? '<th></th>' : ''}${conAntes ? '<th colspan="2" class="g-rc">Contra lo que había</th>' : ''}${conRc ? '<th colspan="4" class="g-rc">Reconfirmación</th>' : ''}<th></th></tr>
+          <tr class="inv-grupos"><th colspan="5"></th>${veSap ? '<th colspan="4" class="g-sap">SAP' + (c && c.archivo ? ' (Excel del cíclico)' : '') + '</th>' : ''}<th colspan="5">${veSap ? (rc ? 'Planta (lo reconfirmado + plano)' : 'Planta (conteo del cíclico + plano)') : 'Lo contado'}</th>${veSap ? '<th></th>' : ''}${conAntes ? '<th colspan="2" class="g-rc">Contra lo que había</th>' : ''}${conRc ? '<th colspan="4" class="g-rc">Reconfirmación</th>' : ''}<th></th>${contar ? '<th></th>' : ''}</tr>
           <tr><th>Estado</th><th>Cód. Nutresa</th><th>Cód. Atlantic</th><th>Producto</th><th>Unidad</th>
             ${veSap ? '<th class="num g-sap">Inventario</th><th class="num g-sap">Calidad</th><th class="num g-sap">Bloqueado</th><th class="num g-sap">Total</th>' : ''}
             <th class="num">Picking</th><th class="num">Aéreo</th><th class="num">Calidad</th><th class="num">Bloqueado</th><th class="num">Total</th>
             ${veSap ? '<th class="num">Diferencia</th>' : ''}
             ${conAntes ? '<th class="num g-rc">Había (conteo anterior)</th><th class="num g-rc">Dif. vs anterior</th>' : ''}
             ${conRc ? '<th class="num g-rc">Reconfirmado</th><th class="num g-rc">Dif. reconf. vs SAP</th><th class="num g-rc">Dif. reconf. vs conteo</th><th class="g-rc">Reconfirmó</th>' : ''}
-            <th>Contó</th></tr>
+            <th>Contó</th>${contar ? '<th><span class="sr">Corregir</span></th>' : ''}</tr>
         </thead>
         <tbody>${filas || `<tr><td colspan="${cols}" class="muted">No hay productos con ese filtro.</td></tr>`}</tbody></table></div>${pg.barra}`;
   }
@@ -4434,6 +4531,104 @@
     invProdInfo();
     $('invLug').closest('.inv-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (!sede.espPorId[invForm.ubic]) $('invLug').focus({ preventScroll: true }); else $('invCPICKING').focus({ preventScroll: true });
+  }
+
+  /* ----- Corregir lo contado (Inventario o cíclico): cantidades, otro producto o eliminar ----- */
+  const btnEditarConteo = f => `<button class="ec-btn" onclick="event.stopPropagation(); editarConteos('${esc(f.cod)}')" title="Corregir o eliminar lo contado" aria-label="Corregir o eliminar lo contado de ${esc(f.p ? f.p.nombre : f.cod)}">✎</button>`;
+  const tagAnulado = c => c.anulado ? ` <span class="tag venc" title="Eliminado por ${esc(c.anuladoPor || '—')}${c.anuladoEn ? ' el ' + esc(fechaHora(c.anuladoEn)) : ''}">Eliminado</span>` : '';
+  let ec = null;   // { cod, conf: índice que pide confirmar eliminar, otro: índice que cambia de producto }
+  function ecFuente() {
+    const enCic = prodTab === 'ciclico' && cicData ? cicData.ciclico : null;
+    return { enCic, conteos: enCic ? cicData.conteos : ((invData && invData.conteos) || []) };
+  }
+  function ecLugares() {
+    const m = {};
+    ecFuente().conteos.filter(c => c.codigo === ec.cod).forEach(c => {
+      const l = m[c.ubicacion] || (m[c.ubicacion] = { ubic: c.ubicacion, PICKING: 0, CALIDAD: 0, BLOQUEADO: 0, usuario: '', fecha: '' });
+      l[c.tipo] = c.cantidad;
+      if (c.fecha > l.fecha) { l.fecha = c.fecha; l.usuario = c.usuario; }
+    });
+    return Object.values(m).sort((a, b) => a.ubic.localeCompare(b.ubic));
+  }
+  function editarConteos(cod) { ec = { cod, conf: -1, otro: -1 }; pintarEc(); }
+  function pintarEc() {
+    const { enCic } = ecFuente(), p = prodDe(ec.cod), ls = ecLugares();
+    if (!ls.length) { cerrarModal(); ec = null; return; }
+    const lugarTxt = id => { const e = sede.espPorId[id]; const r = e && sede.rackPorId[e.rackId]; return e ? `${esc(etiqueta(e))} · ${esc(r ? r.nombre : '')} P${e.posicion}` : esc(id); };
+    abrirModal(`<div class="fila-sb"><span class="h2">Corregir lo contado</span>${btnCerrar()}</div>
+      <div class="info mt8"><span class="fuerte">${esc(p ? p.nombre : ec.cod)}</span>
+        <span class="muted small">Nutresa ${esc(p ? p.codigoNutresa || '—' : '—')} · Atlantic ${esc(ec.cod)}${enCic ? ` · ${esc(nombreCic(enCic))} del ${fCorta(enCic.fecha)}` : ' · Inventario'}</span></div>
+      <span class="muted small mt8">Cambia las cantidades y toca <b>Guardar</b>. Si se contó un producto que no era, toca <b>Era otro producto</b>.
+        Si fue una prueba o un error, <b>Eliminar</b>. Todo queda en el historial con tu nombre.</span>
+      ${ls.map((l, i) => `<div class="ec-lugar mt12">
+        <div class="fila-sb wrap-f gap8"><span class="fuerte">${lugarTxt(l.ubic)} <span class="muted small mono-c">${esc(l.ubic)}</span></span>
+          <span class="muted small">Contó ${esc(l.usuario || '—')} · ${fechaHora(l.fecha)}</span></div>
+        <div class="inv-grid3 mt8">${TIPOS_CONTEO.map(([k, t]) => `<div><label class="lbl" for="ec${k}${i}">${t}</label>
+          <input id="ec${k}${i}" class="campo" type="number" inputmode="decimal" min="0" step="any" value="${l[k]}"></div>`).join('')}</div>
+        ${ec.otro === i ? `<div class="ec-otro mt8"><label class="lbl" for="ecProd${i}">¿Cuál producto era? Se pasan estas cantidades a ese producto, en el mismo lugar.</label>
+            ${campoConCamara(`<input id="ecProd${i}" class="campo" list="dlProductos" autocomplete="off" spellcheck="false" placeholder="Escanea, escribe o elige">`, 'ecProd' + i)}
+            <div class="fila gap8 mt8 wrap-f"><button class="btn btn-sec" onclick="ec.otro=-1; pintarEc()">Cancelar</button>
+              <button class="btn btn-pri" onclick="ecCambiarProducto(${i}, this)">Pasar a ese producto</button></div></div>`
+        : ec.conf === i ? `<div class="fila gap8 mt8 wrap-f ec-conf"><span class="small fuerte">¿Eliminar lo contado aquí (picking, calidad y bloqueado)?</span>
+            <button class="btn btn-sec btn-mini" onclick="ec.conf=-1; pintarEc()">No</button>
+            <button class="btn btn-sal btn-mini" onclick="ecEliminar(${i}, this)">Sí, eliminar</button></div>`
+        : `<div class="fila gap8 mt8 wrap-f"><button class="btn btn-pri btn-mini" onclick="ecGuardar(${i}, this)">Guardar</button>
+            <button class="btn btn-sec btn-mini" onclick="ec.otro=${i}; ec.conf=-1; pintarEc(); setTimeout(() => $('ecProd${i}') && $('ecProd${i}').focus(), 50)">Era otro producto</button>
+            <button class="btn btn-sal btn-mini" onclick="ec.conf=${i}; ec.otro=-1; pintarEc()">Eliminar</button></div>`}
+      </div>`).join('')}
+      <p id="fErr" class="error" hidden></p>`, 'modal-ancho');
+  }
+  function ecCantidades(i) {
+    const c = {};
+    for (const [k, t] of TIPOS_CONTEO) {
+      const v = $(`ec${k}${i}`).value.trim().replace(',', '.'), n = Number(v);
+      if (v === '' || !(n >= 0)) { $(`ec${k}${i}`).focus(); errForm(`Llena ${t.toLowerCase()} (0 si no hay).`); return null; }
+      c[k] = n;
+    }
+    return c;
+  }
+  // Vuelve a traer los conteos y repinta la tabla y la ventana
+  function ecRefrescar() {
+    const { enCic } = ecFuente();
+    const p = enCic ? llamar('bdCiclico', enCic.id).then(d => { if (cicSel === d.ciclico.id) cicData = d;
+        const x = (cicLista || []).find(y => y.id === d.ciclico.id); if (x) x.contados = datosCiclico().filter(f => f.listo).length;
+        if ($('cicLista')) $('cicLista').innerHTML = listaCiclicos(); pintarCicTabla();
+        const cc = document.querySelector('.cic-progreso b'); if (cc) { const dd = datosCiclico(); cc.textContent = `${dd.filter(f => f.listo).length} de ${dd.length}`; } })
+      : llamar('bdInventarioGeneral', ses.sedeId).then(d => { invData = d; if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); });
+    return p.then(() => { if (ec) { ec.conf = -1; ec.otro = -1; pintarEc(); } });
+  }
+  function ecGuardar(i, b) {
+    const l = ecLugares()[i], c = ecCantidades(i);
+    if (!l || !c) return;
+    if (TIPOS_CONTEO.every(([k]) => c[k] === l[k])) return errForm('No cambiaste ninguna cantidad.');
+    const { enCic } = ecFuente();
+    b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: l.ubic, codigo: ec.cod, cantidades: c, usuario: ses.nombre, ciclicoId: enCic ? enCic.id : null })
+      .then(() => { toast('Conteo corregido', 'ok'); return ecRefrescar(); })
+      .catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Guardar'; });
+  }
+  function ecCambiarProducto(i, b) {
+    const l = ecLugares()[i], c = ecCantidades(i);
+    if (!l || !c) return;
+    const p2 = buscarProducto($('ecProd' + i).value);
+    if (!p2) return errForm('Escribe o escanea el producto correcto.');
+    if (p2.id === ec.cod) return errForm('Es el mismo producto. Si solo cambian las cantidades, usa Guardar.');
+    const { enCic } = ecFuente();
+    if (enCic && !enCic.codigos.includes(p2.id)) return errForm(`${p2.nombre} no está en ${esReconf(enCic) ? 'esta reconfirmación' : 'este cíclico'}. Pídele al encargado que lo incluya en uno nuevo.`);
+    b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: l.ubic, codigo: p2.id, cantidades: c, usuario: ses.nombre, ciclicoId: enCic ? enCic.id : null })
+      .then(() => llamar('bdAnularConteos', { sedeId: ses.sedeId, codigo: ec.cod, ubicacionId: l.ubic, ciclicoId: enCic ? enCic.id : null, usuario: ses.nombre }))
+      .then(() => { toast(`Listo: lo de ${l.ubic} quedó en ${p2.nombre}`, 'ok'); return ecRefrescar(); })
+      .catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Pasar a ese producto'; });
+  }
+  function ecEliminar(i, b) {
+    const l = ecLugares()[i];
+    if (!l) return;
+    const { enCic } = ecFuente();
+    b.disabled = true; b.textContent = 'Eliminando…';
+    llamar('bdAnularConteos', { sedeId: ses.sedeId, codigo: ec.cod, ubicacionId: l.ubic, ciclicoId: enCic ? enCic.id : null, usuario: ses.nombre })
+      .then(() => { toast(`Conteo de ${l.ubic} eliminado`, 'ok'); return ecRefrescar(); })
+      .catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Sí, eliminar'; });
   }
 
   // Historial de Inventario: quién va contando (solo Inventario, sin cíclicos)
@@ -4464,9 +4659,9 @@
     const pg = paginar('hc', l, pintarHc);
     $('hcCaja').innerHTML = l.length ? `<div class="muted small">${l.length} conteo${l.length === 1 ? '' : 's'}</div>
       <div class="tabla-wrap mt8"><table class="tabla"><thead><tr><th>Fecha</th><th>Quién</th><th>Producto</th><th>Lugar</th><th>Tipo</th><th class="num">Cantidad</th></tr></thead>
-      <tbody>${pg.filas.map(c => { const p = prodDe(c.codigo); return `<tr><td class="nowrap">${fechaHora(c.fecha)}</td><td>${esc(c.usuario || '—')}</td>
+      <tbody>${pg.filas.map(c => { const p = prodDe(c.codigo); return `<tr class="${c.anulado ? 'ec-anulado' : ''}"><td class="nowrap">${fechaHora(c.fecha)}</td><td>${esc(c.usuario || '—')}</td>
         <td><b>${esc(c.codigo)}</b> <span class="muted small">${esc(p ? p.nombre : '')}</span></td><td>${esc(c.ubicacion)}</td>
-        <td>${(TIPOS_CONTEO.find(t => t[0] === c.tipo) || [0, c.tipo])[1]}</td><td class="num">${nInv(c.cantidad)}</td></tr>`; }).join('')}</tbody></table></div>${pg.barra}`
+        <td>${(TIPOS_CONTEO.find(t => t[0] === c.tipo) || [0, c.tipo])[1]}${tagAnulado(c)}</td><td class="num">${nInv(c.cantidad)}</td></tr>`; }).join('')}</tbody></table></div>${pg.barra}`
       : '<p class="muted">No hay conteos con ese filtro.</p>';
   }
 
@@ -4479,7 +4674,8 @@
     pagInicio('hcc');
     llamar('bdHistorialCiclico', c.id).then(h => {
       const tx = { OK: 'Aéreo: está bien', CORREGIDO: 'Aéreo: corregido', NO_ESTA: 'Aéreo: no estaba' };
-      const filas = h.conteos.map(x => ({ fecha: x.fecha, quien: x.usuario, cod: x.codigo, lugar: x.ubicacion, que: (TIPOS_CONTEO.find(t => t[0] === x.tipo) || [0, x.tipo])[1], cant: nInv(x.cantidad) }))
+      const filas = h.conteos.map(x => ({ fecha: x.fecha, quien: x.usuario, cod: x.codigo, lugar: x.ubicacion, que: (TIPOS_CONTEO.find(t => t[0] === x.tipo) || [0, x.tipo])[1]
+          + (x.anulado ? ` · eliminado por ${x.anuladoPor || '—'}${x.anuladoEn ? ' el ' + fechaHora(x.anuladoEn) : ''}` : ''), cant: nInv(x.cantidad) }))
         .concat(h.validaciones.map(v => ({ fecha: v.fecha, quien: v.usuario, cod: v.productoId, lugar: v.ubicacion, que: tx[v.accion] + (v.lote ? ` · rótulo ${v.lote}` : ''),
           cant: v.accion === 'OK' ? nInv(v.antes) : `${nInv(v.antes)} → ${nInv(v.despues)}${v.motivo ? ' · ' + v.motivo : ''}` })))
         .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
@@ -4886,7 +5082,9 @@
         <td>${e.ultimoImpresor ? `${esc(e.ultimoImpresor)}<br><span class="muted small nowrap">${fechaHora(e.ultimaImpresion)}</span>` : '<span class="muted">—</span>'}</td>
         <td>${esc(e.creadoPor || '—')}${e.responsable && e.responsable !== e.creadoPor ? `<br><span class="muted small">Resp.: ${esc(e.responsable)}</span>` : ''}</td>
         <td class="rt-acc"><span class="rt-acc-btns">${e.estado === 'ANULADA' ? '' : `<button class="btn ${nunca ? 'btn-pri' : 'btn-sec'} btn-mini" onclick="reimprimir(${i})">${nunca ? 'Imprimir' : 'Reimprimir'}</button>`}
-          ${puede('rotular') && e.estado !== 'ANULADA' ? `<button class="btn btn-sec btn-mini" onclick="duplicarRotulo(${i})" title="Otra estiba con la misma información y otro código">Duplicar</button>` : ''}</span></td>
+          ${puede('rotular') && e.estado !== 'ANULADA' ? `<button class="btn btn-sec btn-mini" onclick="duplicarRotulo(${i})" title="Otra estiba con la misma información y otro código">Duplicar</button>` : ''}
+          ${puede('rotular') && (e.estado === 'PENDIENTE' || e.estado === 'UBICADA') ? `<button class="btn btn-sec btn-mini" onclick="editarRotulo(${i})" title="Corregir producto, cantidad o fechas">Editar</button>` : ''}
+          ${puede('rotular') && e.estado === 'PENDIENTE' ? `<button class="btn btn-sec btn-mini txt-rojo" onclick="anularRotulo(${i})" title="Se creó por error: no se podrá ubicar">Anular</button>` : ''}</span></td>
       </tr>`;
     }).join('');
     const sinImp2 = rotulos.filter(noImpreso).length;
@@ -5085,6 +5283,96 @@
 
   function reimprimir(i) { imprimirRotulo([rotulos[i]], 1, leerLS('rtTam') || 'carta'); }
 
+  /* ----- Corregir o anular un rótulo hecho por error ----- */
+  function editarRotulo(i) {
+    const e = rotulos[i];
+    if (!e || sinPermiso('rotular')) return;
+    const peso = e.tipo === 'PESO', ub = e.estado === 'UBICADA';
+    abrirModal(`<div class="fila-sb"><span class="h2">Corregir rótulo ${esc(e.id)}</span>${btnCerrar()}</div>
+      ${ub ? `<div class="alerta-fefo mt8">Está ubicado en <b>${esc(e.ubicacion)}</b>: si cambias la cantidad o el vencimiento, también se corrige en el plano.
+        El producto no se puede cambiar; si era otro, sácalo del plano y crea un rótulo nuevo.</div>` : ''}
+      <label class="lbl mt12" for="erProd">Producto</label>
+      ${ub ? `<div class="info"><span class="fuerte">${esc(e.producto)}</span><span class="muted small">Atlantic ${esc(e.codigo)} · Nutresa ${esc(e.codigoNutresa || '—')}</span></div>`
+        : campoConCamara(`<input id="erProd" class="campo" list="dlProductos" autocomplete="off" spellcheck="false" value="${esc(e.codigo + ' · ' + e.producto)}">`, 'erProd')}
+      ${peso ? `<div class="dos mt12"><div><label class="lbl" for="erTot">Peso total (kg)</label><input id="erTot" class="campo" type="number" inputmode="decimal" min="0" step="any" value="${e.total}"></div>
+          <div><label class="lbl" for="erCajas">Cavas</label><input id="erCajas" class="campo" type="number" inputmode="numeric" min="0" step="1" value="${e.cajas}"></div></div>`
+        : `<div class="dos mt12"><div><label class="lbl" for="erCajas">Cajas</label><input id="erCajas" class="campo" type="number" inputmode="numeric" min="0" step="1" value="${e.cajas}"></div>
+          <div><label class="lbl" for="erEmb">Unidades por caja</label><input id="erEmb" class="campo" type="number" inputmode="numeric" min="1" step="1" value="${e.embalaje}"></div></div>
+          <span id="erTotTxt" class="muted small">Total: ${e.total} und</span>`}
+      <div class="dos mt12"><div><label class="lbl" for="erRec">Fecha de recibo</label><input id="erRec" class="campo" type="date" value="${esc(e.recibo || '')}"></div>
+        <div><label class="lbl" for="erVen">Vencimiento</label><input id="erVen" class="campo" type="date" value="${esc(e.vencimiento || '')}"></div></div>
+      <label class="lbl mt12" for="erMot">¿Por qué se corrige?</label>
+      <input id="erMot" class="campo" placeholder="Ej. Eran 8 cajas, no 10" autocomplete="off">
+      <p id="fErr" class="error" hidden></p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+        <button id="erOk" class="btn btn-pri btn-xl" onclick="guardarRotuloEditado(${i})">Guardar corrección</button></div>
+      <div id="erCambios" class="mt12"></div>`);
+    if (!peso) { const t = () => { $('erTotTxt').textContent = `Total: ${(Number($('erCajas').value) || 0) * (Number($('erEmb').value) || 0)} und`; };
+      $('erCajas').addEventListener('input', t); $('erEmb').addEventListener('input', t);
+      // Si se cambia a otro producto, se ponen sus unidades por caja
+      if ($('erProd')) $('erProd').addEventListener('change', () => {
+        const p = buscarProducto($('erProd').value.split(' · ')[0]) || buscarProducto($('erProd').value);
+        if (p && p.id !== e.codigo && p.undPorCaja) { $('erEmb').value = p.undPorCaja; t(); }
+      }); }
+    llamar('bdCambiosEtiqueta', e.id).then(l => {
+      if (!l.length || !$('erCambios')) return;
+      $('erCambios').innerHTML = `<span class="h3">Cambios anteriores</span>${l.map(c => `<div class="small mt4">${fechaHora(c.fecha)} · ${esc(c.usuario || '—')} · ${c.accion === 'ANULADO' ? 'Anulado' : 'Corregido'}${c.motivo ? ': ' + esc(c.motivo) : ''}</div>`).join('')}`;
+    }).catch(() => {});
+  }
+
+  function guardarRotuloEditado(i) {
+    const e = rotulos[i], peso = e.tipo === 'PESO', ub = e.estado === 'UBICADA';
+    const d = { etiquetaId: e.id, usuario: ses.nombre, motivo: $('erMot').value.trim(), recibo: $('erRec').value || null, vencimiento: $('erVen').value || null };
+    if (!ub) {
+      const p = buscarProducto($('erProd').value.split(' · ')[0]) || buscarProducto($('erProd').value);
+      if (!p) return errForm('Escribe o escanea el producto correcto.');
+      d.codigo = p.id;
+    }
+    const cajas = Number($('erCajas').value);
+    if (!(cajas > 0) || Math.round(cajas) !== cajas) return errForm(peso ? 'Escribe cuántas cavas son.' : 'Escribe cuántas cajas son (número entero).');
+    d.cajas = cajas;
+    if (peso) { d.total = Number(String($('erTot').value).replace(',', '.')); if (!(d.total > 0)) return errForm('Escribe el peso total.'); }
+    else { d.undXCaja = Number($('erEmb').value); if (!(d.undXCaja > 0)) return errForm('Escribe las unidades por caja.'); }
+    const igual = (d.codigo || e.codigo) === e.codigo && cajas === e.cajas && (peso ? d.total === e.total : d.undXCaja === e.embalaje)
+      && (d.recibo || '') === (e.recibo || '') && (d.vencimiento || '') === (e.vencimiento || '');
+    if (igual) return errForm('No cambiaste nada.');
+    if (!d.motivo) { $('erMot').focus(); return errForm('Escribe por qué se corrige.'); }
+    const b = $('erOk'); b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdEditarEtiqueta', d).then(n => {
+      rotulos[i] = Object.assign({}, e, n);
+      if ($('rtLista')) $('rtLista').innerHTML = listaRotulos();
+      if (ub) llamar('bdSede', ses.sedeId).then(setSede).catch(() => {});
+      window.rtCorregido = rotulos[i];
+      abrirModal(`<div class="fila-sb"><span class="h2">Rótulo corregido</span>${btnCerrar()}</div>
+        <span class="mt12">${esc(n.id)} quedó con los datos nuevos${ub ? ' (también en el plano)' : ''}. Imprímelo y cámbialo en la estiba: quedó en <b>sin imprimir</b> hasta que lo imprimas.</span>
+        <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Después</button>
+          <button class="btn btn-pri btn-xl" onclick="cerrarModal(); imprimirRotulo([rtCorregido], 1, leerLS('rtTam') || 'carta')">Imprimir ahora</button></div>`);
+    }).catch(err => { errForm(err.message); b.disabled = false; b.textContent = 'Guardar corrección'; });
+  }
+
+  function anularRotulo(i) {
+    const e = rotulos[i];
+    if (!e || sinPermiso('rotular')) return;
+    abrirModal(`<div class="fila-sb"><span class="h2">¿Anular el rótulo ${esc(e.id)}?</span>${btnCerrar()}</div>
+      <div class="info mt12"><span class="fuerte">${esc(e.producto)}</span>
+        <span class="muted small">${e.tipo === 'PESO' ? kg(e.total) + ' · ' + e.cajas + ' cavas' : e.cajas + ' cj · ' + e.total + ' und'} · vence ${fCorta(e.vencimiento)}</span></div>
+      <span class="small mt12">Queda en la tabla como <b>Anulado</b> y ya no se puede ubicar. Si lo imprimiste, bota el papel.</span>
+      <label class="lbl mt12" for="arMot">¿Por qué? (opcional)</label>
+      <input id="arMot" class="campo" placeholder="Ej. Se creó dos veces" autocomplete="off">
+      <p id="fErr" class="error" hidden></p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">No</button>
+        <button id="arOk" class="btn btn-sal btn-xl" onclick="confirmarAnularRotulo(${i})">Sí, anular</button></div>`);
+  }
+  function confirmarAnularRotulo(i) {
+    const e = rotulos[i], b = $('arOk'); b.disabled = true;
+    llamar('bdAnularEtiqueta', { etiquetaId: e.id, motivo: $('arMot').value.trim(), usuario: ses.nombre }).then(n => {
+      rotulos[i] = Object.assign({}, e, n);
+      rtSel.delete(e.id);
+      if ($('rtLista')) $('rtLista').innerHTML = listaRotulos();
+      cerrarModal(); toast(`Rótulo ${e.id} anulado`, 'ok');
+    }).catch(err => { errForm(err.message); b.disabled = false; });
+  }
+
   function rotuloHtml(e) {
     const peso = e.tipo === 'PESO';
     return `<div class="rotulo">
@@ -5225,7 +5513,7 @@
   function moverAqui(boton) {
     const m = moviendo;
     const esp = sede.espPorId[espSel];
-    if (lineasDe(esp.id).some(l => !(l.productoId === m.productoId && l.lote === m.lote)) && espacioLleno(esp.id)) return;
+    if (espacioLleno(esp.id, m)) return;
     boton.disabled = true; boton.textContent = 'Moviendo…';
     llamar('bdMover', { sedeId: ses.sedeId, origenId: m.origenId, destinoId: esp.id, productoId: m.productoId,
       lote: m.lote, cantidad: m.cantidad, unidad: m.unidad, usuario: ses.nombre })
@@ -5251,8 +5539,8 @@
     moviendo = null;
     // Lugar primero, rótulo después: el espacio que estaba elegido es el destino
     if (vista === 'mapa' && posSel && espSel && sede.espPorId[espSel]) {
-      if (!lineasDe(espSel).length) { pintarApp(); return pedirConfirmUbicar(e, espSel); }
-      toast(`${espSel} ya tiene producto. Escanea o toca otro lugar.`, 'error');
+      if (!sinCupo(espSel, { productoId: e.codigo, lote: e.id })) { pintarApp(); return pedirConfirmUbicar(e, espSel); }
+      toast(`${espSel} ya tiene ${maxEsp()} productos (el máximo). Escanea o toca otro lugar.`, 'error');
     }
     cerrarModal();
     vista = 'mapa';
@@ -5271,7 +5559,8 @@
     const esp = sede.espPorId[espId];
     if (!esp) return;
     const r = sede.rackPorId[esp.rackId];
-    const lleno = lineasDe(espId).length > 0;
+    const lleno = sinCupo(espId, { productoId: e.codigo, lote: e.id });
+    const yaHay = lineasDe(espId);
     abrirModal(`<div class="fila-sb"><span class="h2">Confirmar ubicación</span>${btnCerrar()}</div>
       <div class="conf-ub mt12">
         <div class="conf-q"><span class="muted small">Rótulo</span><b class="mono-c">${esc(e.id)}</b>
@@ -5282,7 +5571,8 @@
           <span class="fuerte">${esc(r ? r.nombre : '')} · Posición ${esp.posicion}</span>
           <span class="muted small mono-c">${esc(esp.id)}</span></div>
       </div>
-      ${lleno ? `<p class="error">Este espacio ya tiene producto (${esc(lineasDe(espId).map(l => l.nombre).join(', '))}). Elige otro.</p>` : ''}
+      ${lleno ? `<p class="error">Este espacio ya tiene ${yaHay.length} productos (${esc(yaHay.map(l => l.nombre).join(', '))}) y el máximo es ${maxEsp()}. Elige otro.</p>`
+        : yaHay.length ? `<p class="muted small">En este espacio ya está: ${esc(yaHay.map(l => l.nombre).join(', '))}. Quedará junto (${yaHay.length + 1} de ${maxEsp()}).</p>` : ''}
       <p id="fErr" class="error" hidden></p>
       <div class="dos mt16">
         <button class="btn btn-sec btn-xl" onclick="otroLugar()">Otro lugar</button>
@@ -5321,7 +5611,7 @@
     const m = moviendo, esp = sede.espPorId[espId];
     if (!m || !esp) return;
     const r = sede.rackPorId[esp.rackId];
-    const lleno = lineasDe(espId).some(l => !(l.productoId === m.productoId && l.lote === m.lote));
+    const lleno = sinCupo(espId, m);
     abrirModal(`<div class="fila-sb"><span class="h2">Confirmar traslado</span>${btnCerrar()}</div>
       <div class="conf-ub mt12">
         <div class="conf-q"><span class="muted small">Sale de</span><b class="mono-c">${esc(m.origenId)}</b>
@@ -5330,7 +5620,7 @@
         <div class="conf-q"><span class="muted small">Va a</span><b>${esc(etiqueta(esp))}</b>
           <span class="fuerte">${esc(r ? r.nombre : '')} · Posición ${esp.posicion}</span><span class="muted small mono-c">${esc(esp.id)}</span></div>
       </div>
-      ${lleno ? '<p class="error">Este espacio ya tiene otro producto. Elige otro.</p>' : ''}
+      ${lleno ? `<p class="error">Este espacio ya tiene ${maxEsp()} productos (el máximo). Elige otro.</p>` : ''}
       <p id="fErr" class="error" hidden></p>
       <div class="dos mt16">
         <button class="btn btn-sec btn-xl" onclick="otroLugar()">Otro lugar</button>
@@ -5346,7 +5636,7 @@
     if (sinPermiso('ubicar')) return;
     const esp = sede.espPorId[espSel];
     if (!esp) return toast('Toca primero el espacio (por ejemplo 2A)', 'error');
-    if (lineasDe(esp.id).length) return toast(`${etiqueta(esp)} ya tiene producto. Elige un espacio vacío.`, 'error');
+    if (espacioLleno(esp.id)) return;
     prLista = null;
     abrirModal(`<div class="fila-sb"><span class="h2">Poner en ${esc(etiqueta(esp))}</span>${btnCerrar()}</div>
       <span class="muted small mono-c">${esc(esp.id)}</span>
@@ -5421,7 +5711,7 @@
     if (sinPermiso('carga_manual')) return;
     const esp = sede.espPorId[espSel];
     if (!esp) return toast('Toca primero el espacio (por ejemplo 2A)', 'error');
-    if (lineasDe(esp.id).length) return toast(`${etiqueta(esp)} ya tiene producto. Elige un espacio vacío.`, 'error');
+    if (espacioLleno(esp.id)) return;
     const ultResp = leerLS('ultResp') || ses.nombre;
     abrirModal(`<div class="fila-sb"><span class="h2">Cargar en ${esc(etiqueta(esp))}</span>${btnCerrar()}</div>
       <span class="muted small">${esc(esp.id)} · Sin código de barras: la app le crea su identificador y queda en <b>Pendientes por imprimir</b> para pegarle el rótulo después.</span>
@@ -5546,7 +5836,7 @@
   function ponerAqui(boton) {
     const e = ubicando;
     const esp = sede.espPorId[espSel];
-    if (espacioLleno(esp.id)) return;
+    if (espacioLleno(esp.id, { productoId: e.codigo, lote: e.id })) return;
     boton.disabled = true; boton.textContent = 'Guardando…';
     llamar('bdUbicarEtiqueta', { sedeId: ses.sedeId, etiquetaId: e.id, ubicacionId: esp.id, usuario: ses.nombre })
       .then(d => {
@@ -5883,6 +6173,7 @@
 
   // Producto y lugar ya están: se muestra la confirmación de una vez
   function proponerEnEspacio(id) {
+    if ((ubicando || moviendo) && sede.bloqueos[id]) return toast(`${id} está bloqueado (${sede.bloqueos[id]}). Escoge otro espacio.`, 'error');
     if (ubicando) return pedirConfirmUbicar(ubicando, id);
     if (moviendo && id !== moviendo.origenId) return pedirConfirmMover(id);
   }
@@ -6152,10 +6443,13 @@
                   <div class="fr-lados" style="flex:1">${letras.map(l => {
                     const e = esps.find(x => x.nivel === n && x.lado === l);
                     if (!e) return '<span class="fr-no">No existe</span>';
-                    const ls = lineasDe(e.id);
-                    const res = !ls.length ? 'Vacío' : ls.length === 1 ? esc(ls[0].nombre) : ls.length + ' productos';
+                    if (sede.bloqueos[e.id]) return `<button class="fr-esp fr-bloq ${espSel === e.id ? 'sel' : ''}" onclick="selEsp('${esc(e.id)}')"
+                      aria-label="${esc(etiqueta(e))}: bloqueado, ${esc(sede.bloqueos[e.id])}" title="No se puede poner producto aquí"><b>${esc(etiqueta(e))}</b><span>⛔ ${esc(sede.bloqueos[e.id])}</span></button>`;
+                    const ls = fefo(lineasDe(e.id));
+                    const res = !ls.length ? 'Vacío' : ls.map(l => esc(l.nombre)).join(' · ');
                     return `<button class="fr-esp t-${estadoDe(ls)} ${espSel === e.id ? 'sel' : ''}" onclick="selEsp('${esc(e.id)}')"
-                      aria-label="${esc(etiqueta(e))}: ${res}"><b>${esc(etiqueta(e))}</b><span>${res}</span></button>`;
+                      aria-label="${esc(etiqueta(e))}: ${res}"><b>${esc(etiqueta(e))}${ls.length > 1 ? ` <small class="fr-cupo">${ls.length}/${maxEsp()}</small>` : ''}</b>${
+                      ls.length > 1 ? ls.map(l => `<span class="fr-prod">${esc(l.nombre)}</span>`).join('') : `<span>${res}</span>`}</button>`;
                   }).join('')}</div>
                 </div>`).join('')}
             </div>
@@ -6215,13 +6509,16 @@
     lista.forEach(e => fefo(lineasDe(e.id)).forEach(l => items.push({ l, e })));
     let h = `<div class="fila-sb"><span class="h3">${sel ? 'En ' + esc(etiqueta(sel)) : 'Productos en esta posición'}</span>
       ${sel ? `<button class="link" onclick="selEsp(null)">Ver todos</button>` : ''}</div>`;
-    if (sel && moviendo) h += sel.id === moviendo.origenId
+    if (sel && sede.bloqueos[sel.id]) h += `<span class="txt-naranja fuerte">⛔ ${esc(etiqueta(sel))} está bloqueado (${esc(sede.bloqueos[sel.id])}): aquí no se puede poner producto.</span>`;
+    else if (sel && moviendo) h += sel.id === moviendo.origenId
       ? `<span class="txt-naranja fuerte">Ese es el espacio de origen; elige otro.</span>`
       : `<button class="btn btn-pri btn-xl" onclick="moverAqui(this)">Mover aquí: ${moviendo.cantidad} ${moviendo.unidad === 'CAJA' ? 'cj' : 'und'} a ${esc(etiqueta(sel))}</button>`;
     else if (moviendo) h += `<span class="txt-naranja fuerte">Toca el espacio (por ejemplo 2A) a donde vas a mover ${esc(moviendo.nombre)}.</span>`;
     else if (sel && ubicando) h += `<button class="btn btn-ent-solido btn-xl" onclick="ponerAqui(this)">Poner aquí: ${ubicando.cajas} cj de ${esc(ubicando.producto)} en ${esc(etiqueta(sel))}</button>`;
-    else if (sel && !lineasDe(sel.id).length && (puede('ubicar') || puede('carga_manual'))) {
-      if (puede('ubicar')) h += `<button class="btn btn-ent-solido btn-xl" onclick="abrirPonerRotulo()">+ Poner un rótulo en ${esc(etiqueta(sel))}</button>`;
+    else if (sel && !sinCupo(sel.id) && (puede('ubicar') || puede('carga_manual'))) {
+      const n = lineasDe(sel.id).length;
+      if (n) h += `<span class="muted small">Aquí caben hasta ${maxEsp()} productos: van ${n}.</span>`;
+      if (puede('ubicar')) h += `<button class="btn btn-ent-solido btn-xl" onclick="abrirPonerRotulo()">+ ${n ? 'Agregar otro rótulo' : 'Poner un rótulo'} en ${esc(etiqueta(sel))}</button>`;
       if (puede('carga_manual')) h += `<button class="btn btn-sec btn-xl mt8" onclick="abrirCargaManual()">Cargar sin código de barras</button>`;
     }
     else if (ubicando) h += `<span class="txt-naranja fuerte">Toca el espacio (por ejemplo 2A) donde vas a poner ${esc(ubicando.producto)}.</span>`;
@@ -6266,7 +6563,36 @@
         <button class="btn btn-sec" onclick="abrirRackModal('${esc(r.id)}')">Niveles de todo el rack</button>
         ${vacia ? `<button class="btn btn-sal" onclick="desactivarPos()">Quitar esta posición</button>` : ''}
       </div>
+      ${bloqueoHtml(esps)}
     </div>`;
+  }
+
+  // Bloquear espacios que no se pueden usar (un aire acondicionado, una columna…): no deja poner producto ahí
+  function bloqueoHtml(esps) {
+    const e = espSel && sede.espPorId[espSel];
+    const bloqs = esps.filter(x => sede.bloqueos[x.id]);
+    return `<div class="col gap8 mt8"><span class="lbl">Espacios que no se pueden usar</span>
+      ${e ? (sede.bloqueos[e.id]
+        ? `<div class="fila gap8 wrap-f"><span class="small">⛔ <b>${esc(etiqueta(e))}</b> bloqueado: ${esc(sede.bloqueos[e.id])}</span>
+            <button class="btn btn-sec btn-mini" onclick="bloquear(['${esc(e.id)}'], null)">Desbloquear</button></div>`
+        : `<button class="btn btn-sec" onclick="pedirBloqueo(['${esc(e.id)}'], '${esc(etiqueta(e))}')">Bloquear ${esc(etiqueta(e))}</button>`)
+        : '<span class="muted small">Toca un espacio arriba para bloquearlo, o bloquea toda la posición.</span>'}
+      ${esps.length > bloqs.length ? `<button class="btn btn-sec" onclick="pedirBloqueo(${esc(JSON.stringify(esps.filter(x => !sede.bloqueos[x.id]).map(x => x.id)))}, 'toda la posición')">Bloquear toda la posición</button>` : ''}
+      ${bloqs.length > 1 ? `<button class="btn btn-sec" onclick="bloquear(${esc(JSON.stringify(bloqs.map(x => x.id)))}, null)">Desbloquear toda la posición</button>` : ''}
+    </div>`;
+  }
+  function pedirBloqueo(ids, que) {
+    abrirModal(`<div class="fila-sb"><span class="h2">Bloquear ${esc(que)}</span>${btnCerrar()}</div>
+      <span class="small mt8">Queda marcado en el plano y nadie puede poner producto ahí hasta que se desbloquee.</span>
+      <label class="lbl mt12" for="blMot">¿Por qué no se puede usar?</label>
+      <div class="fila gap8 wrap-f">${['Aire acondicionado', 'Columna', 'Tablero eléctrico', 'Daño en el rack'].map(t =>
+        `<button type="button" class="chip-btn" onclick="$('blMot').value='${t}'">${t}</button>`).join('')}</div>
+      <input id="blMot" class="campo mt8" placeholder="Escribe el motivo" autocomplete="off">
+      <p id="fErr" class="error" hidden></p>
+      <button class="btn btn-pri btn-xl mt16" onclick="if (!$('blMot').value.trim()) { $('blMot').focus(); return errForm('Escribe el motivo.'); } bloquear(${esc(JSON.stringify(ids))}, $('blMot').value.trim(), this)">Bloquear</button>`);
+  }
+  function bloquear(ids, motivo, boton) {
+    accion('bdBloquearEspacios', { sedeId: ses.sedeId, ids, motivo }, motivo ? 'Bloqueado: ya no se puede poner producto ahí' : 'Desbloqueado', boton);
   }
 
   // Llama al servidor, actualiza la sede y vuelve a pintar
@@ -6399,10 +6725,512 @@
 
   /* ================= Configuración (jefe) ================= */
   function vistaConfig() {
+    const tabs = [['editor', 'Editor del plano'], ['lista', 'Zonas y filas'], ['sedes', 'Sedes'], ['ajustes', 'Ajustes']];
+    return `<div class="col gap12">
+      <span class="h2">Configuración · ${esc(nombreSede(ses.sedeId))}</span>
+      <div class="tabs">${tabs.map(([k, t]) => `<button class="tab ${cfgTab === k ? 'on' : ''}" onclick="cfgTab='${k}'; pintarApp()">${t}</button>`).join('')}</div>
+      ${cfgTab === 'editor' ? vistaEditor() : cfgTab === 'sedes' ? vistaSedes() : cfgTab === 'ajustes' ? vistaAjustes() : vistaConfigLista()}
+    </div>`;
+  }
+
+  // Ajustes generales (aplican a todas las sedes)
+  function vistaAjustes() {
+    return `<div class="card col gap8" style="max-width:520px">
+      <span class="h3">Productos por espacio</span>
+      <span class="muted small">Cuántos productos distintos (o rótulos) se pueden poner en un mismo espacio, por ejemplo en 2A.
+        Si bajas el número, los espacios que ya tienen más se quedan como están, pero no reciben más hasta que se desocupen.</span>
+      <label class="lbl" for="ajMax">Máximo por espacio</label>
+      <div class="fila gap8"><input id="ajMax" type="number" min="1" max="20" step="1" class="campo" style="max-width:120px" value="${maxEsp()}">
+        <button class="btn btn-pri" onclick="guardarAjusteMax(this)">Guardar</button></div>
+    </div>`;
+  }
+  function guardarAjusteMax(boton) {
+    const v = Number($('ajMax').value);
+    if (!(v >= 1 && v <= 20) || Math.round(v) !== v) return toast('Escribe un número entero entre 1 y 20', 'error');
+    boton.disabled = true;
+    llamar('bdGuardarParametro', { clave: 'max_productos_espacio', valor: v, usuario: ses.nombre })
+      .then(p => { ini.parametros = p; toast(`Listo: ahora caben hasta ${maxEsp()} productos por espacio`, 'ok'); pintarApp(); })
+      .catch(e => { boton.disabled = false; toast(e.message, 'error'); });
+  }
+
+  /* ================= EDITOR DEL PLANO (en computador) ================= */
+  let cfgTab = 'editor';      // editor | lista | sedes | ajustes
+  let ed = null;              // borrador del plano mientras se dibuja
+  const ED_PASO = 5;          // todo se acomoda de a 5 puntos
+  const rej = v => Math.round(v / ED_PASO) * ED_PASO;
+  const ED_COLORES = ['#1F9BA6', '#C2185B', '#E65100', '#4A90D9', '#2E7D32', '#6A1B9A', '#F9A825', '#5D4037'];
+  const clon = o => JSON.parse(JSON.stringify(o));
+
+  function edDesdeSede() {
+    const zonas = sede.zonas.map(z => ({ id: z.id, nombre: z.nombre, color: z.color, x: z.x, y: z.y, ancho: z.ancho, alto: z.alto,
+      etqX: z.etqX, etqY: z.etqY, areas: clon(z.areas || []) }));
+    // Las zonas que no tenían lugar en el dibujo se ponen abajo, para acomodarlas
+    let h = 0;
+    zonas.forEach(z => { if (enPlano(z)) h = Math.max(h, z.y + z.alto); });
+    let fx = 20;
+    zonas.filter(z => !enPlano(z)).forEach(z => { Object.assign(z, { x: fx, y: h + 40, ancho: 300, alto: 220 }); fx += 330; });
+    const racks = [];
+    zonas.forEach(z => racksEnPlano(z).forEach(({ r, x, y, largo, o, tramos }) => racks.push({
+      id: r.id, zonaId: r.zonaId, nombre: r.nombre, posiciones: r.posiciones, fondo: r.fondo, orientacion: o === 'H' ? 'H' : 'V',
+      numeracion: r.invertida ? 'INVERTIDA' : 'NORMAL', x, y, largo, tramos: tramos ? clon(tramos) : null, nuevo: false })));
+    return { sedeId: ses.sedeId, zonas, racks, muros: clon(sede.muros || []), fondo: sede.fondo ? clon(sede.fondo) : null,
+      borrar: { zonas: [], racks: [] }, sel: null, herr: 'mover', zoom: null, cambios: false, sec: 1, fondoModo: false, fondoUrl: null };
+  }
+
+  function edIniciar() {
+    const guardado = leerLS('planoBorrador:' + ses.sedeId);
+    ed = guardado && guardado.sedeId === ses.sedeId ? Object.assign(guardado, { sel: null, herr: 'mover', fondoModo: false, fondoUrl: null, restaurado: true }) : edDesdeSede();
+    if (ed.fondo && ed.fondo.ruta) llamar('bdFondoUrl', ed.fondo.ruta).then(u => { if (ed) { ed.fondoUrl = u; edPintarLienzo(); } }).catch(() => {});
+  }
+  function edCambio() {
+    ed.cambios = true;
+    const { sel, herr, fondoModo, fondoUrl, arr, dibujo, ...guardar } = ed;
+    guardarLS('planoBorrador:' + ses.sedeId, guardar);
+    if ($('edEstado')) $('edEstado').innerHTML = edEstadoHtml();
+    document.querySelectorAll('.ed-barra .btn').forEach(b => { b.disabled = false; });
+  }
+  const edEstadoHtml = () => ed.cambios ? '<span class="ed-sin">● Cambios sin guardar</span>' : '<span class="muted small">Todo guardado</span>';
+
+  function edMedidas() {
+    let w = 1600, h = 900;
+    ed.zonas.forEach(z => { w = Math.max(w, z.x + z.ancho + 200); h = Math.max(h, z.y + z.alto + 150); });
+    ed.racks.forEach(r => (r.tramos || [r]).forEach(t => { w = Math.max(w, t.x + 300); h = Math.max(h, t.y + (t.largo || 0) + 150); }));
+    if (ed.fondo) { w = Math.max(w, ed.fondo.x + ed.fondo.ancho + 50); h = Math.max(h, ed.fondo.y + ed.fondo.alto + 50); }
+    return { w, h };
+  }
+
+  function vistaEditor() {
+    if (window.innerWidth < 1000) return `<div class="card col gap8"><span class="h3">El editor del plano se usa en un computador</span>
+      <span class="muted">Ábrelo desde un PC para dibujar zonas y filas. Desde aquí puedes usar la pestaña «Zonas y filas».</span></div>`;
+    if (!ed || ed.sedeId !== ses.sedeId) edIniciar();
+    const herr = (k, t, ayuda) => `<button class="ed-herr ${ed.herr === k ? 'on' : ''}" onclick="edHerr('${k}')" title="${ayuda}">${t}</button>`;
+    return `<div class="ed">
+      <div class="ed-barra">
+        <div class="fila gap4 wrap-f">${herr('mover', '✥ Mover y escoger', 'Toca algo para escogerlo y arrástralo para moverlo')}${herr('zona', '▭ + Zona', 'Arrastra en el dibujo para hacer el recuadro de la zona')}${herr('fila', '┃ + Fila', 'Traza la fila de punta a punta dentro de su zona')}${herr('muro', '╱ + Pared', 'Traza la pared o separación')}</div>
+        <button class="ed-herr ${ed.fondoModo ? 'on' : ''}" onclick="edFondo()" title="Imagen del plano para calcar encima">🖼 Imagen de fondo</button>
+        <div class="zoom" role="group" aria-label="Zoom"><button onclick="edZoom(1 / 1.25)" aria-label="Alejar">−</button><button onclick="edZoom(0)">Ajustar</button><button onclick="edZoom(1.25)" aria-label="Acercar">+</button></div>
+        <span class="flex1"></span>
+        <span id="edEstado">${edEstadoHtml()}</span>
+        <button id="edNo" class="btn btn-sec" onclick="edDescartar()" ${ed.cambios ? '' : 'disabled'}>Descartar</button>
+        <button id="edOk" class="btn btn-pri" onclick="edGuardar()" ${ed.cambios ? '' : 'disabled'}>Guardar cambios</button>
+      </div>
+      ${ed.restaurado && ed.cambios ? `<div class="alerta-fefo">Tienes cambios de la vez pasada que no guardaste. Puedes seguir con ellos y guardarlos, o tocar «Descartar».</div>` : ''}
+      <div class="ed-cuerpo">
+        <div class="ed-wrap" id="edWrap"><div class="ed-sizer" id="edSizer"><div class="ed-lienzo" id="edLienzo"></div></div></div>
+        <aside class="ed-panel card" id="edPanel">${edPanelHtml()}</aside>
+      </div>
+      <input id="edFondoArch" type="file" accept="image/*" class="oculto">
+    </div>`;
+  }
+
+  function edLienzoHtml() {
+    const { w, h } = edMedidas();
+    const s = ed.sel || {};
+    const esSel = (k, id) => s.k === k && s.id === id ? 'sel' : '';
+    let out = '';
+    if (ed.fondo && ed.fondoUrl) {
+      const f = ed.fondo;
+      out += `<img class="ed-fondo ${ed.fondoModo ? 'activo' : ''}" data-k="${ed.fondoModo ? 'fondo' : ''}" src="${esc(ed.fondoUrl)}" alt="" draggable="false"
+        style="left:${f.x}px;top:${f.y}px;width:${f.ancho}px;height:${f.alto}px;opacity:${f.opacidad ?? 0.5}">
+        ${ed.fondoModo ? `<span class="ed-h" data-k="fondo-tam" style="left:${f.x + f.ancho - 8}px;top:${f.y + f.alto - 8}px"></span>` : ''}`;
+    }
+    ed.zonas.forEach(z => {
+      [{ x: z.x, y: z.y, ancho: z.ancho, alto: z.alto }].concat(z.areas || []).forEach((a, i) => {
+        out += `<div class="ez ${esSel('zona', z.id)} ${i ? 'parte' : ''}" data-k="zona" data-id="${esc(z.id)}"
+          style="left:${a.x}px;top:${a.y}px;width:${a.ancho}px;height:${a.alto}px;border-color:${esc(z.color)};background:${hexA(z.color, .07)}"></div>`;
+      });
+      if (esSel('zona', z.id)) out += `<span class="ed-h" data-k="zona-tam" data-id="${esc(z.id)}" style="left:${z.x + z.ancho - 8}px;top:${z.y + z.alto - 8}px" title="Arrastra para cambiar el tamaño"></span>`;
+    });
+    ed.racks.forEach(r => {
+      const grueso = r.fondo === 'D' ? 44 : 20;
+      (r.tramos || [{ x: r.x, y: r.y, largo: r.largo, pos: r.posiciones }]).forEach((t, i) => {
+        const o = r.tramos ? 'V' : r.orientacion;
+        const paso = Math.max(3, t.largo / Math.max(1, t.pos));
+        const ancho = t.ancho || grueso;
+        out += `<div class="er ${o} ${esSel('fila', r.id)}" data-k="fila" data-id="${esc(r.id)}" title="${esc(r.nombre)} · ${r.posiciones} posiciones"
+          style="left:${t.x}px;top:${t.y}px;${o === 'V' ? `width:${ancho}px;height:${t.largo}px` : `height:${ancho}px;width:${t.largo}px`};
+          background:repeating-linear-gradient(${o === 'V' ? 'to bottom' : 'to right'}, var(--er) 0 ${paso - 1}px, var(--er-l) ${paso - 1}px ${paso}px)">
+          ${i === 0 ? `<span class="er-n">${esc(r.nombre.replace(/^Fila\s*/i, 'F'))}</span>` : ''}</div>`;
+      });
+      if (esSel('fila', r.id) && !r.tramos) {
+        const fx = r.orientacion === 'V' ? r.x + grueso / 2 - 7 : r.x + r.largo - 7, fy = r.orientacion === 'V' ? r.y + r.largo - 7 : r.y + grueso / 2 - 7;
+        out += `<span class="ed-h" data-k="fila-largo" data-id="${esc(r.id)}" style="left:${fx}px;top:${fy}px" title="Arrastra para alargar o acortar"></span>`;
+      }
+    });
+    ed.muros.forEach((m, i) => {
+      const [x1, y1, x2, y2] = m, lar = Math.hypot(x2 - x1, y2 - y1), ang = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+      out += `<div class="em ${esSel('muro', i)}" data-k="muro" data-id="${i}" style="left:${x1}px;top:${y1 - 3}px;width:${lar}px;transform:rotate(${ang}deg)"></div>`;
+      if (esSel('muro', i)) out += `<span class="ed-h" data-k="muro-a" data-id="${i}" style="left:${x1 - 7}px;top:${y1 - 7}px"></span><span class="ed-h" data-k="muro-b" data-id="${i}" style="left:${x2 - 7}px;top:${y2 - 7}px"></span>`;
+    });
+    ed.zonas.forEach(z => {
+      out += `<div class="ez-lbl ${esSel('zona', z.id)}" data-k="etq" data-id="${esc(z.id)}" style="left:${z.etqX ?? z.x + 6}px;top:${z.etqY ?? z.y + 6}px" title="Arrastra el nombre a donde no tape nada">${esc(z.nombre)}</div>`;
+    });
+    const d = ed.dibujo;
+    if (d) {
+      if (d.tipo === 'zona') out += `<div class="ed-prev" style="left:${Math.min(d.x1, d.x2)}px;top:${Math.min(d.y1, d.y2)}px;width:${Math.abs(d.x2 - d.x1)}px;height:${Math.abs(d.y2 - d.y1)}px"></div>`;
+      else {
+        const lar = Math.hypot(d.x2 - d.x1, d.y2 - d.y1), ang = Math.atan2(d.y2 - d.y1, d.x2 - d.x1) * 180 / Math.PI;
+        out += `<div class="ed-prev linea" style="left:${d.x1}px;top:${d.y1 - 2}px;width:${lar}px;transform:rotate(${ang}deg)"></div>`;
+      }
+    }
+    return { html: out, w, h };
+  }
+
+  function edPintarLienzo() {
+    const l = $('edLienzo');
+    if (!l) return;
+    const { html, w, h } = edLienzoHtml();
+    l.innerHTML = html;
+    if (ed.arr || ed.dibujo) return;   // mientras arrastra, el tamaño y el zoom no cambian (si no, se descuadra)
+    l.style.width = w + 'px'; l.style.height = h + 'px';
+    l.classList.toggle('dibujando', ed.herr !== 'mover');
+    edAjustar();
+  }
+  function edAjustar() {
+    const wrap = $('edWrap'), l = $('edLienzo'), sz = $('edSizer');
+    if (!wrap || !l) return;
+    const w = parseFloat(l.style.width), h = parseFloat(l.style.height);
+    const s = ed.zoom || Math.min(1, (wrap.clientWidth - 4) / w);
+    ed.escala = s;
+    l.style.transform = `scale(${s})`;
+    sz.style.width = w * s + 'px'; sz.style.height = h * s + 'px';
+  }
+  function edZoom(f) { ed.zoom = f === 0 ? null : Math.min(3, Math.max(0.2, (ed.escala || 1) * f)); edAjustar(); }
+  function edHerr(k) {
+    ed.herr = k; ed.fondoModo = false;
+    if (k !== 'mover') ed.sel = null;
+    pintarApp();
+    toast({ zona: 'Arrastra en el dibujo para hacer el recuadro de la zona', fila: 'Traza la fila de punta a punta, dentro de su zona', muro: 'Traza la pared de punta a punta' }[k] || 'Toca algo para escogerlo y arrástralo para moverlo');
+  }
+
+  // Punto del dibujo donde está el mouse
+  function edPunto(ev) {
+    const r = $('edLienzo').getBoundingClientRect(), s = ed.escala || 1;
+    return { x: (ev.clientX - r.left) / s, y: (ev.clientY - r.top) / s };
+  }
+  const zonaEn = (x, y) => [...ed.zonas].reverse().find(z => [{ x: z.x, y: z.y, ancho: z.ancho, alto: z.alto }].concat(z.areas || [])
+    .some(a => x >= a.x && x <= a.x + a.ancho && y >= a.y && y <= a.y + a.alto));
+
+  function enlazarEditor() {
+    const l = $('edLienzo');
+    if (!l || !ed) return;
+    edPintarLienzo();
+    l.addEventListener('pointerdown', edAbajo);
+    l.addEventListener('pointermove', edMueve);
+    l.addEventListener('pointerup', edArriba);
+    l.addEventListener('pointercancel', edArriba);
+    $('edFondoArch').addEventListener('change', ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) edSubirFondo(f); });
+    if (!enlazarEditor.teclas) {
+      enlazarEditor.teclas = true;
+      document.addEventListener('keydown', ev => {
+        if (!ed || vista !== 'config' || cfgTab !== 'editor' || !$('edLienzo')) return;
+        if (/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '') || !$('modal').hidden) return;
+        if ((ev.key === 'Delete' || ev.key === 'Backspace') && ed.sel) { ev.preventDefault(); edBorrarSel(); }
+        else if (ev.key === 'Escape') { ed.sel = null; ed.herr = 'mover'; ed.fondoModo = false; pintarApp(); }
+        else if (ed.sel && /^Arrow/.test(ev.key)) {
+          ev.preventDefault();
+          const p = ev.shiftKey ? 20 : ED_PASO;
+          const dx = ev.key === 'ArrowLeft' ? -p : ev.key === 'ArrowRight' ? p : 0, dy = ev.key === 'ArrowUp' ? -p : ev.key === 'ArrowDown' ? p : 0;
+          edMoverSel(ed.sel, dx, dy); edCambio(); edPintarLienzo();
+        }
+      });
+    }
+  }
+
+  function edAbajo(ev) {
+    if (ev.button !== 0) return;
+    const p = edPunto(ev), el = ev.target.closest('[data-k]');
+    $('edLienzo').setPointerCapture(ev.pointerId);
+    if (ed.herr !== 'mover') { ed.dibujo = { tipo: ed.herr, x1: rej(p.x), y1: rej(p.y), x2: rej(p.x), y2: rej(p.y) }; return; }
+    if (!el || !el.dataset.k) { if (ed.sel) { ed.sel = null; edPintarLienzo(); $('edPanel').innerHTML = edPanelHtml(); } return; }
+    const k = el.dataset.k, id = el.dataset.id;
+    const tipo = { zona: 'zona', 'zona-tam': 'zona', etq: 'zona', fila: 'fila', 'fila-largo': 'fila', muro: 'muro', 'muro-a': 'muro', 'muro-b': 'muro', fondo: 'fondo', 'fondo-tam': 'fondo' }[k];
+    const idSel = tipo === 'muro' ? Number(id) : id;
+    const cambia = !ed.sel || ed.sel.k !== tipo || ed.sel.id !== idSel;
+    if (tipo !== 'fondo') ed.sel = { k: tipo, id: idSel };
+    ed.arr = { k, id: idSel, x0: p.x, y0: p.y, antes: clon({ zonas: ed.zonas, racks: ed.racks, muros: ed.muros, fondo: ed.fondo }), movio: false };
+    if (cambia) { edPintarLienzo(); $('edPanel').innerHTML = edPanelHtml(); }
+  }
+
+  function edMueve(ev) {
+    if (!ed) return;
+    const p = edPunto(ev);
+    if (ed.dibujo) { ed.dibujo.x2 = rej(p.x); ed.dibujo.y2 = rej(p.y); edPintarLienzo(); return; }
+    const a = ed.arr;
+    if (!a) return;
+    const dx = rej(p.x - a.x0), dy = rej(p.y - a.y0);
+    if (!dx && !dy && !a.movio) return;
+    a.movio = true;
+    // Se parte siempre de cómo estaba al empezar a arrastrar
+    ed.zonas = clon(a.antes.zonas); ed.racks = clon(a.antes.racks); ed.muros = clon(a.antes.muros); ed.fondo = a.antes.fondo ? clon(a.antes.fondo) : null;
+    const z = ed.zonas.find(x => x.id === a.id), r = ed.racks.find(x => x.id === a.id), m = ed.muros[a.id];
+    if (a.k === 'zona' || a.k === 'fila' || a.k === 'muro' || a.k === 'fondo') edMoverSel({ k: a.k, id: a.id }, dx, dy);
+    else if (a.k === 'zona-tam' && z) { z.ancho = Math.max(40, z.ancho + dx); z.alto = Math.max(40, z.alto + dy); }
+    else if (a.k === 'etq' && z) { z.etqX = (z.etqX ?? z.x + 6) + dx; z.etqY = (z.etqY ?? z.y + 6) + dy; }
+    else if (a.k === 'fila-largo' && r) r.largo = Math.max(30, r.largo + (r.orientacion === 'V' ? dy : dx));
+    else if (a.k === 'muro-a' && m) { m[0] += dx; m[1] += dy; }
+    else if (a.k === 'muro-b' && m) { m[2] += dx; m[3] += dy; }
+    else if (a.k === 'fondo-tam' && ed.fondo) { const k = ed.fondo.alto / ed.fondo.ancho; ed.fondo.ancho = Math.max(100, ed.fondo.ancho + dx); ed.fondo.alto = Math.round(ed.fondo.ancho * k); }
+    edPintarLienzo();
+  }
+
+  function edMoverSel(s, dx, dy) {
+    if (s.k === 'zona') {
+      const z = ed.zonas.find(x => x.id === s.id);
+      if (!z) return;
+      z.x += dx; z.y += dy;
+      if (z.etqX !== null && z.etqX !== undefined) z.etqX += dx;
+      if (z.etqY !== null && z.etqY !== undefined) z.etqY += dy;
+      (z.areas || []).forEach(a => { a.x += dx; a.y += dy; });
+      ed.racks.filter(r => r.zonaId === z.id).forEach(r => edMoverRack(r, dx, dy));   // sus filas se mueven con ella
+    } else if (s.k === 'fila') {
+      const r = ed.racks.find(x => x.id === s.id);
+      if (r) edMoverRack(r, dx, dy);
+    } else if (s.k === 'muro') {
+      const m = ed.muros[s.id];
+      if (m) { m[0] += dx; m[1] += dy; m[2] += dx; m[3] += dy; }
+    } else if (s.k === 'fondo' && ed.fondo) { ed.fondo.x += dx; ed.fondo.y += dy; }
+  }
+  function edMoverRack(r, dx, dy) {
+    r.x += dx; r.y += dy;
+    (r.tramos || []).forEach(t => { t.x += dx; t.y += dy; });
+  }
+
+  function edArriba(ev) {
+    if (!ed) return;
+    try { $('edLienzo').releasePointerCapture(ev.pointerId); } catch (e) { /* nada */ }
+    const d = ed.dibujo;
+    if (d) { ed.dibujo = null; edCrear(d); return; }
+    const a = ed.arr;
+    ed.arr = null;
+    if (!a || !a.movio) { edPintarLienzo(); return; }
+    // Una fila que se suelta dentro de otra zona pasa a esa zona
+    if (a.k === 'fila') {
+      const r = ed.racks.find(x => x.id === a.id), t = r && (r.tramos ? r.tramos[0] : r);
+      const z = t && zonaEn(t.x + 5, t.y + 5);
+      if (z && z.id !== r.zonaId) { r.zonaId = z.id; toast(`${r.nombre} quedó en la zona ${z.nombre}`, 'ok'); }
+    }
+    edCambio();
+    edPintarLienzo();
+    $('edPanel').innerHTML = edPanelHtml();
+  }
+
+  function edCrear(d) {
+    const dx = d.x2 - d.x1, dy = d.y2 - d.y1;
+    if (d.tipo === 'zona') {
+      if (Math.abs(dx) < 40 || Math.abs(dy) < 40) { edPintarLienzo(); return toast('Arrastra un recuadro más grande para la zona', 'error'); }
+      const id = 'nueva-' + (ed.sec++);
+      const n = ed.zonas.length;
+      ed.zonas.push({ id, nombre: 'Zona ' + (n + 1), color: ED_COLORES[n % ED_COLORES.length], x: Math.min(d.x1, d.x2), y: Math.min(d.y1, d.y2),
+        ancho: Math.abs(dx), alto: Math.abs(dy), etqX: null, etqY: null, areas: [] });
+      ed.sel = { k: 'zona', id };
+    } else if (d.tipo === 'fila') {
+      const vertical = Math.abs(dy) >= Math.abs(dx), largo = Math.max(Math.abs(dx), Math.abs(dy));
+      if (largo < 30) { edPintarLienzo(); return toast('Traza la fila más larga, de punta a punta', 'error'); }
+      const x = vertical ? d.x1 : Math.min(d.x1, d.x2), y = vertical ? Math.min(d.y1, d.y2) : d.y1;
+      const z = zonaEn(x + 2, y + 2);
+      if (!z) { edPintarLienzo(); return toast('Traza la fila dentro de una zona. Si todavía no hay zona, créala primero con «+ Zona».', 'error'); }
+      const id = 'nueva-' + (ed.sec++);
+      const nFila = ed.racks.filter(r => r.zonaId === z.id).length + 1;
+      ed.racks.push({ id, zonaId: z.id, nombre: 'Fila ' + nFila, posiciones: Math.max(1, Math.round(largo / 30)), fondo: 'S', orientacion: vertical ? 'V' : 'H',
+        numeracion: 'NORMAL', x, y, largo, tramos: null, nuevo: true, niveles: 4, picking: true });
+      ed.sel = { k: 'fila', id };
+    } else {
+      if (Math.hypot(dx, dy) < 10) { edPintarLienzo(); return; }
+      ed.muros.push([d.x1, d.y1, d.x2, d.y2]);
+      ed.sel = { k: 'muro', id: ed.muros.length - 1 };
+    }
+    ed.herr = 'mover';
+    edCambio();
+    pintarApp();
+  }
+
+  const rackConProducto = id => sede.espacios.some(e => e.rackId === id && lineasDe(e.id).length);
+
+  function edBorrarSel() {
+    const s = ed.sel;
+    if (!s) return;
+    if (s.k === 'fila') {
+      const r = ed.racks.find(x => x.id === s.id);
+      if (!r.nuevo && rackConProducto(r.id)) return toast(`${r.nombre} tiene producto ubicado. Sácalo o muévelo antes de borrarla.`, 'error');
+      if (!r.nuevo) ed.borrar.racks.push(r.id);
+      ed.racks = ed.racks.filter(x => x !== r);
+    } else if (s.k === 'zona') {
+      const z = ed.zonas.find(x => x.id === s.id), suyas = ed.racks.filter(r => r.zonaId === z.id);
+      if (suyas.some(r => !r.nuevo && rackConProducto(r.id))) return toast(`La zona ${z.nombre} tiene filas con producto. Sácalo antes de borrarla.`, 'error');
+      suyas.forEach(r => { if (!r.nuevo) ed.borrar.racks.push(r.id); });
+      ed.racks = ed.racks.filter(r => r.zonaId !== z.id);
+      if (!String(z.id).startsWith('nueva-')) ed.borrar.zonas.push(z.id);
+      ed.zonas = ed.zonas.filter(x => x !== z);
+    } else if (s.k === 'muro') ed.muros.splice(s.id, 1);
+    ed.sel = null;
+    edCambio();
+    pintarApp();
+  }
+
+  // Panel de la derecha: guía o datos de lo escogido
+  function edPanelHtml() {
+    const s = ed.sel;
+    if (ed.fondoModo && ed.fondo) {
+      return `<span class="h3">Imagen de fondo</span>
+        <span class="muted small">Arrastra la imagen para acomodarla y la esquina de abajo para cambiar su tamaño. Solo se ve aquí, en el editor: sirve de guía para calcar.</span>
+        <label class="lbl" for="edOpa">Qué tan clara se ve</label>
+        <input id="edOpa" type="range" min="0.1" max="1" step="0.05" value="${ed.fondo.opacidad ?? 0.5}" oninput="ed.fondo.opacidad = Number(this.value); edCambio(); edPintarLienzo()">
+        <div class="fila gap8 wrap-f mt8"><button class="btn btn-sec" onclick="$('edFondoArch').click()">Cambiar imagen</button>
+          <button class="btn btn-sal" onclick="ed.fondo = null; ed.fondoUrl = null; ed.fondoModo = false; edCambio(); pintarApp()">Quitar imagen</button></div>
+        <button class="btn btn-pri mt12" onclick="ed.fondoModo = false; pintarApp()">Listo, seguir dibujando</button>`;
+    }
+    if (!s) {
+      return `<span class="h3">Cómo armar el plano</span>
+        <ol class="ed-guia">
+          <li><b>Imagen de fondo</b> (si la tienes): súbela para calcar encima.</li>
+          <li><b>+ Zona</b>: arrastra en el dibujo para hacer el recuadro de cada zona.</li>
+          <li><b>+ Fila</b>: traza cada fila de punta a punta, dentro de su zona. Después le dices cuántas posiciones y niveles tiene.</li>
+          <li><b>+ Pared</b>: traza las paredes o separaciones.</li>
+          <li>Con <b>Mover y escoger</b> arrastras cualquier cosa, incluido el <b>nombre de la zona</b> para que no tape nada.</li>
+          <li>Toca <b>Guardar cambios</b>. Mientras no guardes, los demás siguen viendo el plano de antes.</li>
+        </ol>
+        <span class="muted small">Si un espacio no se puede usar (por ejemplo, un aire acondicionado), después de guardar tócalo en el plano y bloquéalo.</span>
+        <span class="muted small">Atajos: <b>Supr</b> borra lo escogido, las <b>flechas</b> lo mueven poquito, <b>Esc</b> suelta lo escogido.</span>`;
+    }
+    if (s.k === 'zona') {
+      const z = ed.zonas.find(x => x.id === s.id);
+      if (!z) return '';
+      const n = ed.racks.filter(r => r.zonaId === z.id).length;
+      return `<span class="h3">Zona</span>
+        <label class="lbl" for="edZNom">Nombre</label>
+        <input id="edZNom" class="campo" value="${esc(z.nombre)}" oninput="edZona('nombre', this.value)">
+        <label class="lbl" for="edZCol">Color</label>
+        <input id="edZCol" class="campo" type="color" value="${esc(z.color)}" oninput="edZona('color', this.value)">
+        <span class="muted small mt8">Arrastra el recuadro para moverlo (sus ${n} fila${n === 1 ? '' : 's'} se mueven con él) y la esquina de abajo para cambiar el tamaño. El nombre se arrastra aparte, para ponerlo donde no tape nada.</span>
+        <button class="btn btn-sec mt8" onclick="edZona('etqX', null); edZona('etqY', null)">Poner el nombre en la esquina</button>
+        <button class="btn btn-sal mt12" onclick="edBorrarSel()">Borrar zona</button>`;
+    }
+    if (s.k === 'fila') {
+      const r = ed.racks.find(x => x.id === s.id);
+      if (!r) return '';
+      return `<span class="h3">${r.nuevo ? 'Fila nueva' : 'Fila'}</span>
+        ${r.nuevo ? '' : `<span class="muted small">Código ${esc(r.id)} (no cambia)</span>`}
+        <label class="lbl" for="edRNom">Nombre</label>
+        <input id="edRNom" class="campo" value="${esc(r.nombre)}" oninput="edFila('nombre', this.value)">
+        <label class="lbl" for="edRZona">Zona</label>
+        <select id="edRZona" class="campo" onchange="edFila('zonaId', this.value)">${ed.zonas.map(z => `<option value="${esc(z.id)}" ${z.id === r.zonaId ? 'selected' : ''}>${esc(z.nombre)}</option>`).join('')}</select>
+        <label class="lbl" for="edRPos">Posiciones (de punta a punta)</label>
+        <input id="edRPos" class="campo" type="number" min="1" inputmode="numeric" value="${r.posiciones}" oninput="edFila('posiciones', Math.max(1, Math.floor(Number(this.value)) || 1))">
+        <span class="lbl">Tipo de fila</span>
+        <div class="seg"><button class="${r.fondo === 'S' ? 'on' : ''}" onclick="edFila('fondo', 'S', true)">A-B</button><button class="${r.fondo === 'D' ? 'on' : ''}" onclick="edFila('fondo', 'D', true)">Doble fondo A-B-C-D</button></div>
+        ${r.tramos ? '' : `<span class="lbl">Dirección</span>
+        <div class="seg"><button class="${r.orientacion === 'V' ? 'on' : ''}" onclick="edFila('orientacion', 'V', true)">Vertical</button><button class="${r.orientacion === 'H' ? 'on' : ''}" onclick="edFila('orientacion', 'H', true)">Horizontal</button></div>`}
+        <span class="lbl">¿Dónde queda la posición 1?</span>
+        <div class="seg"><button class="${r.numeracion !== 'INVERTIDA' ? 'on' : ''}" onclick="edFila('numeracion', 'NORMAL', true)">${r.orientacion === 'H' && !r.tramos ? 'Izquierda' : 'Abajo'}</button><button class="${r.numeracion === 'INVERTIDA' ? 'on' : ''}" onclick="edFila('numeracion', 'INVERTIDA', true)">${r.orientacion === 'H' && !r.tramos ? 'Derecha' : 'Arriba'}</button></div>
+        ${r.nuevo ? `<span class="lbl">Niveles que se crean al guardar</span>
+          <div class="fila gap8"><input class="campo" type="number" min="0" max="20" value="${r.niveles}" style="width:90px" oninput="edFila('niveles', Math.max(0, Math.floor(Number(this.value)) || 0))" aria-label="Niveles">
+            <label class="fila gap8 small"><input type="checkbox" ${r.picking ? 'checked' : ''} onchange="edFila('picking', this.checked)"> con picking (nivel 1)</label></div>
+          <span class="muted small">Se crean en todas las posiciones. Después cambias una posición puntual tocándola en el plano.</span>`
+          : '<span class="muted small mt8">Los niveles de cada posición se cambian en el plano, tocando la posición.</span>'}
+        <span class="muted small mt8">Arrástrala para moverla${r.tramos ? '' : ' y usa el punto de la punta para alargarla o acortarla'}.</span>
+        <button class="btn btn-sal mt12" onclick="edBorrarSel()">Borrar fila</button>`;
+    }
+    if (s.k === 'muro') {
+      return `<span class="h3">Pared</span>
+        <span class="muted small">Arrástrala para moverla, o arrastra sus puntas para cambiarla.</span>
+        <button class="btn btn-sal mt12" onclick="edBorrarSel()">Borrar pared</button>`;
+    }
+    return '';
+  }
+  function edZona(campo, v) {
+    const z = ed.zonas.find(x => x.id === ed.sel.id);
+    z[campo] = v;
+    edCambio(); edPintarLienzo();
+  }
+  function edFila(campo, v, repintarPanel) {
+    const r = ed.racks.find(x => x.id === ed.sel.id);
+    r[campo] = v;
+    edCambio(); edPintarLienzo();
+    if (repintarPanel) $('edPanel').innerHTML = edPanelHtml();
+  }
+
+  function edFondo() {
+    ed.sel = null; ed.herr = 'mover';
+    if (!ed.fondo) return $('edFondoArch').click();
+    ed.fondoModo = !ed.fondoModo;
+    pintarApp();
+  }
+  async function edSubirFondo(f) {
+    toast('Subiendo la imagen…');
+    try {
+      const bmp = await createImageBitmap(f);
+      const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.85));
+      const ruta = await llamar('bdSubirFondo', { sedeId: ses.sedeId, archivo: new File([blob], 'plano.jpg', { type: 'image/jpeg' }) });
+      const { w } = edMedidas();
+      const ancho = Math.min(w - 40, 1500);
+      ed.fondo = { ruta, x: 20, y: 20, ancho, alto: Math.round(ancho * c.height / c.width), opacidad: 0.5 };
+      ed.fondoUrl = await llamar('bdFondoUrl', ruta);
+      ed.fondoModo = true;
+      edCambio(); pintarApp();
+      toast('Imagen lista. Acomódala y luego toca «Listo, seguir dibujando».', 'ok');
+    } catch (e) { toast(e.message || 'No se pudo subir la imagen', 'error'); }
+  }
+
+  function edDescartar() {
+    abrirModal(`<div class="fila-sb"><span class="h2">¿Descartar los cambios?</span>${btnCerrar()}</div>
+      <span class="mt12">Se pierde lo que dibujaste desde la última vez que guardaste. El plano queda como está.</span>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">No</button>
+        <button class="btn btn-sal btn-xl" onclick="try { localStorage.removeItem('planoBorrador:' + ses.sedeId); } catch (e) {} ed = null; cerrarModal(); pintarApp()">Sí, descartar</button></div>`);
+  }
+
+  function edGuardar() {
+    const b = $('edOk'); b.disabled = true; b.textContent = 'Guardando…';
+    const niveles = {};
+    ed.racks.filter(r => r.nuevo).forEach(r => { niveles[r.id] = { niveles: r.niveles, picking: r.picking }; });
+    llamar('bdGuardarPlano', {
+      sedeId: ses.sedeId,
+      zonas: ed.zonas.map(({ id, nombre, color, x, y, ancho, alto, etqX, etqY, areas }) => ({ id, nombre, color, x, y, ancho, alto, etqX, etqY, areas })),
+      racks: ed.racks.map(({ id, zonaId, nombre, posiciones, fondo, orientacion, numeracion, x, y, largo, tramos, nuevo }) => ({ id, zonaId, nombre, posiciones, fondo, orientacion, numeracion, x, y, largo, tramos, nuevo })),
+      muros: ed.muros, fondo: ed.fondo, borrar: ed.borrar, niveles
+    }).then(d => {
+      setSede(d);
+      try { localStorage.removeItem('planoBorrador:' + ses.sedeId); } catch (e) { /* nada */ }
+      ed = null;
+      pitido(); toast('Plano guardado. Ya lo ven todos.', 'ok');
+      pintarApp();
+    }).catch(e => { toast(e.message, 'error'); b.disabled = false; b.textContent = 'Guardar cambios'; });
+  }
+
+  /* ----- Sedes ----- */
+  function vistaSedes() {
+    return `<section class="card col gap12">
+      <div class="col gap4"><span class="h3">Sedes</span>
+        <span class="muted small">Cámbiale el nombre a una sede o crea una nueva. Para dibujar el plano de una sede, ábrela (arriba, en el nombre de la sede) y usa el «Editor del plano».</span></div>
+      ${ini.sedes.map(s => `<div class="fila gap8 wrap-f sede-fila">
+        <input class="campo" id="sdN-${esc(s.id)}" value="${esc(s.nombre)}" aria-label="Nombre de la sede ${esc(s.nombre)}" style="flex:1 1 220px">
+        <button class="btn btn-sec" onclick="guardarSede('${esc(s.id)}', this)">Guardar nombre</button>
+        ${s.id === ses.sedeId ? '<span class="tag ok">Abierta</span>' : `<button class="btn btn-sec" onclick="lg.sedeId='${esc(s.id)}'; guardarLS('sesion', { perfil: lg.perfil, nombre: lg.nombre, sedeId: lg.sedeId }); ed = null; verSede('${esc(s.id)}')">Abrir</button>`}
+      </div>`).join('')}
+      <div class="fila gap8 wrap-f mt8"><input class="campo" id="sdNueva" placeholder="Nombre de la sede nueva" style="flex:1 1 220px">
+        <button class="btn btn-pri" onclick="guardarSede(null, this)">+ Crear sede</button></div>
+    </section>`;
+  }
+  function guardarSede(id, b) {
+    const nombre = (id ? $('sdN-' + id) : $('sdNueva')).value;
+    b.disabled = true;
+    llamar('bdGuardarSede', { id, nombre }).then(sedes => {
+      ini.sedes = sedes;
+      toast(id ? 'Nombre guardado' : `Sede ${nombre.trim()} creada. Ábrela para dibujar su plano.`, 'ok');
+      pintarApp();
+    }).catch(e => { toast(e.message, 'error'); b.disabled = false; });
+  }
+
+
+  function vistaConfigLista() {
     return `<div class="col gap16">
       <div class="fila-sb wrap-f">
-        <div class="col gap4"><span class="h2">Zonas y racks · ${esc(nombreSede(ses.sedeId))}</span>
-          <span class="muted small">Los niveles de cada posición se agregan desde el mapa, tocando la posición, o con "Niveles" para todo un rack.</span></div>
+        <div class="col gap4"><span class="h3">Zonas y filas</span>
+          <span class="muted small">Aquí cambias los datos con números. Para dibujar y acomodar con el mouse, usa el «Editor del plano». Los niveles de cada posición se agregan desde el plano, tocando la posición, o con «Niveles» para toda una fila.</span></div>
         <div class="fila wrap-f gap8">
           <button class="btn btn-pri" onclick="formZona()">+ Zona</button>
         </div>
@@ -6491,7 +7319,7 @@
       <label class="lbl" for="zCol">Color en el mapa</label>
       <input id="zCol" class="campo" type="color" value="${esc(z ? z.color : '#1F9BA6')}">
       <span class="lbl">Ubicación en el plano (opcional)</span>
-      <span class="muted small">Déjalo vacío y la zona aparece debajo del plano. Medidas en puntos del plano (930 de ancho × 900 de alto).</span>
+      <span class="muted small">Déjalo vacío y la zona aparece debajo del plano. Medidas en puntos del plano. Si cambias X o Y, sus filas se mueven con ella.</span>
       <div class="dos">
         <div><label class="lbl" for="zX">Desde la izquierda (X)</label><input id="zX" class="campo" type="number" value="${z && z.x !== null ? z.x : ''}"></div>
         <div><label class="lbl" for="zY">Desde arriba (Y)</label><input id="zY" class="campo" type="number" value="${z && z.y !== null ? z.y : ''}"></div>
@@ -6502,8 +7330,27 @@
       <div class="dos mt16">
         <button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
         <button class="btn btn-pri btn-xl" onclick="accion('bdGuardarZona', { sedeId: ses.sedeId, zonaId: ${z ? `'${esc(z.id)}'` : 'null'}, nombre: $('zNom').value, color: $('zCol').value, x: $('zX').value, y: $('zY').value, ancho: $('zW').value, alto: $('zH').value }, 'Zona guardada', this)">Guardar</button>
-      </div>`);
+      </div>
+      ${z && (z.areas || []).length ? `<span class="lbl mt16">Partes aparte de esta zona en el plano</span>
+        <span class="muted small">Recuadros que se dibujan aparte pero son de ${esc(z.nombre)}. Puedes volver uno una zona propia, con su nombre y color: sus filas pasan a la zona nueva y el producto ubicado no cambia.</span>
+        ${z.areas.map((a, i) => { const fs = sede.racks.filter(r => r.zonaId === z.id && (() => { const t = r.tramos ? r.tramos[0] : r; return t.x >= a.x && t.x <= a.x + a.ancho && t.y >= a.y && t.y <= a.y + a.alto; })());
+          return `<div class="ra-fila mt8"><span class="col flex1"><b>Parte ${i + 1}</b><span class="muted small">${fs.length ? 'Filas: ' + fs.map(r => esc(r.nombre)).join(', ') : 'Sin filas'}</span></span>
+            <button class="btn btn-sec btn-mini" onclick="separarArea('${esc(z.id)}', ${i})">Volverla zona propia</button></div>`; }).join('')}` : ''}`);
     $('zNom').focus();
+  }
+
+  function separarArea(zonaId, i) {
+    const z = sede.zonaPorId[zonaId];
+    abrirModal(`<div class="fila-sb"><span class="h2">Zona nueva</span>${btnCerrar()}</div>
+      <span class="muted small mt8">La parte ${i + 1} de ${esc(z.nombre)} queda como una zona propia. Sus filas pasan a esta zona; los códigos de las ubicaciones y el producto ubicado no cambian.</span>
+      <label class="lbl mt12" for="saNom">Nombre</label>
+      <input id="saNom" class="campo" placeholder="Ej. Seco 2, Promociones">
+      <label class="lbl" for="saCol">Color en el mapa</label>
+      <input id="saCol" class="campo" type="color" value="#E65100">
+      <p id="fErr" class="error" hidden></p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="formZona('${esc(zonaId)}')">Volver</button>
+        <button class="btn btn-pri btn-xl" onclick="accion('bdSepararArea', { sedeId: ses.sedeId, zonaId: '${esc(zonaId)}', indice: ${i}, nombre: $('saNom').value, color: $('saCol').value }, 'Zona creada', this)">Crear zona</button></div>`);
+    $('saNom').focus();
   }
 
   function borrarZona(zonaId) {
@@ -6531,7 +7378,11 @@
         ${opcion('rfondo', 'D', 'Doble fondo', 'A-B-C-D por nivel', !r || r.fondo === 'D')}
         ${opcion('rfondo', 'S', 'Sin doble fondo', 'A-B por nivel', r && r.fondo === 'S')}
       </div>
-      <span class="muted small" style="margin-top:8px">La posición 1 queda abajo (o a la izquierda si el rack es horizontal). Para quitar una posición puntual (una columna, una puerta), tócala en el mapa y usa "Quitar esta posición".</span>
+      <label class="lbl" for="rNum">¿Dónde queda la posición 1 en el plano?</label>
+      <select id="rNum" class="campo">
+        <option value="NORMAL" ${!r || !r.invertida ? 'selected' : ''}>Abajo (o a la izquierda si es horizontal)</option>
+        <option value="INVERTIDA" ${r && r.invertida ? 'selected' : ''}>Arriba (o a la derecha si es horizontal)</option></select>
+      <span class="muted small" style="margin-top:4px">Solo cambia cómo se ve el dibujo: los códigos, lo ubicado y el historial quedan igual. Para quitar una posición puntual (una columna, una puerta), tócala en el mapa y usa "Quitar esta posición".</span>
       <span class="lbl">Ubicación en el plano (opcional)</span>
       <span class="muted small">Toca "Elegir en el plano" y luego el punto donde empieza la fila (su parte de arriba). Si lo dejas vacío, se acomoda sola dentro de su zona.</span>
       <button class="btn btn-sec" style="margin-top:8px" onclick="elegirLugar()">Elegir en el plano</button>
@@ -6547,7 +7398,7 @@
       <div class="dos mt16">
         ${r ? `<button class="btn btn-sal btn-xl" onclick="borrarRack('${esc(r.id)}')">Eliminar</button>`
             : `<button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>`}
-        <button class="btn btn-pri btn-xl" onclick="accion('bdGuardarRack', { sedeId: ses.sedeId, rackId: ${r ? `'${esc(r.id)}'` : 'null'}, nombre: $('rNom').value, zonaId: $('rZona').value, posiciones: Number($('rPos').value), fondo: valorRadio('rfondo'), x: $('rX').value, y: $('rY').value, largo: $('rL').value, orientacion: $('rO').value }, 'Fila guardada', this)">Guardar</button>
+        <button class="btn btn-pri btn-xl" onclick="accion('bdGuardarRack', { sedeId: ses.sedeId, rackId: ${r ? `'${esc(r.id)}'` : 'null'}, nombre: $('rNom').value, zonaId: $('rZona').value, posiciones: Number($('rPos').value), fondo: valorRadio('rfondo'), x: $('rX').value, y: $('rY').value, largo: $('rL').value, orientacion: $('rO').value, numeracion: $('rNum').value }, 'Fila guardada', this)">Guardar</button>
       </div>`);
     $('rNom').focus();
   }
@@ -6617,7 +7468,8 @@
     if ($('scan') && !('ontouchstart' in window)) $('scan').focus({ preventScroll: true });
     if (vivoPend) setTimeout(repintarVivo, 50);
   }
-  function errForm(t) { const p = $('fErr'); if (p) { p.textContent = t; p.hidden = false; } else toast(t, 'error'); }
+  // El aviso va en la ventana abierta (si hay una); si no, en el formulario de la pantalla
+  function errForm(t) { const p = (!$('modal').hidden && $('caja').querySelector('#fErr')) || $('fErr'); if (p) { p.textContent = t; p.hidden = false; } else toast(t, 'error'); }
 
   /* ================= Entradas y salidas ================= */
   function abrirForm(modo, i) {
@@ -6632,14 +7484,14 @@
     if (modo === 'NUEVO') {
       const esps = [...espaciosDe(posSel.rackId, posSel.posicion)]
         .sort((a, b) => b.nivel - a.nivel || a.lado.localeCompare(b.lado));
-      // Solo se puede elegir un espacio vacío
-      const elegidoNuevo = espSel && esps.some(y => y.id === espSel) && !lineasDe(espSel).length
-        ? espSel : (esps.find(y => !lineasDe(y.id).length) || {}).id;
+      // Solo se puede elegir un espacio con cupo
+      const elegidoNuevo = espSel && esps.some(y => y.id === espSel) && !sinCupo(espSel)
+        ? espSel : (esps.find(y => !lineasDe(y.id).length) || esps.find(y => !sinCupo(y.id)) || {}).id;
       if (!elegidoNuevo) { toast('Todos los espacios de esta posición están llenos', 'error'); return; }
       h += `<span class="muted small">${esc(sede.rackPorId[posSel.rackId].nombre)} · Posición ${posSel.posicion}</span>
         <label class="lbl" for="fEsp">Nivel y lado</label>
         <select id="fEsp" class="campo">${esps.map(x =>
-          `<option value="${esc(x.id)}" ${lineasDe(x.id).length ? 'disabled' : (x.id === elegidoNuevo ? 'selected' : '')}>${esc(etiqueta(x))}${lineasDe(x.id).length ? ' (lleno)' : ' (vacío)'}</option>`).join('')}
+          `<option value="${esc(x.id)}" ${sinCupo(x.id) ? 'disabled' : (x.id === elegidoNuevo ? 'selected' : '')}>${esc(etiqueta(x))}${sinCupo(x.id) ? ' (lleno)' : lineasDe(x.id).length ? ` (${cupoTxt(x.id)})` : ' (vacío)'}</option>`).join('')}
         </select>
         <label class="lbl" for="fProd">Producto (escanea o busca)</label>
         ${campoConCamara('<input id="fProd" class="campo" list="dlProductos" autocomplete="off">', 'fProd')}
