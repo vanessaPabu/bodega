@@ -3506,7 +3506,12 @@
   // Une SAP + plano + conteos por producto
   function datosInventario() {
     const m = {};
-    const fila = cod => m[cod] || (m[cod] = { cod, p: prodDe(cod), sap: null, picking: 0, aereo: 0, calidad: 0, bloqueado: 0, zonas: new Set(), pas: new Set(), ult: null });
+    const fila = cod => m[cod] || (m[cod] = { cod, p: prodDe(cod), sap: null, picking: 0, aereo: 0, calidad: 0, bloqueado: 0, zonas: new Set(), pas: new Set(), ult: null, alm: {}, pk: {}, ae: {} });
+    const yo = ses.sedeId, suma = (o, k, n) => { o[k] = (o[k] || 0) + n; };
+    // Por almacén (2000, 1500, 1000): un producto puede estar en varios
+    const almDe = ubic => { const u = String(ubic || ''); if (u.startsWith('PICKING-')) return u.slice(8); const x = pasilloDe(u); return x ? x.key : ''; };
+    const enAlmK = (f, k) => f.alm[k] || (f.alm[k] = { key: k, picking: 0, aereo: 0, calidad: 0, bloqueado: 0, pk: {}, ae: {} });
+    const enAlm = (f, ubic) => enAlmK(f, almDe(ubic));
     const pasK = ubic => { const x = pasilloDe(ubic); return x ? x.key + '|' + x.pasillo : ''; };
     const zonaDe = ubic => { const e = sede.espPorId[ubic]; const r = e && sede.rackPorId[e.rackId]; return r ? r.zonaId : ''; };
     ini.productos.forEach(p => { if (p.activo !== false) fila(p.id); });   // todos, aunque no tengan nada
@@ -3515,25 +3520,38 @@
       const e = sede.espPorId[l.ubicacionId];
       if (e && e.nivel === 0) { const k = pasK(l.ubicacionId); if (k) fila(l.productoId).pas.add(k); }
       if (!e || e.nivel === 0) return;                    // el picking se cuenta a mano
-      const f = fila(l.productoId);
-      f.aereo += Number(l.unidades) || 0;
+      const f = fila(l.productoId), n = Number(l.unidades) || 0, a = enAlm(f, l.ubicacionId);
+      f.aereo += n; a.aereo += n; suma(f.ae, yo, n); suma(a.ae, yo, n);
       const z = zonaDe(l.ubicacionId); if (z) f.zonas.add(z);
       const k = pasK(l.ubicacionId); if (k) f.pas.add(k);
     });
     (invData.conteos || []).forEach(c => {
-      const f = fila(c.codigo);
-      if (c.tipo === 'CALIDAD') f.calidad += c.cantidad;
-      else if (c.tipo === 'BLOQUEADO') f.bloqueado += c.cantidad;
-      else f.picking += c.cantidad;
+      const f = fila(c.codigo), a = enAlm(f, c.ubicacion);
+      if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
+      else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
+      else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, yo, c.cantidad); suma(a.pk, yo, c.cantidad); }
       const z = zonaDe(c.ubicacion); if (z) f.zonas.add(z);
       const k = pasK(c.ubicacion); if (k) f.pas.add(k);
       if (!f.ult || c.fecha > f.ult.fecha) f.ult = c;
+    });
+    // Las demás sedes: su picking y su aéreo van en sus columnas; todo se suma contra el mismo SAP
+    (invData.otrasSedes || []).forEach(o => {
+      o.aereo.forEach(x => { const f = fila(x.codigo), a = enAlmK(f, x.almacen); f.aereo += x.cantidad; a.aereo += x.cantidad; suma(f.ae, o.sedeId, x.cantidad); suma(a.ae, o.sedeId, x.cantidad); });
+      o.conteos.forEach(c => {
+        const f = fila(c.codigo), a = enAlmK(f, c.almacen);
+        if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
+        else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
+        else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, o.sedeId, c.cantidad); suma(a.pk, o.sedeId, c.cantidad); }
+      });
     });
     return Object.values(m).map(f => {
       // Todo es producto que se tiene: el total suma calidad y bloqueado (en SAP y en planta)
       const sapTotal = f.sap ? f.sap.inventario + f.sap.calidad + f.sap.bloqueado : 0;
       const planta = f.picking + f.aereo + f.calidad + f.bloqueado;
-      return Object.assign(f, { sapTotal, planta, dif: +(planta - sapTotal).toFixed(3) });
+      // Almacenes donde está, el de más cantidad primero (ahí va lo de SAP en el Excel)
+      const almacenes = Object.values(f.alm).map(a => Object.assign(a, { planta: a.picking + a.aereo + a.calidad + a.bloqueado }))
+        .filter(a => a.planta || Object.keys(f.alm).length === 1).sort((a, b) => b.planta - a.planta || String(a.key).localeCompare(String(b.key)));
+      return Object.assign(f, { sapTotal, planta, dif: +(planta - sapTotal).toFixed(3), almacenes });
     });
   }
 
@@ -3555,39 +3573,93 @@
   }
 
   function tablaInventario() {
-    const todos = datosInventario(), l = filtrarInventario(todos);
+    const todos = datosInventario(), l = aplicarOrden('inv', filtrarInventario(todos), valInv);
     if (!todos.length) return '<p class="muted">Todavía no hay datos: carga el Excel de SAP o registra un conteo.</p>';
     const con = todos.filter(f => f.dif).length;
     const difCls = d => !d ? 'dif-ok' : d < 0 ? 'dif-falta' : 'dif-sobra';
     const pg = paginar('inv', l, () => { if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); });
-    const filas = pg.filas.map(f => `<tr onclick="historialInventario('${esc(f.cod)}')">
+    const SD = sedesInv();
+    const porSede = (o, cls) => SD.map(x => `<td class="num ${cls || ''}">${nInv(o[x.id] || 0)}</td>`).join('');
+    const filas = pg.filas.map(f => {
+      const varios = f.almacenes.length > 1, abierto = varios && invAlmAbiertos.has(f.cod);
+      const almTxt = f.almacenes.map(a => almCorto(a.key)).filter(Boolean).join(' · ');
+      return `<tr onclick="historialInventario('${esc(f.cod)}')" class="${abierto ? 'inv-abierto' : ''}">
         <td>${esc(f.p ? f.p.codigoNutresa || '—' : '—')}</td>
         <td>${esc(f.cod)}</td>
-        <td class="inv-prod">${esc(f.p ? f.p.nombre : 'Producto no está en el catálogo')}</td>
+        <td class="inv-prod">${esc(f.p ? f.p.nombre : 'Producto no está en el catálogo')}
+          ${varios ? `<button class="inv-alm-btn" onclick="event.stopPropagation(); invVerAlm('${esc(f.cod)}')" aria-expanded="${abierto}" title="Está en ${f.almacenes.length} almacenes">${abierto ? '▾' : '▸'} ${f.almacenes.length} almacenes</button>`
+            : almTxt ? `<span class="inv-alm-txt">Alm. ${esc(almTxt)}</span>` : ''}</td>
         <td>${esc(f.p ? f.p.unidadMedida || 'UN' : '')}</td>
         <td class="num g-sap">${f.sap ? nInv(f.sap.inventario) : '—'}</td>
         <td class="num g-sap">${f.sap ? nInv(f.sap.calidad) : '—'}</td>
         <td class="num g-sap">${f.sap ? nInv(f.sap.bloqueado) : '—'}</td>
         <td class="num g-sap fuerte">${f.sap ? nInv(f.sapTotal) : '—'}</td>
-        <td class="num">${nInv(f.picking)}</td>
-        <td class="num">${nInv(f.aereo)}</td>
+        ${porSede(f.pk)}
+        ${porSede(f.ae, 'g-ae')}
         <td class="num">${nInv(f.calidad)}</td>
         <td class="num">${nInv(f.bloqueado)}</td>
         <td class="num fuerte">${nInv(f.planta)}</td>
         <td class="num"><span class="dif ${difCls(f.dif)}">${f.dif > 0 ? '+' : ''}${nInv(f.dif)}</span></td>
         <td class="ec-td">${f.ult && puede('inv_contar') ? btnEditarConteo(f) : ''}</td>
-      </tr>`).join('');
+      </tr>${abierto ? f.almacenes.map(a => `<tr class="inv-sub"><td></td><td></td><td class="inv-prod small">↳ Almacén <b>${esc(almCorto(a.key) || '—')}</b></td><td></td>
+        <td class="g-sap" colspan="4"></td>
+        ${porSede(a.pk)}${porSede(a.ae, 'g-ae')}<td class="num">${nInv(a.calidad)}</td><td class="num">${nInv(a.bloqueado)}</td>
+        <td class="num">${nInv(a.planta)}</td><td></td><td></td></tr>`).join('') : ''}`;
+    }).join('');
     return `<div class="muted small">${l.length} de ${todos.length} productos · <b class="${con ? 'txt-rojo' : ''}">${con}</b> con diferencia</div>
       <div class="tabla-wrap mt8"><table class="tabla inv-tabla">
         <thead>
-          <tr class="inv-grupos"><th colspan="4"></th><th colspan="4" class="g-sap">SAP</th><th colspan="5">Planta (conteo + plano)</th><th></th><th></th></tr>
-          <tr><th>Cód. Nutresa</th><th>Cód. Atlantic</th><th>Producto</th><th>Unidad</th>
-            <th class="num g-sap">Inventario</th><th class="num g-sap">Calidad</th><th class="num g-sap">Bloqueado</th><th class="num g-sap">Total</th>
-            <th class="num">Picking</th><th class="num">Aéreo</th><th class="num">Calidad</th><th class="num">Bloqueado</th><th class="num">Total</th>
-            <th class="num">Diferencia</th><th><span class="sr">Corregir</span></th></tr>
+          <tr class="inv-grupos"><th colspan="4"></th><th colspan="4" class="g-sap">SAP</th><th colspan="${SD.length * 2 + 3}">Planta (conteo + plano) · todas las sedes</th><th></th><th></th></tr>
+          <tr>${thO('inv', 'nutresa', 'Cód. Nutresa')}${thO('inv', 'cod', 'Cód. Atlantic')}${thO('inv', 'prod', 'Producto')}${thO('inv', 'und', 'Unidad')}
+            ${thO('inv', 'sapInv', 'Inventario', 'num g-sap')}${thO('inv', 'sapCal', 'Calidad', 'num g-sap')}${thO('inv', 'sapBlq', 'Bloqueado', 'num g-sap')}${thO('inv', 'sapTot', 'Total', 'num g-sap')}
+            ${SD.map(x => thO('inv', 'pk:' + x.id, `Picking<br><span class="inv-sede">${esc(x.nombre)}</span>`, 'num')).join('')}
+            ${SD.map(x => thO('inv', 'ae:' + x.id, `Aéreo<br><span class="inv-sede">${esc(x.nombre)}</span>`, 'num g-ae')).join('')}${thO('inv', 'cal', 'Calidad', 'num')}${thO('inv', 'blq', 'Bloqueado', 'num')}${thO('inv', 'planta', 'Total', 'num')}
+            ${thO('inv', 'dif', 'Diferencia', 'num')}<th><span class="sr">Corregir</span></th></tr>
         </thead>
-        <tbody>${filas || '<tr><td colspan="15" class="muted">No hay productos con ese filtro.</td></tr>'}</tbody></table></div>${pg.barra}`;
+        <tbody>${filas || `<tr><td colspan="${SD.length * 2 + 13}" class="muted">No hay productos con ese filtro.</td></tr>`}</tbody></table></div>${pg.barra}`;
   }
+  /* ----- Ordenar las tablas tocando el título de la columna (como en Excel): ▲ menor a mayor, ▼ mayor a menor, otra vez = como estaba ----- */
+  const ordT = { inv: { k: '', dir: 1 }, cic: { k: '', dir: 1 } };
+  function ordenarTabla(t, k) {
+    const o = ordT[t];
+    if (o.k !== k) { o.k = k; o.dir = 1; } else if (o.dir === 1) o.dir = -1; else o.k = '';
+    pagInicio(t);
+    if (t === 'inv') { if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); } else pintarCicTabla();
+  }
+  function aplicarOrden(t, l, val) {
+    const o = ordT[t], v = o.k && val(o.k);
+    if (!v) return l;
+    const vacio = x => x === null || x === undefined || x === '';
+    return l.slice().sort((a, b) => {
+      const x = v(a), y = v(b);
+      if (vacio(x) || vacio(y)) return vacio(x) - vacio(y);   // los vacíos siempre al final
+      return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'es', { numeric: true, sensitivity: 'base' })) * o.dir;
+    });
+  }
+  const thO = (t, k, txt, cls) => {
+    const o = ordT[t], on = o.k === k;
+    return `<th class="${cls || ''} th-ord${on ? ' on' : ''}" onclick="ordenarTabla('${t}', '${esc(k)}')" aria-sort="${on ? (o.dir > 0 ? 'ascending' : 'descending') : 'none'}" title="Ordenar por esta columna">${txt}<span class="ord-i" aria-hidden="true">${on ? (o.dir > 0 ? '▲' : '▼') : '↕'}</span></th>`;
+  };
+  const valInv = k => {
+    if (k.startsWith('pk:')) { const sd = k.slice(3); return f => f.pk[sd] || 0; }
+    if (k.startsWith('ae:')) { const sd = k.slice(3); return f => f.ae[sd] || 0; }
+    return { nutresa: f => f.p ? f.p.codigoNutresa : '', cod: f => f.cod, prod: f => f.p ? f.p.nombre : '', und: f => f.p ? f.p.unidadMedida : '',
+      sapInv: f => f.sap ? f.sap.inventario : null, sapCal: f => f.sap ? f.sap.calidad : null, sapBlq: f => f.sap ? f.sap.bloqueado : null, sapTot: f => f.sap ? f.sapTotal : null,
+      cal: f => f.calidad, blq: f => f.bloqueado, planta: f => f.planta, dif: f => f.dif }[k];
+  };
+  const valCic = k => ({ estado: f => f.listo ? 1 : 0, nutresa: f => f.p ? f.p.codigoNutresa : '', cod: f => f.cod, prod: f => f.p ? f.p.nombre : '', und: f => f.p ? f.p.unidadMedida : '',
+    sapInv: f => f.sap ? f.sap.inventario : null, sapCal: f => f.sap ? f.sap.calidad : null, sapBlq: f => f.sap ? f.sap.bloqueado : null, sapTot: f => f.sap ? f.sapTotal : null,
+    pk: f => f.contado ? f.picking : null, ae: f => f.aereo, cal: f => f.contado ? f.calidad : null, blq: f => f.contado ? f.bloqueado : null,
+    planta: f => f.contado ? f.planta : null, dif: f => f.contado ? f.dif : null, antes: f => f.antes, difAntes: f => f.contado && f.antes != null ? f.difAntes : null,
+    rcTot: f => f.rc && f.rc.hecho ? f.rc.total : null, rcSap: f => f.rc && f.rc.hecho ? f.rc.difSap : null, rcCont: f => f.rc && f.rc.hecho ? f.rc.difConteo : null,
+    rcQuien: f => f.rc && f.rc.hecho ? f.rc.ult.usuario : null, conto: f => f.ult ? f.ult.usuario : null }[k]);
+
+  // Sedes que se suman en el inventario: la abierta primero y después las demás
+  const sedesInv = () => [{ id: ses.sedeId, nombre: nombreSede(ses.sedeId) }].concat(((invData && invData.otrasSedes) || []).map(o => ({ id: o.sedeId, nombre: o.nombre })));
+  // Almacenes de un producto: se abren y se cierran (para no llenar la tabla)
+  const invAlmAbiertos = new Set();
+  function invVerAlm(cod) { if (invAlmAbiertos.has(cod)) invAlmAbiertos.delete(cod); else invAlmAbiertos.add(cod); if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); }
+  const almCorto = key => { if (!key) return ''; const a = codGen().almacenes[key]; return a ? (a.alm || a.nombre) : String(key).replace(/^Z:/, ''); };
 
   function enlazarInventario() {
     if ($('cpTabla')) cpEnlazar();
@@ -3781,16 +3853,110 @@
     }).catch(e => { if ($('histInv')) $('histInv').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   }
 
-  function descargarInventarioSap() {
-    const l = filtrarInventario(datosInventario());
+  // Excel del inventario con la plantilla de Control Interno (FORMATO INVENTARIO CONTROL INTERNO), columnas A a la Z.
+  // Un producto contado en varios almacenes sale en una fila por almacén (lo de SAP va en el almacén con más cantidad).
+  const JSZIP_URL = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
+  function cargarScript(url) {
+    return new Promise((ok, mal) => {
+      const ya = document.querySelector(`script[src="${url}"]`);
+      if (ya && ya.dataset.listo) return ok();
+      const sc = ya || document.createElement('script');
+      sc.addEventListener('load', () => { sc.dataset.listo = '1'; ok(); });
+      sc.addEventListener('error', () => mal(new Error('No se pudo preparar el Excel con la plantilla (revisa la señal).')));
+      if (!ya) { sc.src = url; document.head.appendChild(sc); }
+    });
+  }
+  function filasPlantillaInv(l) {
+    const filas = [];
+    l.forEach(f => {
+      const alms = f.almacenes.length ? f.almacenes : [{ key: '', picking: f.picking, aereo: f.aereo, calidad: f.calidad, bloqueado: f.bloqueado, pk: f.pk, ae: f.ae }];
+      alms.forEach((a, i) => {
+        const sap = i === 0 && f.sap ? f.sap : null, alm = almCorto(a.key);
+        filas.push({ nutresa: f.p ? f.p.codigoNutresa || '' : '', cod: f.cod, nombre: f.p ? f.p.nombre : '', alm, umb: f.p ? f.p.unidadMedida || 'UN' : '',
+          libre: sap ? sap.inventario : 0, calidadSap: sap ? sap.calidad : 0, bloqueoSap: sap ? sap.bloqueado : 0,
+          picking: a.picking, aereo: a.aereo, calidad: a.calidad, bloqueado: a.bloqueado, pk: a.pk || {}, ae: a.ae || {} });
+      });
+    });
+    return filas;
+  }
+  async function descargarInventarioSap() {
+    if (sinPermiso('reportes')) return;
+    const l = filtrarInventario(datosInventario()).filter(f => f.sap || f.planta);
     if (!l.length) return toast('No hay datos para descargar', 'error');
-    const zn = f => [...f.zonas].map(z => (sede.zonaPorId[z] || {}).nombre || z).join(', ');
-    descargarExcel(`Inventario SAP ${nombreSede(ses.sedeId)} ${hoyISO()}.xlsx`, { Inventario: l.map(f => ({
-      'Código Nutresa': f.p ? f.p.codigoNutresa : '', 'Código Atlantic': f.cod, 'Producto': f.p ? f.p.nombre : '', 'Unidad': f.p ? f.p.unidadMedida : '',
-      'Zona': zn(f), 'Inventario SAP': f.sap ? f.sap.inventario : 0, 'Calidad SAP': f.sap ? f.sap.calidad : 0, 'Bloqueado SAP': f.sap ? f.sap.bloqueado : 0,
-      'Total SAP': f.sapTotal, 'Picking': f.picking, 'Aéreo': f.aereo, 'Calidad planta': f.calidad, 'Bloqueado planta': f.bloqueado,
-      'Total planta': f.planta, 'Diferencia': f.dif, 'Último conteo': f.ult ? fechaHora(f.ult.fecha) : '', 'Contó': f.ult ? f.ult.usuario : ''
-    })) });
+    toast('Preparando el Excel…', 'ok');
+    try {
+      if (!window.JSZip) await cargarScript(JSZIP_URL);
+      const resp = await fetch('plantilla_inventario.xlsx', { cache: 'no-cache' });
+      if (!resp.ok) throw new Error('No se encontró la plantilla del Excel (plantilla_inventario.xlsx).');
+      const zip = await JSZip.loadAsync(await resp.arrayBuffer());
+      const ruta = 'xl/worksheets/sheet1.xml';
+      let x = await zip.file(ruta).async('string');
+      const h = new Date(), sedeN = nombreSede(ses.sedeId);
+      const xe = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      // La fila 9 de la plantilla trae el formato de cada columna (moneda, miles, bordes…)
+      const r9 = x.match(/<row r="9"[^>]*>[\s\S]*?<\/row>/)[0];
+      const attrFila = (r9.match(/<row r="9"([^>]*)>/) || ['', ''])[1];
+      const est = {};
+      r9.replace(/<c r="([A-Z]+)9" s="(\d+)"/g, (m, c, st) => { est[c] = st; return m; });
+      const celda = (col, r, v) => {
+        const st = est[col] ? ` s="${est[col]}"` : '';
+        if (v === undefined || v === null || v === '') return `<c r="${col}${r}"${st}/>`;
+        if (typeof v === 'object') return `<c r="${col}${r}"${st}><f>${xe(v.f)}</f>${typeof v.v === 'number' ? `<v>${v.v}</v>` : ''}</c>`;
+        if (typeof v === 'number') return `<c r="${col}${r}"${st}><v>${v}</v></c>`;
+        return `<c r="${col}${r}"${st} t="inlineStr"><is><t xml:space="preserve">${xe(v)}</t></is></c>`;
+      };
+      const numO = v => (v !== '' && v !== null && v !== undefined && !isNaN(Number(v)) ? Number(v) : v);
+      const COLS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+      const filas = filasPlantillaInv(l);
+      // De la O a la V: picking de cada sede y después aéreo de cada sede (caben 4 sedes; si hay más, la última columna junta las demás)
+      const SD = sedesInv(), max = 4, grupoS = SD.length > max ? SD.slice(0, max - 1).concat([{ id: '*', nombre: 'OTRAS SEDES', ids: SD.slice(max - 1).map(x => x.id) }]) : SD;
+      const deS = (o, x) => x.id === '*' ? x.ids.reduce((t, k) => t + (o[k] || 0), 0) : (o[x.id] || 0);
+      const colPk = grupoS.map((x, i) => COLS[14 + i]), colAe = grupoS.map((x, i) => COLS[14 + grupoS.length + i]);
+      const xml = filas.map((y, i) => {
+        const r = 9 + i, totSap = y.libre + y.calidadSap + y.bloqueoSap, totFis = y.picking + y.aereo + y.calidad + y.bloqueado;
+        const v = { A: { f: `IFERROR(IF(Y${r}<>"",Y${r}*(I${r}/H${r})),"")` }, B: numO(y.nutresa), C: numO(y.cod), D: y.nombre, F: numO(y.alm), G: y.umb,
+          H: y.libre, J: y.calidadSap, L: y.bloqueoSap, N: { f: `H${r}+J${r}+L${r}`, v: totSap },
+          W: y.calidad, X: y.bloqueado,
+          Y: { f: `SUM(O${r}:X${r})`, v: totFis }, Z: { f: `Y${r}-N${r}`, v: +(totFis - totSap).toFixed(3) } };
+        grupoS.forEach((x, i) => { v[colPk[i]] = deS(y.pk, x); v[colAe[i]] = deS(y.ae, x); });
+        return `<row r="${r}"${attrFila}>${COLS.map(c => celda(c, r, v[c])).join('')}</row>`;
+      }).join('');
+      const fin = 8 + filas.length;
+      const texto = (ref, t) => { x = x.replace(new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`), (m, at) => {
+        const st = (at.match(/ s="\d+"/) || [''])[0];
+        return `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${xe(t)}</t></is></c>`; }); };
+      x = x.replace(r9, () => xml);
+      texto('F3', `FECHA: ${pad2(h.getDate())}.${pad2(h.getMonth() + 1)}.${h.getFullYear()}`);
+      texto('F4', `SUCURSAL: BARRANQUILLA · SEDES: ${SD.map(x => String(x.nombre).toUpperCase()).join(', ')}`);
+      'OPQRSTUV'.split('').forEach(c => texto(c + '8', ''));
+      grupoS.forEach((x, i) => { texto(colPk[i] + '8', `PICKING ${String(x.nombre).toUpperCase()}`); texto(colAe[i] + '8', `AEREO ${String(x.nombre).toUpperCase()}`); });
+      x = x.replace('SUM($A$9:$A$555)', () => `SUM($A$9:$A$${fin})`).replace('SUBTOTAL(9,Z8:Z88)', () => `SUBTOTAL(9,Z9:Z${fin})`)
+        .replace(/<dimension ref="[^"]*"\/>/, `<dimension ref="A1:Z${fin}"/>`)
+        .replace('</sheetData>', `</sheetData><autoFilter ref="B8:Z${fin}"/>`);
+      zip.file(ruta, x);
+      let wbx = await zip.file('xl/workbook.xml').async('string');
+      const nombreFiltro = `<definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'INV FINAL'!$B$8:$Z$${fin}</definedName>`;
+      wbx = wbx.includes('<definedNames/>') ? wbx.replace('<definedNames/>', () => `<definedNames>${nombreFiltro}</definedNames>`) : wbx.replace('<definedNames>', () => `<definedNames>${nombreFiltro}`);
+      zip.file('xl/workbook.xml', wbx);
+      const blob = await zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
+      const url = URL.createObjectURL(blob);
+      const aEl = document.createElement('a');
+      aEl.href = url; aEl.download = `Inventario ${sedeN} ${hoyISO()}.xlsx`;
+      document.body.appendChild(aEl); aEl.click(); aEl.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) {
+      // Sin la plantilla (sin señal o algo falló): sale el Excel sencillo con las mismas columnas, para no quedarse sin nada
+      toast((e.message || 'No se pudo usar la plantilla') + ' Se descargó en formato sencillo.', 'error');
+      const sedeN = nombreSede(ses.sedeId);
+      descargarExcel(`Inventario ${sedeN} ${hoyISO()}.xlsx`, { 'INV FINAL': filasPlantillaInv(l).map(x => ({
+        'COD NUTRESA': x.nutresa, 'COD ATL': x.cod, 'TEXTO BREVE DE MATERIAL': x.nombre, 'ALMACEN': x.alm, 'UMB': x.umb,
+        'LIBRE UTILIZACIÓN': x.libre, 'CALIDAD SAP': x.calidadSap, 'BLOQUEO SAP': x.bloqueoSap, 'TOTAL SAP': x.libre + x.calidadSap + x.bloqueoSap,
+        ...Object.fromEntries(sedesInv().map(s => ['PICKING ' + s.nombre.toUpperCase(), x.pk[s.id] || 0])),
+        ...Object.fromEntries(sedesInv().map(s => ['AEREO ' + s.nombre.toUpperCase(), x.ae[s.id] || 0])),
+        'CALIDAD': x.calidad, 'BLOQUEO': x.bloqueado,
+        'TOTAL FISICO': x.picking + x.aereo + x.calidad + x.bloqueado,
+        'DIFERENCIA': +((x.picking + x.aereo + x.calidad + x.bloqueado) - (x.libre + x.calidadSap + x.bloqueoSap)).toFixed(3) })) });
+    }
   }
 
   /* ----- Cargar el Excel de SAP ----- */
@@ -4586,12 +4752,13 @@
     const l = todos.filter(f => (cicF.estado !== 'pend' || !f.listo) && (cicF.estado !== 'hecho' || f.listo) && (cicF.estado !== 'dif' || (f.contado && f.dif))
       && (!pal.length || pal.every(w => sinTilde(`${f.cod} ${f.p ? f.p.codigoNutresa + ' ' + f.p.nombre : ''}`).includes(w))))
       .sort((a, b) => (a.listo - b.listo) || (a.p ? a.p.nombre : a.cod).localeCompare(b.p ? b.p.nombre : b.cod));
+    const lo = aplicarOrden('cic', l, valCic);
     const rc = esReconf(c);
     const difCls = d => !d ? 'dif-ok' : d < 0 ? 'dif-falta' : 'dif-sobra';
     const difH = d => `<span class="dif ${difCls(d)}">${d > 0 ? '+' : ''}${nInv(d)}</span>`;
     const conRc = veSap && !rc && (cicData.reconfs || []).length;          // columnas de reconfirmación en el cíclico
     const conAntes = veSap && rc && !!cicData.ciclico.base;                // en la reconfirmación: contra lo que había
-    const pg = paginar('cic', l, pintarCicTabla);
+    const pg = paginar('cic', lo, pintarCicTabla);
     const clic = f => contar && (!f.contado || !veSap) ? `cicContar('${esc(f.cod)}')` : veSap ? `historialInventario('${esc(f.cod)}')` : '';
     const filas = pg.filas.map(f => `<tr onclick="${clic(f)}" class="${f.listo ? '' : 'cic-pend'}">
         <td>${f.listo ? `<span class="tag ok">${rc ? 'Reconfirmado' : 'Contado'}</span>` : '<span class="tag amar">Pendiente</span>'}</td>
@@ -4622,13 +4789,13 @@
       <div class="tabla-wrap mt8"><table class="tabla inv-tabla">
         <thead>
           <tr class="inv-grupos"><th colspan="5"></th>${veSap ? '<th colspan="4" class="g-sap">SAP' + (c && c.archivo ? ' (Excel del cíclico)' : '') + '</th>' : ''}<th colspan="5">${veSap ? (rc ? 'Planta (lo reconfirmado + plano)' : 'Planta (conteo del cíclico + plano)') : 'Lo contado'}</th>${veSap ? '<th></th>' : ''}${conAntes ? '<th colspan="2" class="g-rc">Contra lo que había</th>' : ''}${conRc ? '<th colspan="4" class="g-rc">Reconfirmación</th>' : ''}<th></th>${contar ? '<th></th>' : ''}</tr>
-          <tr><th>Estado</th><th>Cód. Nutresa</th><th>Cód. Atlantic</th><th>Producto</th><th>Unidad</th>
-            ${veSap ? '<th class="num g-sap">Inventario</th><th class="num g-sap">Calidad</th><th class="num g-sap">Bloqueado</th><th class="num g-sap">Total</th>' : ''}
-            <th class="num">Picking</th><th class="num">Aéreo</th><th class="num">Calidad</th><th class="num">Bloqueado</th><th class="num">Total</th>
-            ${veSap ? '<th class="num">Diferencia</th>' : ''}
-            ${conAntes ? '<th class="num g-rc">Había (conteo anterior)</th><th class="num g-rc">Dif. vs anterior</th>' : ''}
-            ${conRc ? '<th class="num g-rc">Reconfirmado</th><th class="num g-rc">Dif. reconf. vs SAP</th><th class="num g-rc">Dif. reconf. vs conteo</th><th class="g-rc">Reconfirmó</th>' : ''}
-            <th>Contó</th>${contar ? '<th><span class="sr">Corregir</span></th>' : ''}</tr>
+          <tr>${thO('cic', 'estado', 'Estado')}${thO('cic', 'nutresa', 'Cód. Nutresa')}${thO('cic', 'cod', 'Cód. Atlantic')}${thO('cic', 'prod', 'Producto')}${thO('cic', 'und', 'Unidad')}
+            ${veSap ? thO('cic', 'sapInv', 'Inventario', 'num g-sap') + thO('cic', 'sapCal', 'Calidad', 'num g-sap') + thO('cic', 'sapBlq', 'Bloqueado', 'num g-sap') + thO('cic', 'sapTot', 'Total', 'num g-sap') : ''}
+            ${thO('cic', 'pk', 'Picking', 'num')}${thO('cic', 'ae', 'Aéreo', 'num')}${thO('cic', 'cal', 'Calidad', 'num')}${thO('cic', 'blq', 'Bloqueado', 'num')}${thO('cic', 'planta', 'Total', 'num')}
+            ${veSap ? thO('cic', 'dif', 'Diferencia', 'num') : ''}
+            ${conAntes ? thO('cic', 'antes', 'Había (conteo anterior)', 'num g-rc') + thO('cic', 'difAntes', 'Dif. vs anterior', 'num g-rc') : ''}
+            ${conRc ? thO('cic', 'rcTot', 'Reconfirmado', 'num g-rc') + thO('cic', 'rcSap', 'Dif. reconf. vs SAP', 'num g-rc') + thO('cic', 'rcCont', 'Dif. reconf. vs conteo', 'num g-rc') + thO('cic', 'rcQuien', 'Reconfirmó', 'g-rc') : ''}
+            ${thO('cic', 'conto', 'Contó')}${contar ? '<th><span class="sr">Corregir</span></th>' : ''}</tr>
         </thead>
         <tbody>${filas || `<tr><td colspan="${cols}" class="muted">No hay productos con ese filtro.</td></tr>`}</tbody></table></div>${pg.barra}`;
   }
@@ -7277,7 +7444,10 @@
     const l = $('escLeido');
     if (l) { l.textContent = texto; l.hidden = false; }
     if ($('escEstado')) $('escEstado').textContent = 'Código leído';
-    setTimeout(() => { cerrarEscaner(); codigoLeido(texto); }, 350);
+    setTimeout(() => {
+      try { cerrarEscaner(); } catch (e) { const o = $('escaner'); if (o) o.remove(); }
+      try { codigoLeido(texto); } catch (e) { toast('Código leído: ' + texto + '. No se pudo abrir: ' + (e.message || e), 'error'); }
+    }, 350);
   }
 
   function escribirEnEscaner() {
@@ -7315,9 +7485,16 @@
   function teclaEscaner(ev) {
     if (!$('escaner')) return;
     if (ev.key === 'Escape') { ev.preventDefault(); cerrarEscaner(); return; }
-    // Mientras está el escáner, la pistola no debe escribir en la pantalla de atrás
     if (ev.target && ev.target.id === 'escTxt') return;
+    // Mientras está la cámara, si disparan el lector de la radiofrecuencia (RT40S…), lo que lee se usa de una vez
     ev.stopPropagation();
+    if (ev.key === 'Enter' || ev.key === 'Tab') { ev.preventDefault(); if (esc_.tec) { clearTimeout(esc_.tecT); const t = esc_.tec; esc_.tec = ''; exitoEscaner(t); } return; }
+    if (ev.key && ev.key.length === 1) {
+      ev.preventDefault();
+      esc_.tec = (esc_.tec || '') + ev.key;
+      clearTimeout(esc_.tecT);
+      esc_.tecT = setTimeout(() => { const t = esc_.tec; esc_.tec = ''; if (t && t.trim().length >= 3) exitoEscaner(t.trim()); }, 150);
+    }
   }
 
   function pararCamara() {
@@ -7327,11 +7504,61 @@
   }
 
   function cerrarEscaner() {
-    pararCamara();
     document.removeEventListener('keydown', teclaEscaner, true);
     const ov = $('escaner');
-    if (ov) ov.remove();
+    if (ov) ov.remove();          // primero se quita la pantalla, así nunca se queda pegada en "Código leído"
+    try { pararCamara(); } catch (e) {}
+    esc_.tec = ''; clearTimeout(esc_.tecT);
   }
+
+  /* ----- Radiofrecuencia / pistola (RT40S y similares): el lector escribe el código como si fuera un teclado -----
+     1. Si no hay ningún campo seleccionado (en los equipos táctiles la barra no queda seleccionada sola),
+        lo que lee se toma igual: va al campo de código de la pantalla (Ingresar, Consultar…) o a la barra de escanear.
+     2. Si el lector no manda Enter al final, el código se toma solo cuando termina de escribir. */
+  const lectorT = { buf: '', ult: 0, rap: 0, t: null, campo: null, n: 0 };
+  const editable = el => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  const CAMPOS_COD = ['ingCod', 'cfQ', 'cpQ', 'invProd', 'invLug', 'prQ', 'bpQ', 'rtCod', 'scan'];
+  function codigoSinCampo(t) {
+    const id = CAMPOS_COD.find(k => $(k) && $(k).offsetParent !== null);
+    if (!id) return toast('Código leído: ' + t + '. Abre la pantalla donde lo vas a usar.', 'error');
+    camDestino = id;
+    codigoLeido(t);
+  }
+  document.addEventListener('keydown', ev => {
+    if ($('escaner') || !ses || pantalla !== 'app') return;
+    const ahora = Date.now(), el = document.activeElement;
+    if (!editable(el) || el === document.body) {
+      // Nada seleccionado: se junta lo que va llegando muy rápido (un lector, no una persona)
+      if (ev.key === 'Enter' || ev.key === 'Tab') {
+        if (lectorT.buf.length >= 3 && lectorT.rap >= 2) { ev.preventDefault(); clearTimeout(lectorT.t); const t = lectorT.buf; lectorT.buf = ''; lectorT.rap = 0; codigoSinCampo(t); }
+        return;
+      }
+      if (!ev.key || ev.key.length !== 1 || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      if (ahora - lectorT.ult > 70) { lectorT.buf = ''; lectorT.rap = 0; } else lectorT.rap++;
+      lectorT.ult = ahora; lectorT.buf += ev.key;
+      clearTimeout(lectorT.t);
+      lectorT.t = setTimeout(() => { const t = lectorT.buf; const r = lectorT.rap; lectorT.buf = ''; lectorT.rap = 0; if (t.length >= 3 && r >= 2) codigoSinCampo(t); }, 150);
+      return;
+    }
+    if (ev.key === 'Enter') { clearTimeout(lectorT.t); lectorT.campo = null; }
+  }, true);
+  // En un campo de código: si llega rapidísimo (lector) y no llega el Enter, se da Enter solo
+  document.addEventListener('input', ev => {
+    const el = ev.target;
+    if (!el || el.tagName !== 'INPUT' || !CAMPOS_COD.includes(el.id)) return;
+    if (ev.inputType && !/^insert(Text|CompositionText|FromPaste)?$/.test(ev.inputType)) return;
+    const ahora = Date.now(), d = ev.data || '';
+    if (lectorT.campo !== el || ahora - lectorT.ult > 70) { lectorT.campo = el; lectorT.n = 0; }
+    lectorT.n += d.length > 1 ? 3 : 1;   // si escribe todo de una vez, también es lector
+    lectorT.ult = ahora;
+    clearTimeout(lectorT.t);
+    lectorT.t = setTimeout(() => {
+      if (lectorT.campo !== el || lectorT.n < 4 || el.value.trim().length < 3 || document.activeElement !== el) return;
+      lectorT.campo = null;
+      const e2 = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true });
+      el.dispatchEvent(e2);
+    }, 180);
+  }, true);
   document.addEventListener('visibilitychange', () => { if (document.hidden) cerrarEscaner(); });
 
   function campoConCamara(inputHtml, destino) {

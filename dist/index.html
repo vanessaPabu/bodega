@@ -793,6 +793,7 @@
   .cd-alm { width: 110px; } .cd-num { width: 80px; }
   .cd-dibujo { border: 1px solid var(--borde); border-radius: 10px; padding: 8px; background: var(--bg); overflow: auto; }
   .cd-dibujo svg { width: 100%; height: auto; display: block; }
+  @media (min-width: 900px) { .cd-dibujo svg { width: auto; max-width: 100%; max-height: 62vh; margin: 0 auto; } }
   .cd-pos { fill: var(--card); stroke: var(--borde2); }
   .cd-omit { fill: var(--seg); stroke: none; }
   .cd-txt { fill: var(--txt); text-anchor: middle; dominant-baseline: central; font-weight: 600; font-family: inherit; }
@@ -814,6 +815,17 @@
   .ing-cant { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .ing .ing-in { font-size: 20px; font-weight: 700; text-align: center; }
   .ing .ing-total { font-size: 28px; min-height: 64px; }
+  .th-ord { cursor: pointer; user-select: none; white-space: nowrap; }
+  .th-ord:hover { background: rgba(26,95,208,.08); }
+  .th-ord .ord-i { display: inline-block; margin-left: 4px; font-size: 10px; opacity: .35; }
+  .th-ord.on .ord-i { opacity: 1; color: #1a5fd0; }
+  .th-ord.on { color: #1a5fd0; }
+  .inv-sede { font-weight: 400; font-size: 11px; opacity: .75; white-space: nowrap; }
+  .inv-tabla td.g-ae, .inv-tabla th.g-ae { background: rgba(232,163,61,.07); }
+  .inv-alm-btn { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--borde); background: var(--card); color: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .inv-alm-btn[aria-expanded="true"] { border-color: #1a5fd0; color: #1a5fd0; }
+  .inv-alm-txt { display: block; font-size: 11px; opacity: .65; }
+  .inv-sub td { background: rgba(26,95,208,.05); font-size: 13px; border-top: 0; }
   .ing-aviso { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; padding: 10px 12px; border-radius: 10px; background: #fdecea; border: 2px solid #d93025; color: #7a1712; animation: ingAv 1s ease 2; }
   @keyframes ingAv { 50% { background: #f9c6c1; } }
   .ing-cb { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
@@ -906,7 +918,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-tl7Q7ND1.js"></script>
+  <script type="module" crossorigin src="./assets/index-BIiNziCn.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>
