@@ -1819,7 +1819,7 @@
         const datos = rb.tipo === 'PESO'
           ? { tipo: 'PESO', codigo: p.id, numCavas: x.nc, pesoCava: x.pc, pesoEstiba: x.pe, pesoBascula: x.pb, recibo, vencimiento: venc, responsable: resp, usuario: ses.nombre }
           : { tipo: 'NORMAL', codigo: p.id, cajas: x.cajas, undXCaja: x.und, recibo, vencimiento: venc, responsable: resp, usuario: ses.nombre };
-        creados.push(await llamar('bdCrearEtiqueta', datos));
+        creados.push(await llamar('bdCrearEtiqueta', Object.assign({ sedeId: ses.sedeId }, datos)));
       }
       if (rb.tipo === 'NORMAL' && rb.undX) p.undPorCaja = rb.undX;
       const t = totalPartes();
@@ -1879,7 +1879,7 @@
   // Volver a imprimir los rótulos de un producto ya recibido
   function imprimirDeItem(id) {
     const it = rcAct.items.find(x => x.id === id);
-    llamar('bdEtiquetas').then(l => {
+    llamar('bdEtiquetas', ses.sedeId).then(l => {
       rotulos = l;
       const lista = it.etiquetas.map(eid => l.find(e => e.id === eid)).filter(Boolean);
       if (!lista.length) return toast('No encontré esos rótulos', 'error');
@@ -4735,6 +4735,26 @@
           : { orden: (g.guardado ? 100000 : 0) + i * 10, dir: dirDef, pasillo: String(i), piso: false, nueva: !!g.guardado };
       });
     });
+    return normalizarOrden(cfg);
+  }
+
+  // Cada almacén se numera solo, desde la fila 1 y el pasillo 1, sin huecos ni números repetidos.
+  // Si dos zonas del mismo almacén quedaron con el mismo número de fila (porque una zona se pasó de otro almacén),
+  // cada zona va en bloque (en el orden de las zonas) en vez de mezclarse.
+  function normalizarOrden(cfg) {
+    const porAlm = {};
+    sede.zonas.forEach(z => columnasZona(z).forEach(c => {
+      if (!cfg.columnas[c.key]) return;
+      const a = (cfg.zonas[z.id] || {}).almacen || 'Z:' + z.id;
+      (porAlm[a] = porAlm[a] || []).push({ key: c.key, zonaId: z.id });
+    }));
+    Object.values(porAlm).forEach(cols => {
+      const ord = c => Number(cfg.columnas[c.key].orden) || 0, zo = c => Number((cfg.zonas[c.zonaId] || {}).orden) || 0;
+      const vistos = {};
+      const choque = cols.some(c => { const o = ord(c); if (vistos[o] !== undefined && vistos[o] !== c.zonaId) return true; vistos[o] = c.zonaId; return false; });
+      cols.sort((a, b) => choque ? (zo(a) - zo(b) || ord(a) - ord(b)) : (ord(a) - ord(b) || zo(a) - zo(b)));
+      cols.forEach((c, i) => { const x = cfg.columnas[c.key]; x.orden = (i + 1) * 10; if (!x.pasManual) x.pasillo = String(i + 1); });
+    });
     return cfg;
   }
 
@@ -4941,7 +4961,17 @@
     </svg>`;
   }
   function cdCambio() { cd.cambios = true; cd.v = (cd.v || 0) + 1; pintarApp(); }
-  function cdZona(id, campo, v) { cd.cfg.zonas[id].almacen = String(v).trim().replace(/\D/g, ''); cdCambio(); }
+  function cdZona(id, campo, v) {
+    const nuevo = String(v).trim().replace(/\D/g, '');
+    if (nuevo === cd.cfg.zonas[id].almacen) return;
+    cd.cfg.zonas[id].almacen = nuevo;
+    // La zona pasa al final de su nuevo almacén; los dos almacenes se vuelven a numerar desde 1
+    const z = sede.zonaPorId[id];
+    if (z) columnasZona(z).forEach(c => { const x = cd.cfg.columnas[c.key]; if (x) { x.orden = 1e7 + (Number(x.orden) || 0); x.pasManual = false; } });
+    normalizarOrden(cd.cfg);
+    if (nuevo) cd.alm = nuevo;
+    cdCambio();
+  }
   function cdDig(v) { cd.cfg.digitos = v; cdCambio(); }
   function cdCol(key, campo, v) { cd.cfg.columnas[key][campo] = v; if (campo === 'pasillo') cd.cfg.columnas[key].pasManual = true; cdCambio(); }
   const cdColsAlm = () => generarCodigos(cd.cfg).cols.filter(c => (c.alm || 'Z:' + c.zonaId) === cd.alm);
@@ -5517,7 +5547,8 @@
       ${p ? `<div class="info"><span class="fuerte">${esc(p.nombre)}</span>
           <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · Atlantic ${esc(p.id)} · ${kg ? 'peso variable (kg)' : `${p.undPorCaja || 1} und por caja`}</span>
           ${ingCbHtml(S, p, kg)}
-          ${ya ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Si lo guardas, te pregunta si sumar o reemplazar.</span>` : ''}</div>
+          ${ya ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Si lo guardas, te pregunta si sumar o reemplazar.</span>` : ''}
+          <div id="ingAviso">${ingAvisoHtml(S)}</div></div>
         <div><label class="lbl" for="ingCant">3. ${kg ? 'Peso total (kg)' : 'Cantidad total (unidades)'}</label>
           <input id="ingCant" class="campo ing-in ing-total" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>
         <p id="fErr" class="error" hidden></p>
@@ -5554,7 +5585,27 @@
     const u = cs.reduce((a, c) => !a || c.fecha > a.fecha ? c : a, null);
     const lugar = (pk[0] || cs[0]).ubicacion;
     const de = t => cs.filter(c => c.tipo === t && c.ubicacion === lugar).reduce((a, c) => a + c.cantidad, 0);
-    return { cant: pk.reduce((a, c) => a + c.cantidad, 0), lugar, calidad: de('CALIDAD'), bloqueado: de('BLOQUEADO'), usuario: u && u.usuario };
+    return { cant: pk.reduce((a, c) => a + c.cantidad, 0), lugar, calidad: de('CALIDAD'), bloqueado: de('BLOQUEADO'), usuario: u && u.usuario, fecha: u && u.fecha };
+  }
+  // ¿Otra persona guardó este mismo producto (en este almacén) mientras yo lo estaba llenando?
+  function ingOtro(S) {
+    if (!ing.cod) return null;
+    const ya = ingYaContado(S || cpScope(), ing.cod);
+    if (!ya || ya.fecha === ing.base || !ya.usuario || ya.usuario === ses.nombre) return null;
+    return ya;
+  }
+  function ingAvisoHtml(S) {
+    const o = ingOtro(S), p = o && prodDe(ing.cod);
+    if (!o) return '';
+    return `<div class="ing-aviso" role="alert"><b>⚠ ${esc(o.usuario)} también está llenando este producto.</b>
+      <span>Acaba de guardar <b>${nInv(o.cant)} ${ingEsKg(p) ? 'kg' : 'und'}</b> aquí (${fechaHora(o.fecha)}). Pónganse de acuerdo antes de guardar para no contarlo dos veces.</span></div>`;
+  }
+  // Llega algo en vivo: si es el producto que estoy llenando, avisa (y suena una vez)
+  function ingAvisoVivo() {
+    if (!$('ingAviso')) return;
+    const h = ingAvisoHtml();
+    if (h && !ing.avisado) { ing.avisado = true; try { pitido(); if (navigator.vibrate) navigator.vibrate([120, 80, 120]); } catch (e) {} }
+    $('ingAviso').innerHTML = h;
   }
   function ingTotal() {
     const el = $('ingCant');
@@ -5568,6 +5619,8 @@
     if (!p) { if (enter && String(txt).trim()) toast('No hay un producto con ese código', 'error'); return; }
     if (S.cic && !S.cic.codigos.includes(p.id)) { toast(`${p.nombre} no está en este cíclico. Solo se cuentan los productos que mandaron a contar.`, 'error'); $('ingCod').value = ''; return; }
     ing.cod = p.id;
+    const ya = ingYaContado(S, p.id);
+    ing.base = ya ? ya.fecha : null; ing.avisado = false;   // lo que había cuando empecé a llenarlo
     pintarApp();
     setTimeout(() => { const f = $('ingCant'); if (f) f.focus(); }, 30);
   }
@@ -5593,6 +5646,15 @@
     const ya = ingYaContado(S, p.id);
     if (!ya) return ingEnviar(p, t, null);
     const u = ingEsKg(p) ? 'kg' : 'und';
+    const otro = ingOtro(S);
+    if (otro) return abrirModal(`<div class="fila-sb"><span class="h2">⚠ ${esc(otro.usuario)} también llenó este producto</span>${btnCerrar()}</div>
+      <span class="mt12">Mientras lo llenabas, <b>${esc(otro.usuario)}</b> guardó <b>${nInv(otro.cant)} ${u}</b> de ${esc(p.nombre)} en este almacén (${fechaHora(otro.fecha)}).
+        Tú llevas <b>${nInv(t)} ${u}</b>. No se suma solo: escoge qué queda.</span>
+      <div class="col gap8 mt16">
+        <button class="btn btn-sec btn-xl" onclick="cerrarModal(); ing.cod=''; pintarApp(); toast('Quedó lo que ya estaba guardado', 'ok')">Dejar lo de ${esc(otro.usuario)}: ${nInv(otro.cant)} ${u}</button>
+        <button class="btn btn-ent-solido btn-xl" onclick="cerrarModal(); ingEnviar(prodDe('${esc(p.id)}'), ${t}, 'reemplazar')">Dejar lo mío: ${nInv(t)} ${u}</button>
+        <button class="btn btn-sec btn-xl" onclick="cerrarModal(); ingEnviar(prodDe('${esc(p.id)}'), ${t}, 'sumar')">Son partes distintas, sumar: ${nInv(otro.cant + t)} ${u}</button>
+        <button class="btn btn-sec" onclick="cerrarModal()">Cancelar</button></div>`);
     abrirModal(`<div class="fila-sb"><span class="h2">${esc(p.nombre)} ya se contó aquí</span>${btnCerrar()}</div>
       <span class="mt12">Ya hay <b>${nInv(ya.cant)} ${u}</b> (${esc(ya.usuario || '—')}). ¿Lo que acabas de contar es otra parte, o corrige lo de antes?</span>
       <div class="col gap8 mt16">
@@ -6244,6 +6306,7 @@
         <td class="rt-acc"><span class="rt-acc-btns">${e.estado === 'ANULADA' ? '' : `<button class="btn ${nunca ? 'btn-pri' : 'btn-sec'} btn-mini" onclick="reimprimir(${i})">${nunca ? 'Imprimir' : 'Reimprimir'}</button>`}
           ${puede('rotular') && e.estado !== 'ANULADA' ? `<button class="btn btn-sec btn-mini" onclick="duplicarRotulo(${i})" title="Otra estiba con la misma información y otro código">Duplicar</button>` : ''}
           ${puede('rotular') && (e.estado === 'PENDIENTE' || e.estado === 'UBICADA') ? `<button class="btn btn-sec btn-mini" onclick="editarRotulo(${i})" title="Corregir producto, cantidad o fechas">Editar</button>` : ''}
+          ${puede('rotular') && e.estado === 'PENDIENTE' && ini.sedes.length > 1 ? `<button class="btn btn-sec btn-mini" onclick="trasladarRotulo(${i})" title="Pasarlo a otra sede">Trasladar</button>` : ''}
           ${puede('rotular') && e.estado === 'PENDIENTE' ? `<button class="btn btn-sec btn-mini txt-rojo" onclick="anularRotulo(${i})" title="Se creó por error: no se podrá ubicar">Anular</button>` : ''}</span></td>
       </tr>`;
     }).join('');
@@ -6272,7 +6335,7 @@
     rotulos = null;
     if ($('rtLista')) $('rtLista').innerHTML = listaRotulos();
     // Los que faltan por imprimir siempre salen en la tabla, aunque sean de antes de la fecha elegida
-    Promise.all([llamar('bdEtiquetasTabla', { desde: rtF.desde, hasta: rtF.hasta }), llamar('bdSinImprimir').catch(() => [])])
+    Promise.all([llamar('bdEtiquetasTabla', { desde: rtF.desde, hasta: rtF.hasta, sedeId: ses.sedeId }), llamar('bdSinImprimir', ses.sedeId).catch(() => [])])
       .then(([l, pend]) => {
         const ya = new Set(l.map(e => e.id));
         rotulos = l.concat(pend.filter(e => !ya.has(e.id)).map(e => Object.assign({ sede: '' }, e)));
@@ -6348,7 +6411,7 @@
     try {
       for (let k = 0; k < n; k++) {
         if (boton && n > 1) boton.textContent = `Guardando ${k + 1} de ${n}…`;
-        const e = await llamar('bdCrearEtiqueta', datos);
+        const e = await llamar('bdCrearEtiqueta', Object.assign({ sedeId: ses.sedeId }, datos));
         creados.push(e);
         tanda.push(Object.assign({ imprimir: true }, e));
         if (rotulos) rotulos = [Object.assign({ sede: '' }, e)].concat(rotulos);
@@ -6476,7 +6539,7 @@
       }); }
     llamar('bdCambiosEtiqueta', e.id).then(l => {
       if (!l.length || !$('erCambios')) return;
-      $('erCambios').innerHTML = `<span class="h3">Cambios anteriores</span>${l.map(c => `<div class="small mt4">${fechaHora(c.fecha)} · ${esc(c.usuario || '—')} · ${c.accion === 'ANULADO' ? 'Anulado' : 'Corregido'}${c.motivo ? ': ' + esc(c.motivo) : ''}</div>`).join('')}`;
+      $('erCambios').innerHTML = `<span class="h3">Cambios anteriores</span>${l.map(c => `<div class="small mt4">${fechaHora(c.fecha)} · ${esc(c.usuario || '—')} · ${c.accion === 'ANULADO' ? 'Anulado' : c.accion === 'TRASLADO' ? `Trasladado de ${esc((c.antes || {}).sede || '')} a ${esc((c.despues || {}).sede || '')}` : 'Corregido'}${c.motivo ? ': ' + esc(c.motivo) : ''}</div>`).join('')}`;
     }).catch(() => {});
   }
 
@@ -6530,6 +6593,33 @@
       rtSel.delete(e.id);
       if ($('rtLista')) $('rtLista').innerHTML = listaRotulos();
       cerrarModal(); toast(`Rótulo ${e.id} anulado`, 'ok');
+    }).catch(err => { errForm(err.message); b.disabled = false; });
+  }
+
+  // Pasar un rótulo (todavía sin ubicar) a otra sede: desde ese momento sale allá y no aquí
+  function trasladarRotulo(i) {
+    const e = rotulos[i];
+    if (!e || sinPermiso('rotular')) return;
+    const otras = ini.sedes.filter(s => s.id !== ses.sedeId);
+    abrirModal(`<div class="fila-sb"><span class="h2">Trasladar el rótulo ${esc(e.id)}</span>${btnCerrar()}</div>
+      <div class="info mt12"><span class="fuerte">${esc(e.producto)}</span>
+        <span class="muted small">${e.tipo === 'PESO' ? kg(e.total) + ' · ' + e.cajas + ' cavas' : e.cajas + ' cj · ' + e.total + ' und'} · vence ${fCorta(e.vencimiento)}</span></div>
+      <label class="lbl mt12" for="trSede">¿A qué sede va?</label>
+      <select id="trSede" class="campo">${otras.map(s => `<option value="${esc(s.id)}">${esc(s.nombre)}</option>`).join('')}</select>
+      <label class="lbl mt12" for="trMot">¿Por qué? (opcional)</label>
+      <input id="trMot" class="campo" placeholder="Ej. La mercancía se fue para esa bodega" autocomplete="off">
+      <span class="small muted mt8">Desde ahora el rótulo sale en esa sede y allá lo ubican. Aquí deja de salir.</span>
+      <p id="fErr" class="error" hidden></p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+        <button id="trOk" class="btn btn-pri btn-xl" onclick="confirmarTrasladoRotulo(${i})">Trasladar</button></div>`);
+  }
+  function confirmarTrasladoRotulo(i) {
+    const e = rotulos[i], b = $('trOk'), destino = $('trSede').value; b.disabled = true;
+    llamar('bdTrasladarEtiqueta', { etiquetaId: e.id, sedeId: destino, motivo: $('trMot').value.trim(), usuario: ses.nombre }).then(() => {
+      rotulos.splice(i, 1);
+      rtSel.delete(e.id);
+      if ($('rtLista')) $('rtLista').innerHTML = listaRotulos();
+      cerrarModal(); toast(`Rótulo ${e.id} trasladado a ${nombreSede(destino)}`, 'ok');
     }).catch(err => { errForm(err.message); b.disabled = false; });
   }
 
@@ -6810,7 +6900,7 @@
     q.addEventListener('input', pintarPrLista);
     q.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); elegirPrTexto(q.value); } });
     if (!('ontouchstart' in window)) q.focus();
-    llamar('bdEtiquetasPorUbicar').then(l => { prLista = l; pintarPrLista(); })
+    llamar('bdEtiquetasPorUbicar', ses.sedeId).then(l => { prLista = l; pintarPrLista(); })
       .catch(e => { prLista = []; if ($('prLista')) $('prLista').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   }
 
@@ -6849,7 +6939,7 @@
     if (/^E\d{4,}$/.test(v)) {
       const e = (prLista || []).find(x => x.id === v);
       if (e) return elegirRotuloPr(e.id);
-      return llamar('bdEtiqueta', v).then(x => {
+      return llamar('bdEtiqueta', v, ses.sedeId).then(x => {
         const m = rotuloNoUsable(x);
         if (m) return errForm(m);
         ubicando = x; moviendo = null; pedirConfirmUbicar(x, espSel);
@@ -7308,7 +7398,7 @@
     if ($('scan')) $('scan').value = '';
     if (!cod) return toast('Escribe o escanea un código', 'error');
     if (/^E\d{4,}$/.test(cod)) {
-      return llamar('bdEtiqueta', cod).then(empezarUbicar).catch(err => toast(err.message, 'error'));
+      return llamar('bdEtiqueta', cod, ses.sedeId).then(empezarUbicar).catch(err => toast(err.message, 'error'));
     }
     const e = espDeTexto(cod);
     if (e) { pitido(); return abrirPos(e.rackId, e.posicion, e.id); }
@@ -7357,7 +7447,7 @@
   };
 
   function cargarPorImprimir() {
-    return llamar('bdPorImprimir').then(l => { piLista = l; pintarPorImprimir(); })
+    return llamar('bdPorImprimir', ses.sedeId).then(l => { piLista = l; pintarPorImprimir(); })
       .catch(() => { if (piLista === null) { piLista = []; pintarPorImprimir(); } });
   }
 
@@ -7505,7 +7595,7 @@
       $('dlProductos').innerHTML = d.productos.map(p => `<option value="${esc(p.id + ' · ' + p.nombre)}">`).join(''); }).catch(() => {}));
     if (vista === 'rotulo' && hay('etiquetas')) {
       tareas.push(cargarPorImprimir());
-      if (rotulos) tareas.push(Promise.all([llamar('bdEtiquetasTabla', { desde: rtF.desde, hasta: rtF.hasta }), llamar('bdSinImprimir').catch(() => [])])
+      if (rotulos) tareas.push(Promise.all([llamar('bdEtiquetasTabla', { desde: rtF.desde, hasta: rtF.hasta, sedeId: ses.sedeId }), llamar('bdSinImprimir', ses.sedeId).catch(() => [])])
         .then(([l, pend]) => { const ya = new Set(l.map(e => e.id)); rotulos = l.concat(pend.filter(e => !ya.has(e.id)).map(e => Object.assign({ sede: '' }, e))); })
         .catch(() => {}));
     }
@@ -7537,6 +7627,7 @@
       if ($('rtLista') && rotulos) $('rtLista').innerHTML = listaRotulos();
       vivoPend = false; return;
     }
+    if (vista === 'productos' && (prodTab === 'inventario' || ctxCic())) ingAvisoVivo();
     if (vista === 'productos' && prodTab === 'inventario' && invSub !== 'reconf') {
       if ($('invTabla') && invData) $('invTabla').innerHTML = tablaInventario();
       vivoPend = false; return;
