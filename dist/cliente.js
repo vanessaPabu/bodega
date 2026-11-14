@@ -8113,6 +8113,7 @@
         <span class="chip">${esc(etiqueta(e))}</span>
         <div class="col flex1 gap4">
           <span class="nombre">${esc(l.nombre)}</span>
+          <span class="small">Cód. Atlantic <b>${esc(l.productoId)}</b></span>
           <span class="muted small">Lote ${esc(l.lote || '—')} · Vence ${fFecha(l.vencimiento)}</span>
         </div>
         ${tagVence(dias(l.vencimiento), true)}
