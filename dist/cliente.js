@@ -577,6 +577,7 @@
 
   let vistaPintada = null;
   function pintarApp() {
+    sugCerrar();   // la lista desplegable de productos no se queda flotando al cambiar la pantalla
     anchoPrevio = esAncho();
     // Al volver a pintar la misma pantalla se queda donde estaba (antes saltaba hacia arriba)
     const misma = vistaPintada === vista;
@@ -3559,6 +3560,8 @@
     (invData.conteos || []).forEach(c => {
       const f = fila(c.codigo), a = enAlm(f, c.ubicacion);
       if (c.tipo === 'PICKING') f.contado = true;
+      if (c.tipo === 'CALIDAD') f.hayCal = true;
+      if (c.tipo === 'BLOQUEADO') f.hayBlo = true;
       if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
       else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
       else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, yo, c.cantidad); suma(a.pk, yo, c.cantidad); }
@@ -3572,12 +3575,21 @@
       o.conteos.forEach(c => {
         const f = fila(c.codigo), a = enAlmK(f, c.almacen);
         if (c.tipo === 'PICKING') f.contado = true;
+        if (c.tipo === 'CALIDAD') f.hayCal = true;
+        if (c.tipo === 'BLOQUEADO') f.hayBlo = true;
         if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
         else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
         else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, o.sedeId, c.cantidad); suma(a.pk, o.sedeId, c.cantidad); }
       });
     });
     return Object.values(m).map(f => {
+      // Calidad y bloqueado = lo del sistema + lo nuevo que reportan. Lo guardado ya trae los dos;
+      // si nadie lo ha registrado todavía, se toma lo del sistema (SAP).
+      if (f.sap) {
+        const pon = (k, v) => { if (!v) return; f[k] += v; const ks = Object.keys(f.alm); const a = ks.length ? f.alm[ks[0]] : (f.alm[''] = { key: '', picking: 0, aereo: 0, calidad: 0, bloqueado: 0, pk: {}, ae: {} }); a[k] += v; };
+        if (!f.hayCal) pon('calidad', Number(f.sap.calidad) || 0);
+        if (!f.hayBlo) pon('bloqueado', Number(f.sap.bloqueado) || 0);
+      }
       // Todo es producto que se tiene: el total suma calidad y bloqueado (en SAP y en planta)
       const sapTotal = f.sap ? f.sap.inventario + f.sap.calidad + f.sap.bloqueado : 0;
       const planta = f.picking + f.aereo + f.calidad + f.bloqueado;
@@ -5790,9 +5802,15 @@
         <div><label class="lbl" for="ingCant">3. ${kg ? 'Peso total (kg)' : 'Cantidad total (unidades)'}</label>
           <input id="ingCant" class="campo ing-in ing-total" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>
         <div class="ing-cal">
-          <button type="button" id="ingCalBtn" class="btn btn-sec btn-mini" onclick="ingVerCalidad()">+ Agregar calidad</button>
-          <div id="ingCalCampo" hidden><label class="lbl" for="ingCal">Calidad (${kg ? 'kg' : 'unidades'})</label>
-            <input id="ingCal" class="campo" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div></div>
+          <span class="fila gap8 wrap-f">
+            <button type="button" id="ingCalBtn" class="btn btn-sec btn-mini" onclick="ingVerExtra('CALIDAD')">+ Agregar calidad</button>
+            <button type="button" id="ingBloBtn" class="btn btn-sec btn-mini" onclick="ingVerExtra('BLOQUEADO')">+ Agregar bloqueado</button></span>
+          <div id="ingCalCampo" hidden><label class="lbl" for="ingCal">Calidad nueva (${kg ? 'kg' : 'und'}) <span class="muted" id="ingCalBase"></span></label>
+            <input id="ingCal" class="campo" type="number" inputmode="decimal" min="0" step="any" placeholder="0" oninput="ingExtraTotal('CALIDAD')">
+            <span class="small muted" id="ingCalTot"></span></div>
+          <div id="ingBloCampo" hidden><label class="lbl" for="ingBlo">Bloqueado nuevo (${kg ? 'kg' : 'und'}) <span class="muted" id="ingBloBase"></span></label>
+            <input id="ingBlo" class="campo" type="number" inputmode="decimal" min="0" step="any" placeholder="0" oninput="ingExtraTotal('BLOQUEADO')">
+            <span class="small muted" id="ingBloTot"></span></div></div>
         <p id="fErr" class="error" hidden></p>
         <button id="ingOk" class="btn btn-ent-solido btn-xl" onclick="ingGuardar()">Guardar</button>` : ''}
       ${prog ? `<div class="cp-prog small">${cpBarra(prog.l, prog.t)} <span><b>${prog.l} de ${prog.t}</b> productos ${esReconf(S.cic) ? 'de la reconfirmación' : 'del cíclico'} contados · faltan <b>${prog.t - prog.l}</b></span></div>` : ''}`}
@@ -5867,16 +5885,37 @@
     setTimeout(() => { const f = $('ingCant'); if (f) f.focus(); }, 30);
   }
   // Calidad a mano (opcional): se abre con el botón; si no la escriben, queda la del Excel
-  function ingVerCalidad() {
-    const S = cpScope(), p = prodDe(ing.cod);
+  // Calidad / bloqueado: lo que ya hay (sistema o lo ya registrado) + lo nuevo que escriben
+  const ING_X = { CALIDAD: ['Cal', 'calidad'], BLOQUEADO: ['Blo', 'bloqueado'] };
+  function ingBaseExtra(S, p, t) {
+    const ya = ingYaContado(S, p.id);
+    if (ya && S.conteos.some(c => c.codigo === p.id && c.tipo === t && c.ubicacion === ya.lugar)) return ya[ING_X[t][1]];
+    if (S.conteos.some(c => c.codigo === p.id && c.tipo === t)) return 0;   // ya se registró en otro lugar
+    const sap = S.sapDe(p.id);
+    return sap ? Number(sap[ING_X[t][1]]) || 0 : 0;
+  }
+  function ingVerExtra(t) {
+    const S = cpScope(), p = prodDe(ing.cod), k = ING_X[t][0];
     if (!p) return;
-    const ya = ingYaContado(S, p.id), sap = S.sapDe(p.id);
-    $('ingCalBtn').hidden = true;
-    $('ingCalCampo').hidden = false;
-    const f = $('ingCal');
-    const actual = ya ? ya.calidad : (sap ? Number(sap.calidad) || 0 : 0);
-    if (actual) f.value = actual;
-    f.focus(); f.select();
+    $(`ing${k}Btn`).hidden = true;
+    $(`ing${k}Campo`).hidden = false;
+    $(`ing${k}Base`).textContent = `· se suma a ${nInv(ingBaseExtra(S, p, t))} que ya hay`;
+    ingExtraTotal(t);
+    $(`ing${k}`).focus();
+  }
+  function ingExtraTotal(t) {
+    const S = cpScope(), p = prodDe(ing.cod), k = ING_X[t][0], el = $(`ing${k}`);
+    if (!p || !el) return;
+    const n = el.value.trim() === '' ? 0 : num(el.value);
+    $(`ing${k}Tot`).textContent = n >= 0 ? `Queda en ${ING_X[t][1]}: ${nInv(+(ingBaseExtra(S, p, t) + n).toFixed(3))} ${ingEsKg(p) ? 'kg' : 'und'}` : '';
+  }
+  // Lo nuevo escrito (null si no abrieron el campo o lo dejaron vacío); false si está mal
+  function ingLeerExtra(t) {
+    const k = ING_X[t][0], el = $(`ing${k}`);
+    if (!el || $(`ing${k}Campo`).hidden || el.value.trim() === '') return null;
+    const n = num(el.value);
+    if (!(n >= 0)) { el.focus(); errForm(`Escribe ${t === 'CALIDAD' ? 'la calidad' : 'el bloqueado'} nuevo (0 si no hay).`); return false; }
+    return n;
   }
   // Borra el código de una vez (para no borrar letra por letra) y deja listo para escanear otro
   function ingLimpiar() {
@@ -5889,7 +5928,7 @@
     if (!c) return;
     c.addEventListener('change', () => ingProducto(c.value));
     c.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); ingProducto(c.value, true); } });
-    if ($('ingCal')) $('ingCal').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); ingGuardar(); } });
+    ['ingCal', 'ingBlo'].forEach(id => { if ($(id)) $(id).addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); ingGuardar(); } }); });
     const ins = [...document.querySelectorAll('.ing-in')];
     ins.forEach((el, i) => {
       el.addEventListener('input', ingCalc);
@@ -5902,18 +5941,14 @@
     const S = cpScope(), p = prodDe(ing.cod);
     if (!ing.alm) return errForm('Escoge el almacén.');
     if (!p) return errForm('Escanea o escribe el código del producto.');
-    // Calidad escrita a mano (si abrieron el campo)
-    const fc = $('ingCal');
-    ing.cal = null;
-    if (fc && !$('ingCalCampo').hidden && fc.value.trim() !== '') {
-      const c = num(fc.value);
-      if (!(c >= 0)) { fc.focus(); return errForm('Escribe la calidad (0 si no hay).'); }
-      ing.cal = c;
-    }
+    // Calidad y bloqueado nuevos (si abrieron los campos): se suman a lo que ya hay
+    const xc = ingLeerExtra('CALIDAD'); if (xc === false) return;
+    const xb = ingLeerExtra('BLOQUEADO'); if (xb === false) return;
+    ing.extra = { CALIDAD: xc, BLOQUEADO: xb };
     const t = ingTotal();
-    // Solo calidad: no hace falta la cantidad de arriba (el picking queda como estaba)
-    if (t === null && ing.cal !== null) return ingEnviar(p, null, 'calidad');
-    if (t === null || !(t >= 0)) { if ($('ingCant')) $('ingCant').focus(); return errForm(ingEsKg(p) ? 'Escribe el peso total (o solo la calidad).' : 'Escribe la cantidad total (o solo la calidad).'); }
+    // Solo calidad / bloqueado: no hace falta la cantidad de arriba (el picking queda como estaba)
+    if (t === null && (xc !== null || xb !== null)) return ingEnviar(p, null, 'extra');
+    if (t === null || !(t >= 0)) { if ($('ingCant')) $('ingCant').focus(); return errForm(ingEsKg(p) ? 'Escribe el peso total (o solo calidad / bloqueado).' : 'Escribe la cantidad total (o solo calidad / bloqueado).'); }
     const ya = ingYaContado(S, p.id);
     if (!ya || !ya.tienePk) return ingEnviar(p, t, null);   // si solo tenía calidad, no hay picking que sumar
     const u = ingEsKg(p) ? 'kg' : 'und';
@@ -5939,11 +5974,18 @@
     // Calidad y bloqueado: los del Excel la primera vez que se cuenta el producto; después se dejan como estaban
     const sap = S.sapDe(p.id);
     const otraVez = t => S.conteos.some(c => c.codigo === p.id && c.tipo === t);
-    const cantidades = modo === 'calidad' ? { CALIDAD: ing.cal } : {
+    // Calidad y bloqueado: lo que ya hay (del sistema la primera vez, o lo ya registrado) + lo nuevo que escribieron
+    const ex = ing.extra || {};
+    const conExtra = tp => +(ingBaseExtra(S, p, tp) + (ex[tp] || 0)).toFixed(3);
+    let cantidades;
+    if (modo === 'extra') {
+      cantidades = {};
+      if (ex.CALIDAD !== null && ex.CALIDAD !== undefined) cantidades.CALIDAD = conExtra('CALIDAD');
+      if (ex.BLOQUEADO !== null && ex.BLOQUEADO !== undefined) cantidades.BLOQUEADO = conExtra('BLOQUEADO');
+    } else cantidades = {
       PICKING: modo === 'sumar' && ya ? +(ya.cant + t).toFixed(3) : t,
-      CALIDAD: ing.cal !== null && ing.cal !== undefined ? (modo === 'sumar' && ya ? +(ya.calidad + ing.cal).toFixed(3) : ing.cal)
-        : ya ? ya.calidad : otraVez('CALIDAD') ? 0 : (sap ? Number(sap.calidad) || 0 : 0),
-      BLOQUEADO: ya ? ya.bloqueado : otraVez('BLOQUEADO') ? 0 : (sap ? Number(sap.bloqueado) || 0 : 0)
+      CALIDAD: conExtra('CALIDAD'),
+      BLOQUEADO: conExtra('BLOQUEADO')
     };
     const b = $('ingOk'); if (b) { b.disabled = true; b.textContent = 'Guardando…'; }
     llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: lugar, codigo: p.id, cantidades, usuario: ses.nombre, ciclicoId: S.id })
@@ -5952,8 +5994,9 @@
         if (S.cic) { lista.forEach(c => { cicData.conteos = rem(cicData.conteos, c); }); const ec = (cicLista || []).find(x => x.id === S.id); if (ec) ec.contados = datosCiclico().filter(x => x.listo).length; }
         else lista.forEach(c => { invData.conteos = rem(invData.conteos || [], c); });
         pitido();
-        toast(modo === 'calidad' ? `✓ ${p.nombre}: calidad ${nInv(cantidades.CALIDAD)} ${ingEsKg(p) ? 'kg' : 'und'}` : `✓ ${p.nombre}: ${nInv(cantidades.PICKING)} ${ingEsKg(p) ? 'kg' : 'und'}${modo === 'sumar' ? ' (sumado)' : ''}${ing.cal !== null && ing.cal !== undefined ? ` · calidad ${nInv(cantidades.CALIDAD)}` : ''}`, 'ok');
-        ing.cod = ''; ing.cal = null;
+        const xs = [ex.CALIDAD != null ? `calidad ${nInv(cantidades.CALIDAD)}` : '', ex.BLOQUEADO != null ? `bloqueado ${nInv(cantidades.BLOQUEADO)}` : ''].filter(Boolean).join(' · ');
+        toast(modo === 'extra' ? `✓ ${p.nombre}: ${xs}` : `✓ ${p.nombre}: ${nInv(cantidades.PICKING)} ${ingEsKg(p) ? 'kg' : 'und'}${modo === 'sumar' ? ' (sumado)' : ''}${xs ? ' · ' + xs : ''}`, 'ok');
+        ing.cod = ''; ing.extra = null;
         pintarApp();
         setTimeout(() => $('ingCod') && $('ingCod').focus(), 30);
       })
@@ -6048,13 +6091,12 @@
   }
   /* ----- Pasar conteos de Inventario a otra sede (cuando los registraron en la sede que no era) -----
      Por ahora lo puede hacer quien tiene el permiso de SAP del inventario (inv_sap). */
-  const puedePasarSede = () => puede('inv_sap') && (ini.sedes || []).length > 1;
+  const puedePasarSede = () => puede('inv_sap');   // cambiar de almacén (y de sede si hay varias)
   const almDeUbic = u => { u = String(u || ''); if (u.startsWith('PICKING-')) return u.slice(8); const x = pasilloDe(u); return x ? almCorto(x.key) : ''; };
   let ps = null;   // { claves: [{codigo, ubicacion}], cont, alListo }
   function pasarSedeAbrir(claves, cont, alListo) {
     if (!claves.length) return toast('Marca al menos un conteo.', 'error');
-    const otras = ini.sedes.filter(x => x.id !== ses.sedeId);
-    ps = { claves, cont, alListo, sede: otras[0].id, alms: null, alm: '' };
+    ps = { claves, cont, alListo, sede: ses.sedeId, alms: null, alm: '' };
     pasarSedePintar();
     pasarSedeCargarAlms();
   }
@@ -6063,7 +6105,7 @@
     llamar('bdAlmacenesSede', sid).then(l => {
       if (!ps || ps.sede !== sid) return;
       ps.alms = l;
-      ps.alm = '';   // '' = cada conteo a su mismo almacén
+      ps.alm = '';   // otra sede: '' = cada conteo a su mismo almacén · misma sede: hay que escoger
       ps.alt = (l[0] || {}).almacen || '';
       pasarSedePintar();
     }).catch(e => { if (ps) { ps.alms = []; pasarSedePintar(); errForm(e.message); } });
@@ -6073,16 +6115,18 @@
     if (!c) return;
     const prods = [...new Set(ps.claves.map(k => k.codigo))];
     c.innerHTML = `<div class="ps-panel col gap8">
-      <span class="fuerte">Pasar ${ps.claves.length} conteo${ps.claves.length === 1 ? '' : 's'} (${prods.length} producto${prods.length === 1 ? '' : 's'}) de ${esc(nombreSede(ses.sedeId))} a otra sede</span>
+      <span class="fuerte">Cambiar ${ps.claves.length} conteo${ps.claves.length === 1 ? '' : 's'} (${prods.length} producto${prods.length === 1 ? '' : 's'}) de almacén${ini.sedes.length > 1 ? ' o de sede' : ''}</span>
       <div class="inv-grid3">
-        <div><label class="lbl" for="psSede">Sede correcta</label>
-          <select id="psSede" class="campo" onchange="ps.sede=this.value; pasarSedeCargarAlms()">${ini.sedes.filter(x => x.id !== ses.sedeId).map(x =>
-            `<option value="${esc(x.id)}" ${x.id === ps.sede ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></div>
-        <div><label class="lbl" for="psAlm">Almacén en esa sede</label>
-          <select id="psAlm" class="campo" ${ps.alms ? '' : 'disabled'} onchange="ps.alm=this.value; pasarSedePintar()">${ps.alms ? `<option value="" ${ps.alm ? '' : 'selected'}>El mismo almacén de cada conteo</option>` + ps.alms.map(a =>
-            `<option value="${esc(a.almacen)}" ${a.almacen === ps.alm ? 'selected' : ''}>Todos a ${esc(a.nombre)}</option>`).join('') : '<option>Cargando…</option>'}</select></div>
+        ${ini.sedes.length > 1 ? `<div><label class="lbl" for="psSede">Sede</label>
+          <select id="psSede" class="campo" onchange="ps.sede=this.value; pasarSedeCargarAlms()">${ini.sedes.map(x =>
+            `<option value="${esc(x.id)}" ${x.id === ps.sede ? 'selected' : ''}>${esc(x.nombre)}${x.id === ses.sedeId ? ' (esta sede)' : ''}</option>`).join('')}</select></div>` : ''}
+        <div><label class="lbl" for="psAlm">Almacén correcto</label>
+          <select id="psAlm" class="campo" ${ps.alms ? '' : 'disabled'} onchange="ps.alm=this.value; pasarSedePintar()">${ps.alms ? (ps.sede === ses.sedeId
+              ? `<option value="" ${ps.alm ? '' : 'selected'} disabled>Escoge el almacén</option>`
+              : `<option value="" ${ps.alm ? '' : 'selected'}>El mismo almacén de cada conteo</option>`) + ps.alms.map(a =>
+            `<option value="${esc(a.almacen)}" ${a.almacen === ps.alm ? 'selected' : ''}>${ps.sede === ses.sedeId ? '' : 'Todos a '}${esc(a.nombre)}</option>`).join('') : '<option>Cargando…</option>'}</select></div>
         ${(() => {
-          if (!ps.alms || ps.alm) return '';
+          if (!ps.alms || ps.alm || ps.sede === ses.sedeId) return '';
           const hay = new Set(ps.alms.map(a => a.almacen));
           const faltan = [...new Set(ps.claves.map(k => almDeUbic(k.ubicacion) || '—').filter(a => !hay.has(a)))];
           return faltan.length ? `<div><label class="lbl" for="psAlt">Almacén ${esc(faltan.join(', '))} no existe allá: pasarlo a</label>
@@ -6090,22 +6134,23 @@
         })()}
       </div>
       <div class="fila gap8 wrap-f"><button class="btn btn-sec" onclick="pasarSedeCerrar()">Cancelar</button>
-        <button id="psOk" class="btn btn-pri" ${ps.alms && ps.alms.length ? '' : 'disabled'} onclick="pasarSedeHacer()">Pasar a ${esc(nombreSede(ps.sede))}</button></div>
+        <button id="psOk" class="btn btn-pri" ${ps.alms && ps.alms.length && (ps.alm || ps.sede !== ses.sedeId) ? '' : 'disabled'} onclick="pasarSedeHacer()">${ps.sede === ses.sedeId ? (ps.alm ? 'Pasar al almacén ' + esc(ps.alm) : 'Cambiar') : 'Pasar a ' + esc(nombreSede(ps.sede))}</button></div>
     </div>`;
   }
   function pasarSedeCerrar() { const c = ps && $(ps.cont); if (c) c.innerHTML = ''; ps = null; }
   function pasarSedeHacer() {
-    const b = $('psOk'); b.disabled = true; b.textContent = 'Pasando…';
     const x = ps;
+    if (x.sede === ses.sedeId && !x.alm) return errForm('Escoge el almacén correcto.');
+    const b = $('psOk'), txt = b.textContent; b.disabled = true; b.textContent = 'Pasando…';
     const hay = new Set((x.alms || []).map(a => a.almacen));
     const claves = x.claves.map(k => { const propio = almDeUbic(k.ubicacion); return Object.assign({}, k, { almacen: x.alm || (hay.has(propio) ? propio : x.alt) }); });
     llamar('bdPasarConteosSede', { sedeOrigen: ses.sedeId, sedeDestino: x.sede, claves, usuario: ses.nombre }).then(r => {
-      toast(`✓ ${r.pasados} conteo${r.pasados === 1 ? '' : 's'} pasado${r.pasados === 1 ? '' : 's'} a ${nombreSede(x.sede)}`
+      toast(`✓ ${r.pasados} conteo${r.pasados === 1 ? '' : 's'} pasado${r.pasados === 1 ? '' : 's'} a ${x.sede === ses.sedeId ? 'almacén ' + x.alm : nombreSede(x.sede)}`
         + (r.yaHabia.length ? `. Ojo: ${r.yaHabia.join(', ')} ya tenía${r.yaHabia.length === 1 ? '' : 'n'} conteo en ese almacén; revísalo en esa sede.` : ''), r.yaHabia.length ? 'error' : 'ok');
       pasarSedeCerrar();
       if (x.alListo) x.alListo();
       return llamar('bdInventarioGeneral', ses.sedeId).then(d => { invData = d; if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); if ($('cfTabla')) $('cfTabla').innerHTML = cfTablaHtml(); });
-    }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Pasar a ' + nombreSede(x.sede); });
+    }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = txt; });
   }
 
   function editarConteos(cod) { ec = { cod, conf: -1, otro: -1 }; pintarEc(); }
@@ -6136,7 +6181,7 @@
             <button class="btn btn-sal btn-mini" onclick="ec.conf=${i}; ec.otro=-1; pintarEc()">Eliminar</button></div>`}
       </div>`).join('')}
       ${!enCic && puedePasarSede() ? `<div class="mt12"><div id="ecPasar"></div>
-        <button class="btn btn-sec btn-mini" onclick="pasarSedeAbrir(ecLugares().map(l => ({ codigo: ec.cod, ubicacion: l.ubic })), 'ecPasar', () => ecRefrescar())">Se registró en la sede que no era: pasar a otra sede</button></div>` : ''}
+        <button class="btn btn-sec btn-mini" onclick="pasarSedeAbrir(ecLugares().map(l => ({ codigo: ec.cod, ubicacion: l.ubic })), 'ecPasar', () => ecRefrescar())">Se registró en otro almacén${ini.sedes.length > 1 ? ' o sede' : ''}: cambiar</button></div>` : ''}
       <p id="fErr" class="error" hidden></p>`, 'modal-ancho');
   }
   function ecCantidades(i) {
@@ -6241,7 +6286,7 @@
     $('hcCaja').innerHTML = l.length ? `<div class="fila-sb wrap-f gap8"><span class="muted small">${l.length} conteo${l.length === 1 ? '' : 's'}</span>
         ${marca && hcSel.size ? `<span class="fila gap8 wrap-f"><span class="small fuerte">${hcSel.size} marcado${hcSel.size === 1 ? '' : 's'}</span>
           <button class="btn btn-sec btn-mini" onclick="hcSel = new Set(); pintarHc()">Quitar marcas</button>
-          <button class="btn btn-pri btn-mini" onclick="hcPasarSede()">Pasar a otra sede</button></span>` : ''}</div>
+          <button class="btn btn-pri btn-mini" onclick="hcPasarSede()">Cambiar almacén${ini.sedes.length > 1 ? ' o sede' : ''}</button></span>` : ''}</div>
       <div class="tabla-wrap mt8"><table class="tabla"><thead><tr>${marca ? `<th><input type="checkbox" aria-label="Marcar todos los de esta página" ${todosPag ? 'checked' : ''} onchange="hcMarcarPagina(this.checked)"></th>` : ''}<th>Fecha</th><th>Quién</th><th>Sede</th><th>Almacén</th><th>Producto</th><th>Lugar</th><th>Tipo</th><th class="num">Cantidad</th></tr></thead>
       <tbody>${pg.filas.map(c => { const p = prodDe(c.codigo), k = key(c); return `<tr class="${c.anulado ? 'ec-anulado' : ''}">
         ${marca ? `<td>${c.anulado ? '' : `<input type="checkbox" aria-label="Marcar" ${hcSel.has(k) ? 'checked' : ''} onchange="hcMarcar('${esc(k)}', this.checked)">`}</td>` : ''}
@@ -7770,6 +7815,7 @@
     if (l) { el.dataset.lista = l; el.removeAttribute('list'); }
   });
   document.addEventListener('input', ev => { const el = ev.target; if (el && el.dataset && el.dataset.lista && pantallaTactil()) sugPintar(el); });
+  document.addEventListener('keydown', ev => { if (ev.key === 'Enter' && sug.el && ev.target === sug.el) sugCerrar(); }, true);
   document.addEventListener('focusout', ev => {
     if (!sug.el || ev.target !== sug.el) return;
     setTimeout(() => { if (sug.tocando) { sug.tocando = false; return; } if (document.activeElement !== sug.el) sugCerrar(); }, 200);
