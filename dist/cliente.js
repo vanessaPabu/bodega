@@ -3163,8 +3163,32 @@
           <button onclick="cambiarZoom(1.25)" aria-label="Acercar">+</button>
         </div>
       </div></div>
+      ${zonasBarHtml()}
       <div id="mapaCont">${contenidoMapa()}</div>`;
     return h;
+  }
+
+  // Ver todo el mapa o una sola zona en grande (se recuerda en este equipo, por sede)
+  let zonaVer = null, zonaVerSede = null;
+  function zonaVista() {
+    if (zonaVer === null || zonaVerSede !== ses.sedeId) { zonaVer = leerLS('mapaZona:' + ses.sedeId) || ''; zonaVerSede = ses.sedeId; }
+    const z = zonaVer && sede.zonas.find(x => x.id === zonaVer && enPlano(x));
+    return z || null;
+  }
+  function zonasBarHtml() {
+    const dentro = sede.zonas.filter(enPlano);
+    if (dentro.length < 2 || colocando) return '';
+    const z = zonaVista();
+    return `<div class="mapa-zonas" role="group" aria-label="Zona del mapa">
+      <button class="${z ? '' : 'on'}" aria-pressed="${!z}" onclick="verZona('')">Todo el mapa</button>
+      ${dentro.map(x => `<button class="${z && z.id === x.id ? 'on' : ''}" aria-pressed="${!!(z && z.id === x.id)}" onclick="verZona('${esc(x.id)}')">${esc(x.nombre)}</button>`).join('')}
+    </div>`;
+  }
+  function verZona(id) {
+    zonaVer = id || '';
+    guardarLS('mapaZona:' + ses.sedeId, zonaVer);
+    zoom = null;
+    pintarApp();
   }
 
   const enPlano = z => z.x !== null && z.y !== null && z.ancho && z.alto;
@@ -3172,6 +3196,8 @@
   function contenidoMapa() {
     const dentro = sede.zonas.filter(enPlano);
     const fuera = sede.zonas.filter(z => !enPlano(z));
+    const zv = !colocando && dentro.length > 1 ? zonaVista() : null;
+    if (zv) return planoHtml([zv], true);
     let h = dentro.length ? planoHtml(dentro) : '';
     if (fuera.length) {
       h += `${dentro.length ? '<span class="lbl mt16">Zonas sin ubicación en el plano</span>' : ''}
@@ -3205,23 +3231,26 @@
     return (ocup ? Math.max(1, Math.round(ocup * 100 / esps.length)) : 0) + '% ocupado';
   }
 
-  function planoHtml(zonas) {
-    let w = 0, h = 0;
+  function planoHtml(zonas, recortar) {
+    let w = 0, h = 0, x0 = Infinity, y0 = Infinity;
     const racks = [];
+    const caja = (x, y, x2, y2) => { w = Math.max(w, x2); h = Math.max(h, y2); x0 = Math.min(x0, x); y0 = Math.min(y0, y); };
     zonas.forEach(z => {
-      w = Math.max(w, z.x + z.ancho); h = Math.max(h, z.y + z.alto);
-      (z.areas || []).forEach(a => { w = Math.max(w, a.x + a.ancho); h = Math.max(h, a.y + a.alto); });
+      caja(z.x, z.y, z.x + z.ancho, z.y + z.alto);
+      (z.areas || []).forEach(a => caja(a.x, a.y, a.x + a.ancho, a.y + a.alto));
+      if (z.etqY !== null && z.etqY !== undefined) caja(z.etqX !== null ? z.etqX : z.x, z.etqY, z.x, z.etqY);
       racksEnPlano(z).forEach(x => {
         racks.push(x);
         (x.tramos || [{ x: x.x, y: x.y, largo: x.largo }]).forEach(t => {
-          w = Math.max(w, t.x + (x.o === 'V' ? 44 : t.largo));
-          h = Math.max(h, t.y + (x.o === 'V' ? t.largo : 44));
+          caja(t.x, t.y, t.x + (x.o === 'V' ? 44 : t.largo), t.y + (x.o === 'V' ? t.largo : 44));
         });
       });
     });
-    w += 12; h += 12;
+    // Una sola zona: se recorta a lo que ocupa esa zona (con espacio para su nombre arriba), así se ve en grande
+    const dx = recortar ? Math.max(0, x0 - 8) : 0, dy = recortar ? Math.max(0, y0 - 20) : 0;
+    w = w - dx + 12; h = h - dy + 12;
     return `<div class="plano-wrap" id="planoWrap"><div class="plano-sizer" id="planoSizer">
-      <div class="plano" id="plano" data-w="${w}" data-h="${h}" style="width:${w}px;height:${h}px">
+      <div class="plano${recortar ? ' plano-zona' : ''}" id="plano" data-w="${w}" data-h="${h}" style="width:${w}px;height:${h}px">${recortar ? `<div class="plano-in" style="left:${-dx}px;top:${-dy}px">` : ''}
         ${zonas.map(z => [{ x: z.x, y: z.y, ancho: z.ancho, alto: z.alto }].concat(z.areas || []).map(a =>
           `<div class="pz" style="left:${a.x}px;top:${a.y}px;width:${a.ancho}px;height:${a.alto}px;border-color:${esc(z.color)};background:${hexA(z.color, .06)}"></div>`).join('')).join('')}
         ${(sede.muros || []).map(([x1, y1, x2, y2]) =>
@@ -3229,7 +3258,7 @@
         ${racks.map(rackPlanoHtml).join('')}
         ${zonas.map(z => `<div class="pz-lbl" style="left:${z.etqX !== null ? z.etqX : z.x + 8}px;top:${z.etqY !== null ? z.etqY : z.y - 11}px;border-color:${esc(z.color)}">
           <b style="color:${esc(z.color)}">${esc(z.nombre)}</b><small>${ocupacionZona(z)}</small></div>`).join('')}
-      </div></div></div>`;
+      ${recortar ? '</div>' : ''}</div></div></div>`;
   }
 
   // Nombre corto de la fila en el plano: el que se le puso (Fila 4 → F4)
@@ -3281,11 +3310,11 @@
       .map(e => { const ls = lineasDe(e.id); return ls.length ? `${etiqueta(e)}: ${ls.map(l => l.nombre).join(' + ')}` : ''; })
       .filter(Boolean);
     const tit = esc(r.nombre + ' · posición ' + p + (det.length ? '\n' + det.join('\n') : ' · vacía'));
-    return `<button class="${clase} ${sel} ${dim}" onclick="abrirPos('${esc(r.id)}', ${p})" aria-label="${tit}" title="${tit}">
+    return `<button class="${clase} ${sel} ${dim}" onclick="abrirPos('${esc(r.id)}', ${p})" aria-label="${tit}" title="${tit}"><span class="pc-in">
       ${niveles.map(n => `<span class="franja ${n === 0 ? 'pk' : ''}">${esps.filter(e => e.nivel === n)
         .sort((a, b) => a.lado.localeCompare(b.lado))
         .map(e => `<i class="e-${sede.bloqueos[e.id] ? 'bloq' : estadoDe(lineasDe(e.id))}${lineasDe(e.id).length > 1 ? ' multi' : ''}"></i>`).join('')}</span>`).join('')}
-    </button>`;
+    </span></button>`;
   }
 
   // Escala el plano para que quepa en la pantalla (o usa el zoom elegido)
@@ -3293,7 +3322,7 @@
     const wrap = $('planoWrap'), pl = $('plano'), sizer = $('planoSizer');
     if (!wrap || !pl) return;
     const w = Number(pl.dataset.w), h = Number(pl.dataset.h);
-    const s = zoom || Math.min(1, (wrap.clientWidth - 2) / w);
+    const s = zoom || Math.min(pl.classList.contains('plano-zona') ? 3 : 1, (wrap.clientWidth - 2) / w);
     pl.style.transform = `scale(${s})`;
     sizer.style.width = w * s + 'px';
     sizer.style.height = h * s + 'px';
@@ -3302,7 +3331,7 @@
   function cambiarZoom(f) {
     const pl = $('plano'), wrap = $('planoWrap');
     if (!pl) return;
-    const actual = zoom || Math.min(1, (wrap.clientWidth - 2) / Number(pl.dataset.w));
+    const actual = zoom || Math.min(pl.classList.contains('plano-zona') ? 3 : 1, (wrap.clientWidth - 2) / Number(pl.dataset.w));
     zoom = f === 0 ? null : Math.min(4, Math.max(0.3, actual * f));
     ajustarPlano();
   }
