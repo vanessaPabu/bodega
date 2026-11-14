@@ -3422,7 +3422,7 @@
   /* ----- Inventario contra SAP ----- */
   let invData = null;                                      // { sap, carga, conteos } de la sede
   let invSede = null;                                      // sede de los datos cargados
-  const invF = { zona: '', q: '', soloDif: false, pas: '' };
+  const invF = { zona: '', q: '', soloDif: false, pas: '', estado: '' };
   const invForm = { ubic: '', prod: '', tipo: 'PICKING' };
   const TIPOS_CONTEO = [['PICKING', 'Picking'], ['CALIDAD', 'Calidad'], ['BLOQUEADO', 'Bloqueado']];
   const nInv = n => (Math.round(Number(n) * 1000) / 1000).toLocaleString('es-CO', { maximumFractionDigits: 3 });
@@ -3470,7 +3470,9 @@
               <option value="-" ${invF.zona === '-' ? 'selected' : ''}>Sin ubicar en el plano</option></select></div>
           <div class="inv-buscar"><label class="lbl" for="invQ">Buscar</label>
             <input id="invQ" class="campo" placeholder="Código o nombre" value="${esc(invF.q)}" autocomplete="off"></div>
-          <label class="fila gap8 small" style="cursor:pointer;align-self:end;min-height:48px"><input type="checkbox" id="invDif" ${invF.soloDif ? 'checked' : ''}> Solo con diferencia</label>
+          <div class="inv-estado"><span class="lbl">Mostrar</span>
+            <div class="seg inv-seg" role="group" aria-label="Mostrar">${[['', 'Todos'], ['pend', 'Pendientes'], ['hecho', 'Contados'], ['dif', 'Con diferencia']].map(([k, t]) =>
+              `<button class="${invF.estado === k ? 'on' : ''}" onclick="invF.estado='${k}'; pagInicio('inv'); if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); this.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === this))">${t}</button>`).join('')}</div></div>
         </div>
         <div id="invTabla">${tablaInventario()}</div>
         <span class="muted small">Todo en unidades. <b>Total SAP</b> = Inventario + Calidad + Bloqueado de SAP. <b>Aéreo</b> = lo ubicado en el plano del nivel 2 hacia arriba (sin picking).
@@ -3527,6 +3529,7 @@
     });
     (invData.conteos || []).forEach(c => {
       const f = fila(c.codigo), a = enAlm(f, c.ubicacion);
+      f.contado = true;
       if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
       else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
       else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, yo, c.cantidad); suma(a.pk, yo, c.cantidad); }
@@ -3539,6 +3542,7 @@
       o.aereo.forEach(x => { const f = fila(x.codigo), a = enAlmK(f, x.almacen); f.aereo += x.cantidad; a.aereo += x.cantidad; suma(f.ae, o.sedeId, x.cantidad); suma(a.ae, o.sedeId, x.cantidad); });
       o.conteos.forEach(c => {
         const f = fila(c.codigo), a = enAlmK(f, c.almacen);
+        f.contado = true;
         if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
         else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
         else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, o.sedeId, c.cantidad); suma(a.pk, o.sedeId, c.cantidad); }
@@ -3561,7 +3565,9 @@
       if (invF.zona === '-' && f.zonas.size) return false;
       if (invF.zona && invF.zona !== '-' && !f.zonas.has(invF.zona)) return false;
       if (invF.pas && ![...f.pas].some(k => invF.pas.includes('|') ? k === invF.pas : k.split('|')[0] === invF.pas)) return false;
-      if (invF.soloDif && !f.dif) return false;
+      if ((invF.soloDif || invF.estado === 'dif') && !f.dif) return false;
+      if (invF.estado === 'pend' && f.contado) return false;   // pendiente = de toda la lista, nadie lo ha contado
+      if (invF.estado === 'hecho' && !f.contado) return false;
       if (!pal.length) return true;
       const t = sinTilde(`${f.cod} ${f.p ? f.p.codigoNutresa + ' ' + f.p.nombre : ''}`);
       return pal.every(w => t.includes(w));
@@ -3681,7 +3687,7 @@
       $('invZona').addEventListener('change', () => { invF.zona = $('invZona').value; repintar(); });
       if ($('invPas')) $('invPas').addEventListener('change', () => { invF.pas = $('invPas').value; repintar(); });
       $('invQ').addEventListener('input', () => { invF.q = $('invQ').value; repintar(); });
-      $('invDif').addEventListener('change', () => { invF.soloDif = $('invDif').checked; repintar(); });
+      if ($('invDif')) $('invDif').addEventListener('change', () => { invF.soloDif = $('invDif').checked; repintar(); });
     }
     const lg = $('invLug'), pr = $('invProd');
     if (lg) {
@@ -5597,6 +5603,39 @@
   /* ----- Pestaña Avance (jefe): cuánto falta por pasillo y por persona, y asignar ----- */
   let cpMarcados = new Set();
   const cpAv = { soloFaltan: false, verPas: false };
+  // Inventario: cuánto falta en cada sede, contra TODA la lista de productos.
+  //  Picking: productos que ya tienen conteo de picking en esa sede (se cuenta sin ubicación, aunque el producto no esté en el plano).
+  //  Aéreo: productos que esa sede tiene en el plano (aéreo) y cuántos de la lista no están en el aéreo.
+  function cpPorSedeHtml() {
+    const lista = new Set(ini.productos.filter(p => p.activo !== false).map(p => p.id));
+    const N = lista.size;
+    const desde = invData && invData.carga ? invData.carga.fecha : null;
+    const enLista = arr => new Set([...arr].filter(c => lista.has(c)));
+    const filas = [];
+    // Esta sede
+    const pkYo = enLista(((invData && invData.conteos) || []).filter(c => c.tipo === 'PICKING' && (!desde || c.fecha >= desde)).map(c => c.codigo));
+    const aeYo = enLista(sede.lineas.filter(l => sede.espPorId[l.ubicacionId] && sede.espPorId[l.ubicacionId].nivel > 0).map(l => l.productoId));
+    filas.push({ nombre: nombreSede(ses.sedeId), pk: pkYo, ae: aeYo });
+    ((invData && invData.otrasSedes) || []).forEach(o => {
+      const pk = enLista(o.conteos.filter(c => c.tipo === 'PICKING' && (!desde || !c.fecha || c.fecha >= desde)).map(c => c.codigo));
+      const ae = enLista((o.aereo || []).filter(x => x.cantidad).map(x => x.codigo));
+      filas.push({ nombre: o.nombre, pk, ae });
+    });
+    const celdas = (pk, ae) => `<td>${pk} de ${N} ${cpBarra(pk, N)}</td>
+        <td><b class="${N - pk ? 'txt-naranja' : 'txt-verde'}">${N - pk}</b></td>
+        <td>${ae} de ${N} ${cpBarra(ae, N)}</td>
+        <td><b>${N - ae}</b></td>`;
+    const union = k => new Set(filas.flatMap(x => [...x[k]])).size;
+    return `<section class="card col gap8">
+      <span class="h3">Cuánto falta en cada sede <span class="muted small">(lista de ${N} productos)</span></span>
+      <div class="tabla-wrap"><table class="tabla cp-sedes"><thead><tr><th>Sede</th><th>Picking contado</th><th>Falta picking</th><th>Productos en aéreo</th><th>No están en aéreo</th></tr></thead>
+        <tbody>${filas.map(x => `<tr><td><b>${esc(x.nombre)}</b></td>${celdas(x.pk.size, x.ae.size)}</tr>`).join('')}
+        ${filas.length > 1 ? `<tr class="cp-sedes-tot"><td><b>Todas las sedes</b></td>${celdas(union('pk'), union('ae'))}</tr>` : ''}</tbody></table></div>
+      <span class="muted small"><b>Picking contado</b>: productos de la lista que ya contaron en picking (sin ubicación). <b>Falta picking</b>: los que faltan por contar.
+        <b>Productos en aéreo</b>: los que están ubicados en el plano (nivel 2 hacia arriba). <b>No están en aéreo</b>: los de la lista que no tienen nada en el aéreo.
+        En <b>Todas las sedes</b> un producto cuenta una vez aunque esté en varias.</span>
+    </section>`;
+  }
   function cpAvanceHtml() {
     const T = cpTodo(), S = T.S, ps = cpPasillos(T).filter(x => x.total);
     const tot = ps.reduce((a, x) => a + x.total, 0), lis = ps.reduce((a, x) => a + x.listos, 0);
@@ -5617,6 +5656,7 @@
         <div class="cp-kpi"><span class="muted small">Faltan</span><b class="${tot - lis ? 'txt-naranja' : 'txt-verde'}">${tot - lis}</b><span class="muted small">${cpPct(lis, tot)}% hecho</span></div>
         <div class="cp-kpi"><span class="muted small">Sin lugar en el plano</span><b class="${sinUb.length ? 'txt-naranja' : ''}">${sinUb.length}</b><span class="muted small">por contar</span></div>
       </div>
+      ${S.cic ? '' : cpPorSedeHtml()}
       <section class="card col gap8">
         <span class="h3">Personas</span>
         ${Object.values(pers).length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Persona</th>${conAsig ? '<th>Pasillos asignados</th>' : ''}<th class="num">Productos listos</th>${conAsig ? '<th>Le falta</th>' : ''}<th>Último</th></tr></thead><tbody>
@@ -5709,7 +5749,9 @@
           <option value="">Escoge el almacén</option>${alms.map(a => `<option value="${esc(a.key)}" ${a.key === ing.alm ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></div>
       ${!ing.alm ? '' : `
       <div><label class="lbl" for="ingCod">2. Código del producto</label>
-        ${campoConCamara(`<input id="ingCod" class="campo" list="${S.cic ? 'dlIng' : 'dlProductos'}" autocomplete="off" spellcheck="false" placeholder="Escanea o escribe el código" value="${p ? esc(p.id + ' · ' + p.nombre) : ''}">`, 'ingCod')}
+        <div class="fila gap8"><span class="campo-x" style="flex:1;min-width:0">
+          <input id="ingCod" class="campo" list="${S.cic ? 'dlIng' : 'dlProductos'}" autocomplete="off" spellcheck="false" placeholder="Escanea o escribe el código" value="${p ? esc(p.id + ' · ' + p.nombre) : ''}">
+          <button type="button" class="campo-x-btn" onclick="ingLimpiar()" aria-label="Borrar el código" title="Borrar todo">✕</button></span>${botonCamara('ingCod', 'btn btn-sec btn-cam2')}</div>
         ${S.cic ? `<datalist id="dlIng">${S.cic.codigos.map(k => { const x = prodDe(k); return x ? `<option value="${esc(x.id + ' · ' + x.nombre)}">` : ''; }).join('')}</datalist>` : ''}</div>
       ${p ? `<div class="info"><span class="fuerte">${esc(p.nombre)}</span>
           <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · Atlantic ${esc(p.id)} · ${kg ? 'peso variable (kg)' : `${p.undPorCaja || 1} und por caja`}</span>
@@ -5790,6 +5832,12 @@
     ing.base = ya ? ya.fecha : null; ing.avisado = false;   // lo que había cuando empecé a llenarlo
     pintarApp();
     setTimeout(() => { const f = $('ingCant'); if (f) f.focus(); }, 30);
+  }
+  // Borra el código de una vez (para no borrar letra por letra) y deja listo para escanear otro
+  function ingLimpiar() {
+    if (ing.cod) { ing.cod = ''; ing.base = null; ing.avisado = false; pintarApp(); }
+    const c = $('ingCod');
+    if (c) { c.value = ''; c.focus(); }
   }
   function enlazarIngresar() {
     const c = $('ingCod');
