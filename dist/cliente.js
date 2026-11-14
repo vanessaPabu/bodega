@@ -3484,6 +3484,7 @@
           ${puede('inv_sap') ? '<button class="btn btn-pri" onclick="abrirCargaSap()">Cargar Excel de SAP</button>' : ''}
           <button class="btn btn-sec" onclick="historialConteosInv()">Historial de conteos</button>
           ${puede('reportes') && jefe ? '<button class="btn btn-sec" onclick="descargarInventarioSap()">Descargar Excel</button>' : ''}
+          ${puede('reportes') && jefe ? '<button class="btn btn-sec" onclick="abrirMb52()">Descargar en formato MB52</button>' : ''}
           <button class="btn btn-sec" onclick="invData=null; pintarApp()">Actualizar</button></span>
       </div>
       ${tabs.length > 1 ? subTabsHtml(invSub, tabs, 'invSub') : ''}
@@ -4006,6 +4007,215 @@
     }
   }
 
+  /* ----- Excel en formato MB52: el almacén de cada producto lo dice la MB52 (no el que escogieron al contar).
+     Solo lee la MB52, lo contado y las reconfirmaciones; no cambia nada guardado. ----- */
+  function abrirMb52() {
+    if (sinPermiso('reportes')) return;
+    abrirModal(`<div class="fila-sb"><span class="h2">Descargar en formato MB52</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Escoge la planilla MB52 de SAP. Cada producto sale en el almacén que dice la MB52, con lo que se contó y sus reconfirmaciones.</span>
+      <label for="mbArch" class="btn btn-pri btn-xl mt12" role="button" tabindex="0">Escoger planilla MB52</label>
+      <input id="mbArch" type="file" accept=".xlsx,.xls" class="oculto">
+      <p id="mbEstado" class="muted small" hidden></p>
+      <p id="fErr" class="error" hidden></p>`);
+    $('mbArch').addEventListener('change', ev => { const f = ev.target.files[0]; if (f) llenarMb52(f); });
+  }
+
+  // Reconfirmaciones de inventario de este inventario (desde que se cargó SAP), con sus conteos
+  async function reconfsInventario() {
+    const lista = await llamar('bdCiclicos', ses.sedeId);
+    const desde = invData && invData.carga ? invData.carga.fecha : null;
+    const rcs = lista.filter(c => esRcInv(c) && (!desde || !c.creado || c.creado >= desde))
+      .sort((a, b) => String(a.creado || '').localeCompare(String(b.creado || '')));
+    const datos = [];
+    for (const c of rcs) datos.push(await llamar('bdCiclico', c.id));
+    return datos;
+  }
+
+  async function llenarMb52(arch) {
+    const est = $('mbEstado');
+    const aviso = t => { est.textContent = t; est.hidden = false; };
+    if (!window.XLSX) return errForm('No se pudo abrir el Excel (revisa la señal) e inténtalo otra vez.');
+    try {
+      aviso('Leyendo la MB52…');
+      const wb = XLSX.read(new Uint8Array(await arch.arrayBuffer()), { type: 'array' });
+      const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+      const t = v => sinTilde(String(v || '')).toUpperCase().trim();
+      const iCab = filas.findIndex(x => x.some(c => /^COD/.test(t(c))) && x.some(c => /ALMACEN/.test(t(c))));
+      if (iCab < 0) return errForm('No se encontraron las columnas COD ATL y ALMACEN. Revisa que sea la planilla MB52.');
+      const cab = filas[iCab].map(t), col = re => cab.findIndex(c => re.test(c));
+      const cCod = col(/^COD/), cNom = col(/TEXTO|MATERIAL|DESCRIP/), cAlm = col(/ALMACEN/), cUmb = col(/^UMB|UNIDAD/);
+      const cLib = col(/LIBRE/), cCal = col(/CALIDAD/), cBlq = col(/BLOQ/);
+      let cTot = col(/^TOTAL/);
+      // Columnas de la MB52 que salen: de la primera hasta TOTAL SAP (si no viene, se agrega)
+      const nMb = cTot >= 0 ? cTot + 1 : Math.max(cCod, cNom, cAlm, cUmb, cLib, cCal, cBlq) + 2;
+      if (cTot < 0) cTot = nMb - 1;
+      const titMb = Array.from({ length: nMb }, (_, i) => i === cTot && !String(filas[iCab][i] || '').trim() ? 'TOTAL SAP' : String(filas[iCab][i] ?? '').trim());
+      const cod = v => String(v ?? '').trim().replace(/\.0+$/, '').replace(/^0+(?=\d)/, '');
+      const num = (x, i) => (i >= 0 ? numSap(x[i]) : 0);
+      const red = n => +Number(n || 0).toFixed(3);
+
+      aviso('Buscando reconfirmaciones…');
+      const rcs = await reconfsInventario();
+      if (!window.JSZip) await cargarScript(JSZIP_URL);
+
+      // Lo contado (todas las sedes sumadas) y, si tiene, su última reconfirmación con conteo
+      const datos = {}; datosInventario().forEach(f => (datos[String(f.cod)] = f));
+      const valores = k => {
+        const f = datos[k];
+        const v = f ? { pk: f.picking, ae: f.aereo, cal: f.calidad, blq: f.bloqueado } : { pk: 0, ae: 0, cal: 0, blq: 0 };
+        let rc = null;
+        for (let i = rcs.length - 1; i >= 0 && !rc; i--) {
+          const r = rcs[i], cs = r.ciclico.codigos.includes(k) ? r.conteos.filter(c => c.codigo === k) : [];
+          if (!cs.length) continue;
+          const s = { PICKING: null, CALIDAD: null, BLOQUEADO: null };
+          cs.forEach(c => { s[c.tipo] = (s[c.tipo] || 0) + c.cantidad; });
+          const b = r.ciclico.base && r.ciclico.base[k];
+          if (b) v.ae = Number(b.aereo) || 0;     // el aéreo como estaba cuando se pidió la reconfirmación
+          const otrasPk = f ? f.picking - (f.pk[ses.sedeId] || 0) : 0;
+          rc = { pk: s.PICKING === null ? v.pk : s.PICKING + otrasPk, ae: f ? f.aereo : 0,
+            cal: s.CALIDAD === null ? v.cal : s.CALIDAD, blq: s.BLOQUEADO === null ? v.blq : s.BLOQUEADO };
+        }
+        return { v, rc };
+      };
+
+      // Filas: las de la MB52 en su orden; un producto en varios almacenes deja sus filas vacías y abajo el total para repartir a mano
+      const porCod = {}, orden = [];
+      filas.slice(iCab + 1).forEach(x => { const k = cod(x[cCod]); if (!k) return; if (!porCod[k]) { porCod[k] = []; orden.push(k); } porCod[k].push(x); });
+      const mbDe = x => { const y = Array.from({ length: nMb }, (_, i) => x[i] ?? ''); y[cTot] = red(num(x, cLib) + num(x, cCal) + num(x, cBlq)); return y; };
+      const salida = [];   // { mb: [...], val: {v, rc} | null, tipo: '' | 'total' | 'seccion' }
+      orden.forEach(k => {
+        const g = porCod[k], val = valores(k);
+        if (g.length === 1) return salida.push({ mb: mbDe(g[0]), val, sap: num(g[0], cLib) + num(g[0], cCal) + num(g[0], cBlq) });
+        g.forEach(y => salida.push({ mb: mbDe(y), val: null }));
+        const tot = Array(nMb).fill(''), suma = i => red(g.reduce((a, y) => a + num(y, i), 0));
+        tot[cCod] = g[0][cCod];
+        if (cNom >= 0) tot[cNom] = 'TOTAL CONTADO: repártelo a mano en los almacenes de arriba';
+        if (cUmb >= 0) tot[cUmb] = g[0][cUmb];
+        [cLib, cCal, cBlq].forEach(i => { if (i >= 0) tot[i] = suma(i); });
+        tot[cTot] = red(suma(cLib) + suma(cCal) + suma(cBlq));
+        salida.push({ mb: tot, val, sap: tot[cTot], tipo: 'total' });
+      });
+      const fuera = Object.values(datos).filter(f => !porCod[String(f.cod)] && (f.picking || f.aereo || f.hayCal || f.hayBlo))
+        .sort((a, b) => (a.p ? a.p.nombre : a.cod).localeCompare(b.p ? b.p.nombre : b.cod));
+      if (fuera.length) {
+        const s = Array(nMb).fill(''); s[cCod] = 'CONTADOS QUE NO ESTÁN EN LA MB52';
+        salida.push({ mb: s, val: null, tipo: 'seccion' });
+        fuera.forEach(f => {
+          const y = Array(nMb).fill('');
+          y[cCod] = /^\d+$/.test(String(f.cod)) ? Number(f.cod) : f.cod;
+          if (cNom >= 0) y[cNom] = f.p ? f.p.nombre : '';
+          if (cAlm >= 0) { const a = f.almacenes.map(z => almCorto(z.key)).filter(Boolean).join(' / '); y[cAlm] = /^\d+$/.test(a) ? Number(a) : a; }
+          if (cUmb >= 0) y[cUmb] = f.p ? f.p.unidadMedida || 'UN' : '';
+          [cLib, cCal, cBlq, cTot].forEach(i => { if (i >= 0) y[i] = 0; });
+          salida.push({ mb: y, val: valores(String(f.cod)), sap: 0 });
+        });
+      }
+
+      // Columnas de lo contado (con reconfirmación solo si alguno de la lista tiene)
+      const conRc = salida.some(r => r.val && r.val.rc);
+      const C = conRc
+        ? [['PICKING', 'f', r => r.v.pk], ['RECONFIRMACION PICKING', 'r', r => r.rc && r.rc.pk], ['AEREO', 'f', r => r.v.ae], ['RECONFIRMACION AEREO', 'r', r => r.rc && r.rc.ae],
+          ['CALIDAD', 'f', r => r.v.cal], ['RECONFIRMACION CALIDAD', 'r', r => r.rc && r.rc.cal], ['BLOQUEO', 'f', r => r.v.blq], ['RECONFIRMACION BLOQUEO', 'r', r => r.rc && r.rc.blq],
+          ['TOTAL FISICO', 't', r => r.fis], ['TOTAL CON RECONFIRMACION', 't', r => r.conRc], ['DIFERENCIA', 'd', r => r.fis - r.sap], ['DIFERENCIA DE RECONFIRMACION', 'd', r => r.conRc - r.sap]]
+        : [['PICKING', 'f', r => r.v.pk], ['AEREO', 'f', r => r.v.ae], ['CALIDAD', 'f', r => r.v.cal], ['BLOQUEO', 'f', r => r.v.blq],
+          ['TOTAL FISICO', 't', r => r.fis], ['DIFERENCIA', 'd', r => r.fis - r.sap]];
+
+      // Estilos: 1-4 títulos (SAP azul, contado verde, reconfirmación naranja, totales gris), 5 texto, 6 número, 7 rojo, 8 verde,
+      // 9-10 fila para repartir (amarillo), 11 sección, 12 número de reconfirmación
+      const cant = new Set([cLib, cCal, cBlq, cTot].filter(i => i >= 0));   // columnas de cantidad (códigos y almacén van sin decimales)
+      const hoja = [];
+      hoja.push(titMb.map(h => ({ v: h, s: 1 })).concat(C.map(([h, k]) => ({ v: h, s: k === 'f' ? 2 : k === 'r' ? 3 : 4 }))));
+      salida.forEach(r => {
+        const amar = r.tipo === 'total', secc = r.tipo === 'seccion';
+        const fila = r.mb.map((v, i) => { const q = typeof v === 'number' && cant.has(i); return { v, s: secc ? 11 : amar ? (q ? 10 : 9) : (q ? 6 : 5) }; });
+        if (r.val) {
+          const x = Object.assign({}, r.val, { sap: r.sap });
+          x.fis = x.v.pk + x.v.ae + x.v.cal + x.v.blq;
+          x.conRc = x.rc ? x.rc.pk + x.rc.ae + x.rc.cal + x.rc.blq : x.fis;
+          C.forEach(([, k, fn]) => {
+            const v = fn(x);
+            if (v === null || v === undefined || v === false) return fila.push({ v: '', s: amar ? 9 : 5 });
+            const n = red(v);
+            fila.push({ v: n, s: amar ? 10 : k === 'd' ? (n < 0 ? 7 : n > 0 ? 8 : 6) : k === 'r' ? 12 : 6 });
+          });
+        } else C.forEach(() => fila.push({ v: '', s: secc ? 11 : 5 }));
+        hoja.push(fila);
+      });
+      const anchos = titMb.map((h, i) => i === cNom ? 46 : i === cCod ? 10 : Math.max(9, String(h).length + 2)).concat(C.map(([h]) => h.includes('RECONFIRMACION') ? 17 : 12));
+      aviso('Armando el Excel…');
+      const blob = await xlsxConEstilo('INVENTARIO', hoja, anchos);
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = `MB52 ${nombreSede(ses.sedeId)} ${hoyISO()}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      cerrarModal();
+      const varios = salida.filter(r => r.tipo === 'total').length;
+      toast(varios ? `Listo. ${varios} producto(s) están en varios almacenes: reparte a mano la fila amarilla.` : 'Listo: Excel en formato MB52 descargado', 'ok');
+    } catch (e) { est.hidden = true; errForm('No se pudo armar el Excel: ' + e.message); }
+  }
+
+  // Arma un .xlsx con colores (una hoja, primera fila fija y con filtro). celdas: [[{ v, s }]]
+  async function xlsxConEstilo(nombre, celdas, anchos) {
+    const xe = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const letra = i => { let s = ''; i++; while (i) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+    const nCol = Math.max(...celdas.map(f => f.length));
+    const filas = celdas.map((f, r) => `<row r="${r + 1}"${r === 0 ? ' ht="34" customHeight="1"' : ''}>${f.map((c, i) => {
+      const ref = letra(i) + (r + 1), st = c.s ? ` s="${c.s}"` : '';
+      if (c.v === '' || c.v === null || c.v === undefined) return `<c r="${ref}"${st}/>`;
+      if (typeof c.v === 'number' && isFinite(c.v)) return `<c r="${ref}"${st}><v>${c.v}</v></c>`;
+      return `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${xe(c.v)}</t></is></c>`;
+    }).join('')}</row>`).join('');
+    const fin = `${letra(nCol - 1)}${celdas.length}`;
+    const hojaXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${fin}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/><cols>${anchos.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>
+<sheetData>${filas}</sheetData><autoFilter ref="A1:${fin}"/>
+<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+    const borde = '<border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border>';
+    const relleno = c => `<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`;
+    const tit = '<alignment horizontal="center" vertical="center" wrapText="1"/>';
+    const estilos = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00"/></numFmts>
+<fonts count="5"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+<font><sz val="11"/><color rgb="FFC00000"/><name val="Calibri"/></font><font><sz val="11"/><color rgb="FF2E7D32"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>
+<fills count="9"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${['1F3864', '548235', 'C55A11', '404040', 'FFF2CC', 'D9E1F2', 'FCE4D6'].map(relleno).join('')}</fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>${borde}</borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="13"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">${tit}</xf>
+<xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">${tit}</xf>
+<xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">${tit}</xf>
+<xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1">${tit}</xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>
+<xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="2" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="3" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="4" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="4" fillId="6" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="4" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="164" fontId="0" fillId="8" borderId="1" xfId="0" applyNumberFormat="1" applyFill="1" applyBorder="1"/></cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`);
+    zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
+    zip.file('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xe(nombre)}" sheetId="1" r:id="rId1"/></sheets>
+<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'${xe(nombre)}'!$A$1:$${letra(nCol - 1)}$${celdas.length}</definedName></definedNames></workbook>`);
+    zip.file('xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+    zip.file('xl/styles.xml', estilos);
+    zip.file('xl/worksheets/sheet1.xml', hojaXml);
+    return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
+  }
+
   /* ----- Cargar el Excel de SAP ----- */
   let sapTmp = null;   // { archivo, filas: [[...]], cab: índice de la fila de títulos }
   let sapModo = 'general';   // 'general' (Inventario) | 'ciclico' (solo los productos de un cíclico nuevo)
@@ -4330,7 +4540,10 @@
           <span class="muted small">Con este nombre lo encuentran en la lista. Quien tenga permiso de contar lo ve y lo puede contar.</span>
           <div><label class="lbl" for="cnFecha">Fecha</label><input id="cnFecha" class="campo" type="date" value="${esc(n.fecha)}" onchange="cicNuevo.fecha=this.value"></div>
         </div>
-        ${rc ? `<div class="col gap8"><span class="lbl">2. ¿Qué productos va a reconfirmar?</span><div id="cnCand">${cnCandHtml()}</div></div>` : `<div class="col gap8">
+        ${rc ? `<div class="col gap8"><span class="lbl">2. ¿Qué productos va a reconfirmar?</span>
+          <div class="dos"><button class="btn btn-sec cn-pegar" onclick="rcCargarArchivo()">📄 Cargar Excel con los productos</button>
+            <button class="btn btn-sec cn-pegar" onclick="cnPegarLista()">📋 Pegar lista de códigos</button></div>
+          <div id="cnCand">${cnCandHtml()}</div></div>` : `<div class="col gap8">
           <span class="lbl">2. Carga el Excel de SAP con los productos a revisar</span>
           <div id="cnSap">${cnSapHtml()}</div>
           <details class="cn-mano" ${n.codigos.length && !n.sap ? 'open' : ''}><summary>¿No tienes el Excel? Agrega los productos a mano</summary>
@@ -4444,6 +4657,7 @@
   }
   function cnPegarOk() {
     const { ok } = cnLeerLista($('cnTxt').value);
+    if (cicNuevo.tipo === 'RECONFIRMACION') return rcAgregarCods(ok.map(p => p.id));
     let n = 0;
     ok.forEach(p => { if (!cicNuevo.codigos.includes(p.id)) { cicNuevo.codigos.push(p.id); n++; } });
     cerrarModal();
@@ -4501,13 +4715,13 @@
       filas = datosCiclico().filter(f => f.contado && f.dif);
       origen = tituloCic(c); origenTipo = 'CICLICO'; origenId = c.id;
     }
-    if (!filas.length) return toast(fuente === 'inv' ? 'No hay productos con diferencia para reconfirmar' : 'Todavía no hay productos contados con diferencia en este cíclico', 'error');
+    // Sin diferencias igual se abre: puede cargar o pegar los productos que quiere reconfirmar
     const sap = {}, base = {};
     filas.forEach(f => {
       if (f.sap) sap[f.cod] = { inventario: f.sap.inventario, calidad: f.sap.calidad, bloqueado: f.sap.bloqueado };
       base[f.cod] = { picking: f.picking, aereo: f.aereo, calidad: f.calidad, bloqueado: f.bloqueado, planta: f.planta, sapTotal: f.sapTotal };   // cómo estaba
     });
-    cicNuevo = { tipo: 'RECONFIRMACION', origen, origenTipo, origenId, base, codigos: filas.map(f => f.cod), sap, archivo: null, fecha: hoyISO(),
+    cicNuevo = { tipo: 'RECONFIRMACION', fuente, origen, origenTipo, origenId, base, codigos: filas.map(f => f.cod), sap, archivo: null, fecha: hoyISO(),
       nombre: fuente === 'inv' ? 'Reconfirmación de inventario ' + fCorta(hoyISO()) : 'Reconfirmación de ' + origen,
       candidatos: filas.map(f => ({ cod: f.cod, sapTotal: f.sapTotal, planta: f.planta, dif: f.dif })) };
     if (fuente === 'inv') { cicSel = null; cicData = null; prodTab = 'inventario'; invSub = 'reconf'; }
@@ -4518,6 +4732,7 @@
 
   function cnCandHtml() {
     const n = cicNuevo, sel = new Set(n.codigos);
+    if (!n.candidatos.length) return '<p class="muted small">Carga o pega los códigos de los productos que quieres reconfirmar.</p>';
     const difCls = d => !d ? 'dif-ok' : d < 0 ? 'dif-falta' : 'dif-sobra';
     return `<div class="fila-sb"><span class="muted small"><b>${sel.size}</b> de ${n.candidatos.length} marcados</span>
         <span class="fila gap12"><button class="link small" onclick="cnCandTodos(true)">Todos</button><button class="link small" onclick="cnCandTodos(false)">Ninguno</button></span></div>
@@ -4531,6 +4746,62 @@
     cicNuevo.codigos = cicNuevo.codigos.filter(k => k !== cod);
     if (on) cicNuevo.codigos.push(cod);
     $('cnCand').innerHTML = cnCandHtml();
+  }
+  // Productos que el encargado carga o pega: entran a la lista ya marcados, con cómo estaban (SAP y planta)
+  function rcAgregarCods(ids) {
+    const n = cicNuevo, cic = n.fuente === 'cic';
+    const datos = {}; (cic ? datosCiclico() : datosInventario()).forEach(f => (datos[f.cod] = f));
+    let nuevos = 0; const fuera = [];
+    ids.forEach(cod => {
+      const f = datos[cod];
+      if (!f) return fuera.push(cod);
+      if (!n.candidatos.some(c => c.cod === cod)) {
+        n.candidatos.push({ cod, sapTotal: f.sapTotal, planta: f.planta, dif: f.dif });
+        if (f.sap) n.sap[cod] = { inventario: f.sap.inventario, calidad: f.sap.calidad, bloqueado: f.sap.bloqueado };
+        n.base[cod] = { picking: f.picking, aereo: f.aereo, calidad: f.calidad, bloqueado: f.bloqueado, planta: f.planta, sapTotal: f.sapTotal };
+      }
+      if (!n.codigos.includes(cod)) { n.codigos.push(cod); nuevos++; }
+    });
+    cerrarModal();
+    if ($('cnCand')) $('cnCand').innerHTML = cnCandHtml();
+    if (fuera.length) toast(`${nuevos} marcado${nuevos === 1 ? '' : 's'}. No están en este cíclico: ${fuera.slice(0, 5).join(', ')}${fuera.length > 5 ? '…' : ''}`, 'error');
+    else { pitido(); toast(`${nuevos} producto${nuevos === 1 ? '' : 's'} marcado${nuevos === 1 ? '' : 's'}`, 'ok'); }
+  }
+  // Excel o CSV con los productos: se toma la columna de códigos (Atlantic primero, si no Nutresa) y se revisa en la ventana de pegar
+  function rcCargarArchivo() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv,.txt';
+    inp.addEventListener('change', () => {
+      const f = inp.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          let filas;
+          if (window.XLSX && !/\.(csv|txt)$/i.test(f.name)) {
+            const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+            filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+          } else {
+            let txt = new TextDecoder('utf-8').decode(r.result);
+            if (txt.includes('\uFFFD')) txt = new TextDecoder('windows-1252').decode(r.result);
+            filas = txt.split(/\r?\n/).map(l => l.split(/[;,\t]/).map(c => c.replace(/^"|"$/g, '').trim()));
+          }
+          const t = v => sinTilde(String(v || '')).toUpperCase();
+          const iCab = filas.findIndex(x => x.some(c => /COD|MATERIAL/.test(t(c))));
+          let col = 0;
+          if (iCab >= 0) {
+            const cab = filas[iCab].map(t), busca = re => cab.findIndex(c => re.test(c));
+            col = [busca(/COD.*(ATL|AFS)/), busca(/COD.*NUTRESA/), busca(/^COD/), busca(/COD|MATERIAL/)].find(i => i >= 0);
+          }
+          const cods = filas.slice(iCab + 1).map(x => String(x[col] ?? '').trim().replace(/\.0+$/, '')).filter(Boolean);
+          if (!cods.length) return toast('No encontré códigos en ese archivo. Revisa que tenga una columna de códigos.', 'error');
+          cnPegarLista();
+          $('cnTxt').value = cods.join('\n');
+          cnPegarPrevia();
+        } catch (e) { toast('No se pudo leer el archivo: ' + e.message, 'error'); }
+      };
+      r.readAsArrayBuffer(f);
+    });
+    inp.click();
   }
   function cnCandTodos(on) { cicNuevo.codigos = on ? cicNuevo.candidatos.map(c => c.cod) : []; $('cnCand').innerHTML = cnCandHtml(); }
 
@@ -5686,8 +5957,7 @@
     // Por persona: productos que dejó listos y sus pasillos asignados
     const pers = {};
     Object.values(T.grupos).forEach(g => Object.values(g).forEach(f => { if (f.listo && f.ult) { const n = f.ult.usuario || '—'; (pers[n] = pers[n] || { n, listos: 0, ult: null }).listos++; if (!pers[n].ult || f.ult.fecha > pers[n].ult) pers[n].ult = f.ult.fecha; } }));
-    if (!S.cic) S.asig.forEach(a => { const n = a.nombre; pers[n] = pers[n] || { n, listos: 0, ult: null }; });
-    const asigDe = n => ps.filter(x => x.asig.some(a => a.nombre === n));
+    // Ya no se asigna a nadie: en Personas solo sale quien ha contado
     const conAsig = !S.cic;   // en el cíclico no se asigna: lo cuenta quien tenga permiso
     const jefe = conAsig && puede('ciclico_asignar') && S.abierto;
     const ver = ps.filter(x => !cpAv.soloFaltan || x.listos < x.total);
@@ -5700,10 +5970,9 @@
       ${S.cic ? '' : cpPorSedeHtml()}
       <section class="card col gap8">
         <span class="h3">Personas</span>
-        ${Object.values(pers).length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Persona</th>${conAsig ? '<th>Pasillos asignados</th>' : ''}<th class="num">Productos listos</th>${conAsig ? '<th>Le falta</th>' : ''}<th>Último</th></tr></thead><tbody>
-          ${Object.values(pers).sort((a, b) => b.listos - a.listos).map(x => { const as = asigDe(x.n), t = as.reduce((a, y) => a + y.total, 0), l = as.reduce((a, y) => a + y.listos, 0);
-            return `<tr><td><b>${esc(x.n)}</b></td>${conAsig ? `<td class="small">${as.length ? as.map(y => `${esc(y.alm.split(' · ')[0])} P${esc(y.pas)}`).join(', ') : '<span class="muted">—</span>'}</td>` : ''}
-              <td class="num">${x.listos}</td>${conAsig ? `<td class="small">${as.length ? `${t - l ? `<b>${t - l}</b> de ${t}` : '✓ Terminó'} ${cpBarra(l, t)}` : '—'}</td>` : ''}<td class="small nowrap">${x.ult ? fechaHora(x.ult) : '—'}</td></tr>`; }).join('')}
+        ${Object.values(pers).length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Persona</th><th class="num">Productos listos</th><th>Último</th></tr></thead><tbody>
+          ${Object.values(pers).sort((a, b) => b.listos - a.listos).map(x => `<tr><td><b>${esc(x.n)}</b></td>
+              <td class="num">${x.listos}</td><td class="small nowrap">${x.ult ? fechaHora(x.ult) : '—'}</td></tr>`).join('')}
         </tbody></table></div>` : '<p class="muted small">Todavía nadie ha contado.</p>'}
       </section>
       ${!conAsig ? '' : `<details class="card col gap8 cp-pas-det" ${cpAv.verPas ? 'open' : ''} ontoggle="cpAv.verPas=this.open">
