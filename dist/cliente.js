@@ -3558,7 +3558,7 @@
     });
     (invData.conteos || []).forEach(c => {
       const f = fila(c.codigo), a = enAlm(f, c.ubicacion);
-      f.contado = true;
+      if (c.tipo === 'PICKING') f.contado = true;
       if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
       else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
       else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, yo, c.cantidad); suma(a.pk, yo, c.cantidad); }
@@ -3571,7 +3571,7 @@
       o.aereo.forEach(x => { const f = fila(x.codigo), a = enAlmK(f, x.almacen); f.aereo += x.cantidad; a.aereo += x.cantidad; suma(f.ae, o.sedeId, x.cantidad); suma(a.ae, o.sedeId, x.cantidad); });
       o.conteos.forEach(c => {
         const f = fila(c.codigo), a = enAlmK(f, c.almacen);
-        f.contado = true;
+        if (c.tipo === 'PICKING') f.contado = true;
         if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
         else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
         else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, o.sedeId, c.cantidad); suma(a.pk, o.sedeId, c.cantidad); }
@@ -5390,7 +5390,7 @@
       f.aereoPend = f.aereo.filter(x => !x.v).length;
       f.cant = { PICKING: 0, CALIDAD: 0, BLOQUEADO: 0 };
       f.conteos.forEach(c => { f.cant[c.tipo] = (f.cant[c.tipo] || 0) + c.cantidad; });
-      f.contado = f.conteos.length > 0;
+      f.contado = f.conteos.some(c => c.tipo === 'PICKING');   // solo calidad no cuenta como contado
       f.listo = f.contado;   // aquí solo se confirma el picking
       f.ult = f.conteos.reduce((a, c) => !a || c.fecha > a.fecha ? c : a, null);
       (porCod[f.cod] = porCod[f.cod] || []).push(f);
@@ -5785,7 +5785,7 @@
       ${p ? `<div class="info"><span class="fuerte">${esc(p.nombre)}</span>
           <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · Atlantic ${esc(p.id)} · ${kg ? 'peso variable (kg)' : `${p.undPorCaja || 1} und por caja`}</span>
           ${ingCbHtml(S, p, kg)}
-          ${ya ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Si lo guardas, te pregunta si sumar o reemplazar.</span>` : ''}
+          ${ya && ya.tienePk ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Si lo guardas, te pregunta si sumar o reemplazar.</span>` : ''}
           <div id="ingAviso">${ingAvisoHtml(S)}</div></div>
         <div><label class="lbl" for="ingCant">3. ${kg ? 'Peso total (kg)' : 'Cantidad total (unidades)'}</label>
           <input id="ingCant" class="campo ing-in ing-total" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>
@@ -5827,7 +5827,7 @@
     const u = cs.reduce((a, c) => !a || c.fecha > a.fecha ? c : a, null);
     const lugar = (pk[0] || cs[0]).ubicacion;
     const de = t => cs.filter(c => c.tipo === t && c.ubicacion === lugar).reduce((a, c) => a + c.cantidad, 0);
-    return { cant: pk.reduce((a, c) => a + c.cantidad, 0), lugar, calidad: de('CALIDAD'), bloqueado: de('BLOQUEADO'), usuario: u && u.usuario, fecha: u && u.fecha };
+    return { cant: pk.reduce((a, c) => a + c.cantidad, 0), tienePk: pk.length > 0, lugar, calidad: de('CALIDAD'), bloqueado: de('BLOQUEADO'), usuario: u && u.usuario, fecha: u && u.fecha };
   }
   // ¿Otra persona guardó este mismo producto (en este almacén) mientras yo lo estaba llenando?
   function ingOtro(S) {
@@ -5902,8 +5902,6 @@
     const S = cpScope(), p = prodDe(ing.cod);
     if (!ing.alm) return errForm('Escoge el almacén.');
     if (!p) return errForm('Escanea o escribe el código del producto.');
-    const t = ingTotal();
-    if (t === null || !(t >= 0)) { if ($('ingCant')) $('ingCant').focus(); return errForm(ingEsKg(p) ? 'Escribe el peso total.' : 'Escribe la cantidad total.'); }
     // Calidad escrita a mano (si abrieron el campo)
     const fc = $('ingCal');
     ing.cal = null;
@@ -5912,8 +5910,12 @@
       if (!(c >= 0)) { fc.focus(); return errForm('Escribe la calidad (0 si no hay).'); }
       ing.cal = c;
     }
+    const t = ingTotal();
+    // Solo calidad: no hace falta la cantidad de arriba (el picking queda como estaba)
+    if (t === null && ing.cal !== null) return ingEnviar(p, null, 'calidad');
+    if (t === null || !(t >= 0)) { if ($('ingCant')) $('ingCant').focus(); return errForm(ingEsKg(p) ? 'Escribe el peso total (o solo la calidad).' : 'Escribe la cantidad total (o solo la calidad).'); }
     const ya = ingYaContado(S, p.id);
-    if (!ya) return ingEnviar(p, t, null);
+    if (!ya || !ya.tienePk) return ingEnviar(p, t, null);   // si solo tenía calidad, no hay picking que sumar
     const u = ingEsKg(p) ? 'kg' : 'und';
     const otro = ingOtro(S);
     if (otro) return abrirModal(`<div class="fila-sb"><span class="h2">⚠ ${esc(otro.usuario)} también llenó este producto</span>${btnCerrar()}</div>
@@ -5937,7 +5939,7 @@
     // Calidad y bloqueado: los del Excel la primera vez que se cuenta el producto; después se dejan como estaban
     const sap = S.sapDe(p.id);
     const otraVez = t => S.conteos.some(c => c.codigo === p.id && c.tipo === t);
-    const cantidades = {
+    const cantidades = modo === 'calidad' ? { CALIDAD: ing.cal } : {
       PICKING: modo === 'sumar' && ya ? +(ya.cant + t).toFixed(3) : t,
       CALIDAD: ing.cal !== null && ing.cal !== undefined ? (modo === 'sumar' && ya ? +(ya.calidad + ing.cal).toFixed(3) : ing.cal)
         : ya ? ya.calidad : otraVez('CALIDAD') ? 0 : (sap ? Number(sap.calidad) || 0 : 0),
@@ -5950,7 +5952,7 @@
         if (S.cic) { lista.forEach(c => { cicData.conteos = rem(cicData.conteos, c); }); const ec = (cicLista || []).find(x => x.id === S.id); if (ec) ec.contados = datosCiclico().filter(x => x.listo).length; }
         else lista.forEach(c => { invData.conteos = rem(invData.conteos || [], c); });
         pitido();
-        toast(`✓ ${p.nombre}: ${nInv(cantidades.PICKING)} ${ingEsKg(p) ? 'kg' : 'und'}${modo === 'sumar' ? ' (sumado)' : ''}${ing.cal !== null && ing.cal !== undefined ? ` · calidad ${nInv(cantidades.CALIDAD)}` : ''}`, 'ok');
+        toast(modo === 'calidad' ? `✓ ${p.nombre}: calidad ${nInv(cantidades.CALIDAD)} ${ingEsKg(p) ? 'kg' : 'und'}` : `✓ ${p.nombre}: ${nInv(cantidades.PICKING)} ${ingEsKg(p) ? 'kg' : 'und'}${modo === 'sumar' ? ' (sumado)' : ''}${ing.cal !== null && ing.cal !== undefined ? ` · calidad ${nInv(cantidades.CALIDAD)}` : ''}`, 'ok');
         ing.cod = ''; ing.cal = null;
         pintarApp();
         setTimeout(() => $('ingCod') && $('ingCod').focus(), 30);
@@ -6025,7 +6027,11 @@
 
   /* ----- Corregir lo contado (Inventario o cíclico): cantidades, otro producto o eliminar ----- */
   const btnEditarConteo = f => `<button class="ec-btn" onclick="event.stopPropagation(); editarConteos('${esc(f.cod)}')" title="Corregir o eliminar lo contado" aria-label="Corregir o eliminar lo contado de ${esc(f.p ? f.p.nombre : f.cod)}">✎</button>`;
-  const tagAnulado = c => c.anulado ? ` <span class="tag venc" title="Eliminado por ${esc(c.anuladoPor || '—')}${c.anuladoEn ? ' el ' + esc(fechaHora(c.anuladoEn)) : ''}">Eliminado</span>` : '';
+  const tagAnulado = c => {
+    if (!c.anulado) return '';
+    const pas = /pasado a (.+)$/.exec(c.anuladoPor || '');
+    return ` <span class="tag venc" title="${pas ? 'Lo pasó' : 'Eliminado por'} ${esc(c.anuladoPor || '—')}${c.anuladoEn ? ' el ' + esc(fechaHora(c.anuladoEn)) : ''}">${pas ? 'Pasado a ' + esc(pas[1]) : 'Eliminado'}</span>`;
+  };
   let ec = null;   // { cod, conf: índice que pide confirmar eliminar, otro: índice que cambia de producto }
   function ecFuente() {
     const enCic = ctxCic() && cicData ? cicData.ciclico : null;
@@ -6040,6 +6046,68 @@
     });
     return Object.values(m).sort((a, b) => a.ubic.localeCompare(b.ubic));
   }
+  /* ----- Pasar conteos de Inventario a otra sede (cuando los registraron en la sede que no era) -----
+     Por ahora lo puede hacer quien tiene el permiso de SAP del inventario (inv_sap). */
+  const puedePasarSede = () => puede('inv_sap') && (ini.sedes || []).length > 1;
+  const almDeUbic = u => { u = String(u || ''); if (u.startsWith('PICKING-')) return u.slice(8); const x = pasilloDe(u); return x ? almCorto(x.key) : ''; };
+  let ps = null;   // { claves: [{codigo, ubicacion}], cont, alListo }
+  function pasarSedeAbrir(claves, cont, alListo) {
+    if (!claves.length) return toast('Marca al menos un conteo.', 'error');
+    const otras = ini.sedes.filter(x => x.id !== ses.sedeId);
+    ps = { claves, cont, alListo, sede: otras[0].id, alms: null, alm: '' };
+    pasarSedePintar();
+    pasarSedeCargarAlms();
+  }
+  function pasarSedeCargarAlms() {
+    const sid = ps.sede; ps.alms = null; pasarSedePintar();
+    llamar('bdAlmacenesSede', sid).then(l => {
+      if (!ps || ps.sede !== sid) return;
+      ps.alms = l;
+      ps.alm = '';   // '' = cada conteo a su mismo almacén
+      ps.alt = (l[0] || {}).almacen || '';
+      pasarSedePintar();
+    }).catch(e => { if (ps) { ps.alms = []; pasarSedePintar(); errForm(e.message); } });
+  }
+  function pasarSedePintar() {
+    const c = ps && $(ps.cont);
+    if (!c) return;
+    const prods = [...new Set(ps.claves.map(k => k.codigo))];
+    c.innerHTML = `<div class="ps-panel col gap8">
+      <span class="fuerte">Pasar ${ps.claves.length} conteo${ps.claves.length === 1 ? '' : 's'} (${prods.length} producto${prods.length === 1 ? '' : 's'}) de ${esc(nombreSede(ses.sedeId))} a otra sede</span>
+      <div class="inv-grid3">
+        <div><label class="lbl" for="psSede">Sede correcta</label>
+          <select id="psSede" class="campo" onchange="ps.sede=this.value; pasarSedeCargarAlms()">${ini.sedes.filter(x => x.id !== ses.sedeId).map(x =>
+            `<option value="${esc(x.id)}" ${x.id === ps.sede ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></div>
+        <div><label class="lbl" for="psAlm">Almacén en esa sede</label>
+          <select id="psAlm" class="campo" ${ps.alms ? '' : 'disabled'} onchange="ps.alm=this.value; pasarSedePintar()">${ps.alms ? `<option value="" ${ps.alm ? '' : 'selected'}>El mismo almacén de cada conteo</option>` + ps.alms.map(a =>
+            `<option value="${esc(a.almacen)}" ${a.almacen === ps.alm ? 'selected' : ''}>Todos a ${esc(a.nombre)}</option>`).join('') : '<option>Cargando…</option>'}</select></div>
+        ${(() => {
+          if (!ps.alms || ps.alm) return '';
+          const hay = new Set(ps.alms.map(a => a.almacen));
+          const faltan = [...new Set(ps.claves.map(k => almDeUbic(k.ubicacion) || '—').filter(a => !hay.has(a)))];
+          return faltan.length ? `<div><label class="lbl" for="psAlt">Almacén ${esc(faltan.join(', '))} no existe allá: pasarlo a</label>
+            <select id="psAlt" class="campo" onchange="ps.alt=this.value">${ps.alms.map(a => `<option value="${esc(a.almacen)}" ${a.almacen === ps.alt ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></div>` : '';
+        })()}
+      </div>
+      <div class="fila gap8 wrap-f"><button class="btn btn-sec" onclick="pasarSedeCerrar()">Cancelar</button>
+        <button id="psOk" class="btn btn-pri" ${ps.alms && ps.alms.length ? '' : 'disabled'} onclick="pasarSedeHacer()">Pasar a ${esc(nombreSede(ps.sede))}</button></div>
+    </div>`;
+  }
+  function pasarSedeCerrar() { const c = ps && $(ps.cont); if (c) c.innerHTML = ''; ps = null; }
+  function pasarSedeHacer() {
+    const b = $('psOk'); b.disabled = true; b.textContent = 'Pasando…';
+    const x = ps;
+    const hay = new Set((x.alms || []).map(a => a.almacen));
+    const claves = x.claves.map(k => { const propio = almDeUbic(k.ubicacion); return Object.assign({}, k, { almacen: x.alm || (hay.has(propio) ? propio : x.alt) }); });
+    llamar('bdPasarConteosSede', { sedeOrigen: ses.sedeId, sedeDestino: x.sede, claves, usuario: ses.nombre }).then(r => {
+      toast(`✓ ${r.pasados} conteo${r.pasados === 1 ? '' : 's'} pasado${r.pasados === 1 ? '' : 's'} a ${nombreSede(x.sede)}`
+        + (r.yaHabia.length ? `. Ojo: ${r.yaHabia.join(', ')} ya tenía${r.yaHabia.length === 1 ? '' : 'n'} conteo en ese almacén; revísalo en esa sede.` : ''), r.yaHabia.length ? 'error' : 'ok');
+      pasarSedeCerrar();
+      if (x.alListo) x.alListo();
+      return llamar('bdInventarioGeneral', ses.sedeId).then(d => { invData = d; if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); if ($('cfTabla')) $('cfTabla').innerHTML = cfTablaHtml(); });
+    }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Pasar a ' + nombreSede(x.sede); });
+  }
+
   function editarConteos(cod) { ec = { cod, conf: -1, otro: -1 }; pintarEc(); }
   function pintarEc() {
     const { enCic } = ecFuente(), p = prodDe(ec.cod), ls = ecLugares();
@@ -6053,6 +6121,7 @@
       ${ls.map((l, i) => `<div class="ec-lugar mt12">
         <div class="fila-sb wrap-f gap8"><span class="fuerte">${lugarTxt(l.ubic)} <span class="muted small mono-c">${esc(l.ubic)}</span></span>
           <span class="muted small">Contó ${esc(l.usuario || '—')} · ${fechaHora(l.fecha)}</span></div>
+        <span class="small">Sede <b>${esc(nombreSede(ses.sedeId))}</b>${almDeUbic(l.ubic) ? ` · Almacén <b>${esc(almDeUbic(l.ubic))}</b>` : ''}</span>
         <div class="inv-grid3 mt8">${TIPOS_CONTEO.map(([k, t]) => `<div><label class="lbl" for="ec${k}${i}">${t}</label>
           <input id="ec${k}${i}" class="campo" type="number" inputmode="decimal" min="0" step="any" value="${l[k]}"></div>`).join('')}</div>
         ${ec.otro === i ? `<div class="ec-otro mt8"><label class="lbl" for="ecProd${i}">¿Cuál producto era? Se pasan estas cantidades a ese producto, en el mismo lugar.</label>
@@ -6066,6 +6135,8 @@
             <button class="btn btn-sec btn-mini" onclick="ec.otro=${i}; ec.conf=-1; pintarEc(); setTimeout(() => $('ecProd${i}') && $('ecProd${i}').focus(), 50)">Era otro producto</button>
             <button class="btn btn-sal btn-mini" onclick="ec.conf=${i}; ec.otro=-1; pintarEc()">Eliminar</button></div>`}
       </div>`).join('')}
+      ${!enCic && puedePasarSede() ? `<div class="mt12"><div id="ecPasar"></div>
+        <button class="btn btn-sec btn-mini" onclick="pasarSedeAbrir(ecLugares().map(l => ({ codigo: ec.cod, ubicacion: l.ubic })), 'ecPasar', () => ecRefrescar())">Se registró en la sede que no era: pasar a otra sede</button></div>` : ''}
       <p id="fErr" class="error" hidden></p>`, 'modal-ancho');
   }
   function ecCantidades(i) {
@@ -6130,10 +6201,20 @@
       <span class="muted small mt8">Quién contó qué, dónde y cuándo. Lo más nuevo primero. Los conteos de cíclicos y reconfirmaciones no salen aquí.</span>
       <div class="pi-filtros mt12"><select id="hcQuien" class="campo" aria-label="Persona"><option value="">Todas las personas</option></select>
         <input id="hcQ" class="campo" placeholder="Buscar producto o lugar" autocomplete="off"></div>
-      <div id="hcCaja" class="mt8"><div class="cargando">Cargando…</div></div>`, 'modal-ancho');
+      <div id="hcPasar" class="mt8"></div>
+      <div id="hcCaja" class="mt8"><div class="cargando">Cargando…</div></div>
+      <p id="fErr" class="error" hidden></p>`, 'modal-ancho');
     pagInicio('hc');
-    llamar('bdConteosInventario', ses.sedeId).then(l => {
+    hcSel = new Set();
+    hcCargar();
+  }
+  let hcSel = new Set();
+  function hcCargar() {
+    return llamar('bdConteosInventario', ses.sedeId).then(l => {
+      const nuevo = hcInv === null || !$('hcQuien') || !$('hcQuien').dataset.listo;
       hcInv = l;
+      if (!nuevo) { pintarHc(); return; }
+      $('hcQuien').dataset.listo = '1';
       const ps = [...new Set(l.map(c => c.usuario || '—'))].sort();
       $('hcQuien').innerHTML = '<option value="">Todas las personas</option>' + ps.map(p => `<option>${esc(p)}</option>`).join('');
       $('hcQuien').addEventListener('change', () => { hcF.quien = $('hcQuien').value; pagInicio('hc'); pintarHc(); });
@@ -6141,15 +6222,30 @@
       pintarHc();
     }).catch(e => { if ($('hcCaja')) $('hcCaja').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
   }
+  function hcMarcar(k, on) { if (on) hcSel.add(k); else hcSel.delete(k); pintarHc(); }
+  function hcMarcarPagina(on) { (hcVis || []).forEach(k => on ? hcSel.add(k) : hcSel.delete(k)); pintarHc(); }
+  let hcVis = [];
+  function hcPasarSede() {
+    const claves = [...hcSel].map(k => { const i = k.indexOf('|'); return { codigo: k.slice(0, i), ubicacion: k.slice(i + 1) }; });
+    pasarSedeAbrir(claves, 'hcPasar', () => { hcSel = new Set(); hcCargar(); });
+  }
   function pintarHc() {
     if (!$('hcCaja')) return;
     const pal = sinTilde(hcF.q.trim()).split(/\s+/).filter(Boolean);
     const l = hcInv.filter(c => (!hcF.quien || (c.usuario || '—') === hcF.quien)
       && (!pal.length || pal.every(w => sinTilde(`${c.codigo} ${(prodDe(c.codigo) || {}).nombre || ''} ${(prodDe(c.codigo) || {}).codigoNutresa || ''} ${c.ubicacion}`).includes(w))));
     const pg = paginar('hc', l, pintarHc);
-    $('hcCaja').innerHTML = l.length ? `<div class="muted small">${l.length} conteo${l.length === 1 ? '' : 's'}</div>
-      <div class="tabla-wrap mt8"><table class="tabla"><thead><tr><th>Fecha</th><th>Quién</th><th>Producto</th><th>Lugar</th><th>Tipo</th><th class="num">Cantidad</th></tr></thead>
-      <tbody>${pg.filas.map(c => { const p = prodDe(c.codigo); return `<tr class="${c.anulado ? 'ec-anulado' : ''}"><td class="nowrap">${fechaHora(c.fecha)}</td><td>${esc(c.usuario || '—')}</td>
+    const marca = puedePasarSede(), sedeN = esc(nombreSede(ses.sedeId)), key = c => c.codigo + '|' + c.ubicacion;
+    hcVis = [...new Set(pg.filas.filter(c => !c.anulado).map(key))];
+    const todosPag = hcVis.length && hcVis.every(k => hcSel.has(k));
+    $('hcCaja').innerHTML = l.length ? `<div class="fila-sb wrap-f gap8"><span class="muted small">${l.length} conteo${l.length === 1 ? '' : 's'}</span>
+        ${marca && hcSel.size ? `<span class="fila gap8 wrap-f"><span class="small fuerte">${hcSel.size} marcado${hcSel.size === 1 ? '' : 's'}</span>
+          <button class="btn btn-sec btn-mini" onclick="hcSel = new Set(); pintarHc()">Quitar marcas</button>
+          <button class="btn btn-pri btn-mini" onclick="hcPasarSede()">Pasar a otra sede</button></span>` : ''}</div>
+      <div class="tabla-wrap mt8"><table class="tabla"><thead><tr>${marca ? `<th><input type="checkbox" aria-label="Marcar todos los de esta página" ${todosPag ? 'checked' : ''} onchange="hcMarcarPagina(this.checked)"></th>` : ''}<th>Fecha</th><th>Quién</th><th>Sede</th><th>Almacén</th><th>Producto</th><th>Lugar</th><th>Tipo</th><th class="num">Cantidad</th></tr></thead>
+      <tbody>${pg.filas.map(c => { const p = prodDe(c.codigo), k = key(c); return `<tr class="${c.anulado ? 'ec-anulado' : ''}">
+        ${marca ? `<td>${c.anulado ? '' : `<input type="checkbox" aria-label="Marcar" ${hcSel.has(k) ? 'checked' : ''} onchange="hcMarcar('${esc(k)}', this.checked)">`}</td>` : ''}
+        <td class="nowrap">${fechaHora(c.fecha)}</td><td>${esc(c.usuario || '—')}</td><td class="nowrap">${sedeN}</td><td>${esc(almDeUbic(c.ubicacion) || '—')}</td>
         <td><b>${esc(c.codigo)}</b> <span class="muted small">${esc(p ? p.nombre : '')}</span></td><td>${esc(cu(c.ubicacion))}</td>
         <td>${(TIPOS_CONTEO.find(t => t[0] === c.tipo) || [0, c.tipo])[1]}${tagAnulado(c)}</td><td class="num">${nInv(c.cantidad)}</td></tr>`; }).join('')}</tbody></table></div>${pg.barra}`
       : '<p class="muted">No hay conteos con ese filtro.</p>';
