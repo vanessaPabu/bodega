@@ -676,6 +676,11 @@
   .inv-grid2 { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto; gap: 12px; align-items: end; }
   .inv-grid2 .btn-xl { min-height: 48px; height: 48px; }
   @media (max-width: 760px) { .inv-grid, .inv-grid2 { grid-template-columns: 1fr; } }
+  .sug-lista { position: absolute; z-index: 40; max-height: 300px; overflow-y: auto; background: var(--card); border: 1px solid var(--borde2); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 4px; box-sizing: border-box; }
+  .sug-lista button { display: block; width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--txt); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+  .sug-lista button:active, .sug-lista button:hover { background: var(--seg); }
+  .ing-cal { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .ing-cal > div { width: 100%; }
   .campo-x { position: relative; display: block; }
   .campo-x .campo { width: 100%; padding-right: 48px; }
   .campo-x-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border: 0; border-radius: 50%;
@@ -944,7 +949,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-DlJwbOeh.js"></script>
+  <script type="module" crossorigin src="./assets/index-Bq21F-Mj.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>

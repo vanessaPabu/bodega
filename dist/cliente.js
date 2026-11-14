@@ -5789,6 +5789,10 @@
           <div id="ingAviso">${ingAvisoHtml(S)}</div></div>
         <div><label class="lbl" for="ingCant">3. ${kg ? 'Peso total (kg)' : 'Cantidad total (unidades)'}</label>
           <input id="ingCant" class="campo ing-in ing-total" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>
+        <div class="ing-cal">
+          <button type="button" id="ingCalBtn" class="btn btn-sec btn-mini" onclick="ingVerCalidad()">+ Agregar calidad</button>
+          <div id="ingCalCampo" hidden><label class="lbl" for="ingCal">Calidad (${kg ? 'kg' : 'unidades'})</label>
+            <input id="ingCal" class="campo" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div></div>
         <p id="fErr" class="error" hidden></p>
         <button id="ingOk" class="btn btn-ent-solido btn-xl" onclick="ingGuardar()">Guardar</button>` : ''}
       ${prog ? `<div class="cp-prog small">${cpBarra(prog.l, prog.t)} <span><b>${prog.l} de ${prog.t}</b> productos ${esReconf(S.cic) ? 'de la reconfirmación' : 'del cíclico'} contados · faltan <b>${prog.t - prog.l}</b></span></div>` : ''}`}
@@ -5862,6 +5866,18 @@
     pintarApp();
     setTimeout(() => { const f = $('ingCant'); if (f) f.focus(); }, 30);
   }
+  // Calidad a mano (opcional): se abre con el botón; si no la escriben, queda la del Excel
+  function ingVerCalidad() {
+    const S = cpScope(), p = prodDe(ing.cod);
+    if (!p) return;
+    const ya = ingYaContado(S, p.id), sap = S.sapDe(p.id);
+    $('ingCalBtn').hidden = true;
+    $('ingCalCampo').hidden = false;
+    const f = $('ingCal');
+    const actual = ya ? ya.calidad : (sap ? Number(sap.calidad) || 0 : 0);
+    if (actual) f.value = actual;
+    f.focus(); f.select();
+  }
   // Borra el código de una vez (para no borrar letra por letra) y deja listo para escanear otro
   function ingLimpiar() {
     if (ing.cod) { ing.cod = ''; ing.base = null; ing.avisado = false; pintarApp(); }
@@ -5873,6 +5889,7 @@
     if (!c) return;
     c.addEventListener('change', () => ingProducto(c.value));
     c.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); ingProducto(c.value, true); } });
+    if ($('ingCal')) $('ingCal').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); ingGuardar(); } });
     const ins = [...document.querySelectorAll('.ing-in')];
     ins.forEach((el, i) => {
       el.addEventListener('input', ingCalc);
@@ -5887,6 +5904,14 @@
     if (!p) return errForm('Escanea o escribe el código del producto.');
     const t = ingTotal();
     if (t === null || !(t >= 0)) { if ($('ingCant')) $('ingCant').focus(); return errForm(ingEsKg(p) ? 'Escribe el peso total.' : 'Escribe la cantidad total.'); }
+    // Calidad escrita a mano (si abrieron el campo)
+    const fc = $('ingCal');
+    ing.cal = null;
+    if (fc && !$('ingCalCampo').hidden && fc.value.trim() !== '') {
+      const c = num(fc.value);
+      if (!(c >= 0)) { fc.focus(); return errForm('Escribe la calidad (0 si no hay).'); }
+      ing.cal = c;
+    }
     const ya = ingYaContado(S, p.id);
     if (!ya) return ingEnviar(p, t, null);
     const u = ingEsKg(p) ? 'kg' : 'und';
@@ -5914,7 +5939,8 @@
     const otraVez = t => S.conteos.some(c => c.codigo === p.id && c.tipo === t);
     const cantidades = {
       PICKING: modo === 'sumar' && ya ? +(ya.cant + t).toFixed(3) : t,
-      CALIDAD: ya ? ya.calidad : otraVez('CALIDAD') ? 0 : (sap ? Number(sap.calidad) || 0 : 0),
+      CALIDAD: ing.cal !== null && ing.cal !== undefined ? (modo === 'sumar' && ya ? +(ya.calidad + ing.cal).toFixed(3) : ing.cal)
+        : ya ? ya.calidad : otraVez('CALIDAD') ? 0 : (sap ? Number(sap.calidad) || 0 : 0),
       BLOQUEADO: ya ? ya.bloqueado : otraVez('BLOQUEADO') ? 0 : (sap ? Number(sap.bloqueado) || 0 : 0)
     };
     const b = $('ingOk'); if (b) { b.disabled = true; b.textContent = 'Guardando…'; }
@@ -5924,8 +5950,8 @@
         if (S.cic) { lista.forEach(c => { cicData.conteos = rem(cicData.conteos, c); }); const ec = (cicLista || []).find(x => x.id === S.id); if (ec) ec.contados = datosCiclico().filter(x => x.listo).length; }
         else lista.forEach(c => { invData.conteos = rem(invData.conteos || [], c); });
         pitido();
-        toast(`✓ ${p.nombre}: ${nInv(cantidades.PICKING)} ${ingEsKg(p) ? 'kg' : 'und'}${modo === 'sumar' ? ' (sumado)' : ''}`, 'ok');
-        ing.cod = '';
+        toast(`✓ ${p.nombre}: ${nInv(cantidades.PICKING)} ${ingEsKg(p) ? 'kg' : 'und'}${modo === 'sumar' ? ' (sumado)' : ''}${ing.cal !== null && ing.cal !== undefined ? ` · calidad ${nInv(cantidades.CALIDAD)}` : ''}`, 'ok');
+        ing.cod = ''; ing.cal = null;
         pintarApp();
         setTimeout(() => $('ingCod') && $('ingCod').focus(), 30);
       })
@@ -7601,6 +7627,58 @@
     try { pararCamara(); } catch (e) {}
     esc_.tec = ''; clearTimeout(esc_.tecT); esc_.leido = null;
   }
+
+  /* ----- Lista desplegable de productos en celulares y equipos táctiles -----
+     La lista del navegador (datalist) no sale en muchos Android: en pantallas táctiles se usa esta. */
+  const pantallaTactil = () => { try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return 'ontouchstart' in window; } };
+  const sug = { el: null, box: null };
+  function sugCerrar() { if (sug.box) sug.box.remove(); sug.box = null; sug.el = null; }
+  function sugPintar(el) {
+    const dl = el.dataset.lista && document.getElementById(el.dataset.lista);
+    const q = sinTilde(String(el.value || '').trim());
+    if (!dl || q.length < 2) return sugCerrar();
+    const pal = q.split(/\s+/).filter(Boolean), ops = [];
+    for (const o of dl.options) {
+      const v = o.value;
+      if (pal.every(w => sinTilde(v).includes(w))) { ops.push(v); if (ops.length >= 8) break; }
+    }
+    if (!ops.length || (ops.length === 1 && ops[0] === el.value)) return sugCerrar();
+    if (!sug.box) {
+      sug.box = document.createElement('div');
+      sug.box.className = 'sug-lista';
+      sug.box.setAttribute('role', 'listbox');
+      sug.box.addEventListener('mousedown', ev => ev.preventDefault());   // que el campo no pierda el foco
+      sug.box.addEventListener('touchstart', () => { sug.tocando = true; }, { passive: true });
+      sug.box.addEventListener('click', ev => { const b = ev.target.closest('[data-v]'); if (b) sugElegir(b.getAttribute('data-v')); });
+      document.body.appendChild(sug.box);
+    }
+    sug.el = el;
+    const r = el.getBoundingClientRect();
+    sug.box.style.left = (r.left + window.pageXOffset) + 'px';
+    sug.box.style.top = (r.bottom + window.pageYOffset + 4) + 'px';
+    sug.box.style.width = r.width + 'px';
+    sug.box.innerHTML = ops.map(v => `<button type="button" role="option" data-v="${esc(v)}">${esc(v)}</button>`).join('');
+  }
+  function sugElegir(v) {
+    const el = sug.el;
+    sugCerrar();
+    if (!el) return;
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  document.addEventListener('focusin', ev => {
+    const el = ev.target;
+    if (!el || el.tagName !== 'INPUT' || !pantallaTactil()) return;
+    const l = el.getAttribute('list');
+    if (l) { el.dataset.lista = l; el.removeAttribute('list'); }
+  });
+  document.addEventListener('input', ev => { const el = ev.target; if (el && el.dataset && el.dataset.lista && pantallaTactil()) sugPintar(el); });
+  document.addEventListener('focusout', ev => {
+    if (!sug.el || ev.target !== sug.el) return;
+    setTimeout(() => { if (sug.tocando) { sug.tocando = false; return; } if (document.activeElement !== sug.el) sugCerrar(); }, 200);
+  });
+  window.addEventListener('resize', () => { if (sug.el && document.body.contains(sug.el)) sugPintar(sug.el); else sugCerrar(); });
 
   /* ----- Radiofrecuencia / pistola (RT40S y similares): el lector escribe el código como si fuera un teclado -----
      1. Si no hay ningún campo seleccionado (en los equipos táctiles la barra no queda seleccionada sola),
