@@ -873,6 +873,7 @@
     if (/^E\d{4,}$/i.test(v)) return buscarCodigo(v);
     const p = buscarProducto(v);
     if (p) { pitido(); return hojaProducto(p); }
+    if (pareceEan(v)) return hojaEanNuevo(v);
     abrirBuscarProducto(v);
     toast('No hay un producto con ese código exacto. Revisa la lista.', 'error');
   }
@@ -9182,6 +9183,60 @@
       if (caja) caja.outerHTML = `<span class="small txt-verde">✓ EAN ${esc(ean)} guardado</span>`;
     }).catch(e => { delete inp.dataset.guardando; toast(e.message, 'error'); });
   }
+  // Código que no es de ningún producto: si parece un EAN se ofrece ponérselo a un producto o crear el producto
+  const pareceEan = t => /^\d{8,14}$/.test(String(t || '').replace(/\s+/g, ''));
+  function hojaEanNuevo(ean) {
+    ean = String(ean).replace(/\s+/g, '');
+    hojaCtx = { ean };
+    abrirModal(`<div class="fila-sb"><span class="h2">EAN no registrado</span>${btnCerrar()}</div>
+      <span class="hoja-cod mt8">EAN <b>${esc(ean)}</b></span>
+      <span class="muted small">Este código de barras no está en ningún producto.</span>
+      ${puede('productos') ? `<div class="hoja-acc mt16">
+          <button class="btn btn-pri btn-xl" onclick="hojaEanAsignar()">Ponérselo a un producto</button>
+          <button class="btn btn-sec btn-xl" onclick="formProducto(false, '${esc(ean)}')">Crear producto nuevo</button></div>`
+        : '<p class="small mt16">Pídele a quien maneja los productos que lo agregue.</p>'}`);
+  }
+  function hojaEanAsignar() {
+    const ean = hojaCtx && hojaCtx.ean;
+    if (!ean) return;
+    abrirModal(`<div class="fila-sb"><span class="h2">¿De qué producto es?</span>${btnCerrar()}</div>
+      <span class="muted small mt8">EAN <b>${esc(ean)}</b>. Busca el producto por código Atlantic, Nutresa o nombre y tócalo.</span>
+      <input id="eaQ" class="campo mt12" autocomplete="off" placeholder="Código o nombre" oninput="eanListaPintar()">
+      <div id="eaLista" class="lista-bp mt8" role="list"></div>
+      <button class="btn btn-sec btn-xl mt12" onclick="hojaEanNuevo('${esc(ean)}')">Volver</button>`);
+    eanListaPintar();
+    if (!('ontouchstart' in window)) $('eaQ').focus();
+  }
+  function eanListaPintar() {
+    const pal = sinTilde($('eaQ').value.trim()).split(/\s+/).filter(Boolean);
+    const l = ini.productos.filter(p => p.activo !== false && (!pal.length || pal.every(w => sinTilde(`${p.id} ${p.codigoNutresa} ${p.nombre}`).includes(w)))).slice(0, 30);
+    $('eaLista').innerHTML = l.length ? l.map(p => `<button class="bp-item" onclick="eanConfirmar('${esc(p.id)}')"><span class="col flex1 gap4" style="min-width:0">
+        <span class="nombre">${esc(p.nombre)}</span><span class="muted small">Atlantic <b>${esc(p.id)}</b> · Nutresa ${esc(p.codigoNutresa || '—')}${p.codigoBarras ? ' · ya tiene EAN ' + esc(p.codigoBarras) : ''}</span></span></button>`).join('')
+      : '<p class="muted small">No hay productos con eso.</p>';
+  }
+  function eanConfirmar(pid) {
+    const p = prodDe(pid), ean = hojaCtx && hojaCtx.ean;
+    if (!p || !ean) return;
+    abrirModal(`<div class="fila-sb"><span class="h2">Confirmar EAN</span>${btnCerrar()}</div>
+      <span class="nombre mt8">${esc(p.nombre)}</span>
+      <span class="hoja-cod">Código Atlantic <b>${esc(p.id)}</b></span>
+      <span class="small mt8">Se le pone el EAN <b>${esc(ean)}</b>.${p.codigoBarras ? ` <b class="txt-naranja">Ya tenía el ${esc(p.codigoBarras)}: se reemplaza.</b>` : ''}</span>
+      <p id="fErr" class="error" hidden></p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="hojaEanAsignar()">Otro producto</button>
+        <button id="eaOk" class="btn btn-pri btn-xl" onclick="eanGuardarEn('${esc(pid)}')">Guardar</button></div>`);
+  }
+  function eanGuardarEn(pid) {
+    const b = $('eaOk'), ean = hojaCtx && hojaCtx.ean;
+    if (!b || b.disabled || !ean) return;
+    b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdGuardarEan', { codigo: pid, ean, usuario: ses.nombre }).then(r => {
+      ini.productos = r.productos;
+      $('dlProductos').innerHTML = r.productos.map(x => `<option value="${esc(x.id + ' · ' + x.nombre)}">`).join('');
+      if ($('prodLista')) $('prodLista').innerHTML = listaProdHtml();
+      pitido(); toast(`EAN ${ean} guardado en ${pid}`, 'ok');
+      hojaProducto(prodDe(pid));
+    }).catch(e => { b.disabled = false; b.textContent = 'Guardar'; errForm(e.message); });
+  }
   function rotuloAquiTexto(t) {
     const v = String(t || '').trim().toUpperCase();
     if (!/^E\d{4,}$/.test(v)) return toast('Escanea el código de barras del rótulo (empieza por E)', 'error');
@@ -9211,6 +9266,7 @@
     }
     const prod = buscarProducto(String(txt).trim());
     if (prod) { pitido(); return hojaProducto(prod); }
+    if (pareceEan(txt)) return hojaEanNuevo(txt);
     toast(`No se encontró el código ${cod}`, 'error');
   }
 
@@ -10622,8 +10678,9 @@
   }
 
   // Crear producto. "desdeEntrada" = al terminar vuelve al formulario de entrada con el producto elegido
-  function formProducto(desdeEntrada) {
+  function formProducto(desdeEntrada, ean) {
     if (sinPermiso('productos')) return;
+    formProductoTras = ean ? (p => hojaProducto(p)) : null;
     const escrito = desdeEntrada && $('fProd') ? $('fProd').value.trim() : '';
     const guardado = desdeEntrada ? { esp: $('fEsp') && $('fEsp').value, lote: $('fLote').value, venc: $('fVenc').value } : null;
     abrirModal(`
@@ -10645,6 +10702,7 @@
         <button class="btn btn-sec btn-xl" onclick="${desdeEntrada ? 'abrirForm(\'NUEVO\')' : 'cerrarModal()'}">Cancelar</button>
         <button id="npOk" class="btn btn-pri btn-xl">Crear</button>
       </div>`);
+    if (ean) $('npCb').value = ean;
     $('npNom').focus();
     formProductoOk = () => {
       const b = $('npOk');
@@ -10665,6 +10723,7 @@
           } else {
             cerrarModal();
             pintarApp();
+            if (formProductoTras) { const f = formProductoTras; formProductoTras = null; return f(p); }
             abrirFicha(p.id);
           }
         })
@@ -10673,6 +10732,7 @@
     $('npOk').onclick = formProductoOk;
   }
   let formProductoOk = null;
+  let formProductoTras = null;   // qué hacer después de crear el producto (ej. mostrar su ventana al venir de un EAN nuevo)
 
   // Acepta: ID del producto, código de barras, o la opción elegida de la lista
   function buscarProducto(txt) {
