@@ -607,7 +607,7 @@
     } else if (vista === 'config') {
       cuerpo = `<main class="wrap wrap-ancho">${vistaConfig()}</main>`;
     } else if (vista === 'productos') {
-      cuerpo = `<main class="wrap ${prodTab !== 'totales' ? 'wrap-ancho' : ''}">${vistaProductos()}</main>`;
+      cuerpo = `<main class="wrap wrap-ancho">${vistaProductos()}</main>`;
     } else if (vista === 'recibidor') {
       cuerpo = `<main class="wrap ${rcTab !== 'recibir' ? 'wrap-ancho' : ''}">${vistaRecibidor()}</main>`;
     } else if (vista === 'rotulo') {
@@ -3143,6 +3143,230 @@
     pistola.txt += ev.key; pistola.t = ahora;
   });
 
+  /* ================= Plano en 3D (solo PC) =================
+     Se dibuja en un lienzo, sin librerías: cada posición es una columna de cajas (una por nivel y lado),
+     del color de su estado (vacío, más de 30 días, por vencer, vencido). Arrastrar = girar, rueda = acercar,
+     clic derecho o Shift + arrastrar = mover, clic en una caja = abrir esa posición. */
+  let ver3d = leerLS('mapa3d') === '1';
+  const pc3d = () => window.matchMedia('(min-width: 1000px) and (pointer: fine)').matches;
+  const p3 = { yaw: -0.55, tilt: 0.95, zoom: 1, px: 0, py: 0, cajas: [], hits: [], hover: null, raf: 0, ini: false };
+  function ponerVer3d(si) {
+    ver3d = !!si; guardarLS('mapa3d', ver3d ? '1' : '');
+    p3.ini = false;
+    pintarApp();
+  }
+  const usa3d = () => ver3d && pc3d() && !colocando;
+  function plano3dHtml() {
+    return `<div class="p3-wrap" id="p3Wrap">
+      <canvas id="plano3d" aria-label="Plano en 3D"></canvas>
+      <div class="p3-ctrl">
+        ${ayudaHtml('Arrastra con el mouse para girar. Rueda para acercar o alejar. Clic derecho (o Shift + arrastrar) para mover. Clic en una caja para abrir esa posición. Cada caja es un nivel de la posición, del color de su estado.')}
+        <button onclick="p3Zoom(1.25)" aria-label="Acercar">+</button>
+        <button onclick="p3Zoom(1 / 1.25)" aria-label="Alejar">−</button>
+        <button onclick="p3Vista('arriba')">Desde arriba</button>
+        <button onclick="p3Vista('')">Restablecer</button>
+      </div>
+      <div class="p3-tip" id="p3Tip" hidden></div>
+    </div>`;
+  }
+  function p3Zoom(f) { p3.zoom = Math.min(8, Math.max(0.3, p3.zoom * f)); p3Pintar(); }
+  function p3Vista(v) { if (v === 'arriba') { p3.tilt = 1.5; p3.yaw = 0; } else { p3.yaw = -0.55; p3.tilt = 0.95; p3.zoom = 1; p3.px = 0; p3.py = 0; } p3Pintar(); }
+
+  // Cajas del plano: posiciones (por nivel y lado), paredes y piso de las zonas
+  // Piezas del plano: estantería (parales azules y vigas naranja), estibas de madera con cajas encima, paredes y piso.
+  // Cada posición (nivel y lado) es una "celda": al tocar cualquiera de sus piezas se abre esa posición.
+  function p3Datos() {
+    const dentro = sede.zonas.filter(enPlano), zv = dentro.length > 1 ? zonaVista() : null;
+    const zonas = zv ? [zv] : dentro;
+    const piezas = [], pisos = [], etqs = [], celdas = [];
+    const H = 26;   // alto de cada nivel
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    const caja = (x, y, x2, y2) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x2); y1 = Math.max(y1, y2); };
+    const colores = getComputedStyle(document.documentElement);
+    const col = k => colores.getPropertyValue('--' + k).trim() || '#999';
+    const C = { ocupado: col('ocupado'), pronto: col('pronto'), vencido: col('vencido') };
+    const PARAL = '#2f5d9e', VIGA = '#e8772e', MADERA = '#b7895a', CARTON = ['#c9a06a', '#bf9460', '#d2ab76'];
+    const add = (x, y, z, w, h, d, color, extra) => piezas.push(Object.assign({ x, y, z, w, h, d, color }, extra || {}));
+    zonas.forEach(z => {
+      pisos.push({ x: z.x, y: z.y, w: z.ancho, h: z.alto, color: z.color });
+      (z.areas || []).forEach(a => pisos.push({ x: a.x, y: a.y, w: a.ancho, h: a.alto, color: z.color }));
+      caja(z.x, z.y, z.x + z.ancho, z.y + z.alto);
+      etqs.push({ x: z.x + 8, y: z.y + 10, z: 0, txt: z.nombre, color: z.color, grande: true });
+      racksEnPlano(z).forEach(c => {
+        const r = c.r, grueso = r.fondo === 'D' ? 44 : 22;
+        const piezasR = c.tramos ? (() => { let ini = 1; return c.tramos.map(t => { const pz = { x: t.x, y: t.y, largo: t.largo, o: 'V', desde: ini, n: t.pos, ancho: t.ancho || grueso }; ini += t.pos; return pz; }); })()
+          : [{ x: c.x, y: c.y, largo: c.largo, o: c.o, desde: 1, n: r.posiciones, ancho: grueso }];
+        // Niveles de la fila (el picking va en el piso)
+        const nivFila = [...new Set(sede.espacios.filter(e => e.rackId === r.id).map(e => e.nivel))].sort((a, b) => a - b);
+        const nNiv = Math.max(1, nivFila.length), alto = nNiv * H + 3;
+        piezasR.forEach((pz, k) => {
+          const paso = pz.largo / Math.max(1, pz.n), H_ = pz.o === 'H';
+          if (k === 0) etqs.push({ x: pz.x + (H_ ? -14 : pz.ancho / 2), y: pz.y + (H_ ? pz.ancho / 2 : -12), z: alto + 6, txt: nombreCorto(r) });
+          // Estructura: un paral en cada borde de posición (adelante y atrás) y vigas en cada nivel
+          const T = 2.2;
+          for (let i = 0; i <= pz.n; i++) {
+            const a = Math.min(pz.largo - T, i * paso);
+            if (H_) { add(pz.x + a, pz.y, 0, T, T, alto, PARAL, { est: 1 }); add(pz.x + a, pz.y + pz.ancho - T, 0, T, T, alto, PARAL, { est: 1 }); }
+            else { add(pz.x, pz.y + a, 0, T, T, alto, PARAL, { est: 1 }); add(pz.x + pz.ancho - T, pz.y + a, 0, T, T, alto, PARAL, { est: 1 }); }
+          }
+          for (let i = 0; i < pz.n; i++) {
+            const p = pz.desde + i;
+            if (p > r.posiciones || r.omitidas.includes(p)) continue;
+            let x, y, w, h;
+            if (H_) { w = paso; h = pz.ancho; y = pz.y; x = r.invertida ? pz.x + pz.largo - (i + 1) * paso : pz.x + i * paso; }
+            else { w = pz.ancho; h = paso; x = pz.x; y = r.invertida ? pz.y + i * paso : pz.y + pz.largo - (i + 1) * paso; }
+            caja(x, y, x + w, y + h);
+            // Vigas de esta posición en cada nivel (por posición, para que se dibujen en el orden correcto)
+            for (let n = 1; n <= nNiv; n++) {
+              const zv2 = n * H - 2;
+              if (H_) { add(x, y, zv2, w, T, 2.4, VIGA, { est: 1 }); add(x, y + h - T, zv2, w, T, 2.4, VIGA, { est: 1 }); }
+              else { add(x, y, zv2, T, h, 2.4, VIGA, { est: 1 }); add(x + w - T, y, zv2, T, h, 2.4, VIGA, { est: 1 }); }
+            }
+            const esps = espaciosDe(r.id, p);
+            const lados = [...new Set(esps.map(e => e.lado))].sort();
+            esps.forEach(e => {
+              const nv = Math.max(0, nivFila.indexOf(e.nivel)), li = lados.indexOf(e.lado), nl = Math.max(1, lados.length);
+              let bx = x, by = y, bw = w, bh = h;
+              if (nl > 1) { if (H_) { bh = h / nl; by = y + li * bh; } else { bw = w / nl; bx = x + li * bw; } }
+              const ls = lineasDe(e.id), est = estadoDe(ls);
+              const cel = { esp: e, rackId: r.id, pos: p, vacio: !ls.length, apagado: !!busqueda.trim() && !coincide(e.id),
+                x: bx, y: by, z: nv * H + (nv ? 0.4 : 0), w: bw, h: bh, d: H - 4 };
+              celdas.push(cel);
+              if (!ls.length) return;
+              // Estiba de madera y encima las cajas (la tapa sale del color de su vencimiento)
+              const m = 2.2, zb = cel.z + (nv ? 0.6 : 0);
+              add(bx + m, by + m, zb, bw - 2 * m, bh - 2 * m, 2.6, MADERA, { cel });
+              const tapa = C[est] || C.ocupado, cajasN = Math.min(3, Math.max(1, ls.length + 1));
+              const largoL = (H_ ? bw : bh) - 2 * m - 1, alt = H - 9;
+              for (let q = 0; q < cajasN; q++) {
+                const t0 = m + 0.5 + q * largoL / cajasN, tl = largoL / cajasN - 1;
+                const altq = alt - (q % 2) * 3;
+                if (H_) add(bx + t0, by + m + 0.8, zb + 2.6, tl, bh - 2 * m - 1.6, altq, CARTON[q % 3], { cel, top: tapa });
+                else add(bx + m + 0.8, by + t0, zb + 2.6, bw - 2 * m - 1.6, tl, altq, CARTON[q % 3], { cel, top: tapa });
+              }
+            });
+          }
+        });
+      });
+    });
+    (sede.muros || []).forEach(([a, b, c2, d2]) => {
+      const x = Math.min(a, c2), y = Math.min(b, d2), w = Math.max(4, Math.abs(c2 - a)), h = Math.max(4, Math.abs(d2 - b));
+      if (x + w < x0 || x > x1 || y + h < y0 || y > y1) return;
+      add(x, y, 0, w, h, 90, '#9aa3ae', { muro: true });
+    });
+    return { piezas, celdas, pisos, etqs, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, ancho: Math.max(1, x1 - x0), alto: Math.max(1, y1 - y0),
+      piso: { x: x0 - 20, y: y0 - 20, w: x1 - x0 + 40, h: y1 - y0 + 40 } };
+  }
+
+  function p3Pintar() { if (!p3.raf) p3.raf = requestAnimationFrame(() => { p3.raf = 0; p3Dibujar(); }); }
+  function p3Dibujar() {
+    const cv = $('plano3d');
+    if (!cv) return;
+    const wrap = $('p3Wrap'), W = wrap.clientWidth, Hc = Math.max(420, Math.min(760, window.innerHeight - 220));
+    const dpr = window.devicePixelRatio || 1;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(Hc * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(Hc * dpr); cv.style.width = W + 'px'; cv.style.height = Hc + 'px'; }
+    const g = cv.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, Hc);
+    const D = p3.datos || (p3.datos = p3Datos());
+    const cy = Math.cos(p3.yaw), sy = Math.sin(p3.yaw), ct = Math.cos(p3.tilt), st = Math.sin(p3.tilt);
+    const base = Math.min(W / (D.ancho * 1.1), Hc / (D.alto * 1.25)), s = base * p3.zoom;
+    const ox = W / 2 + p3.px, oy = Hc / 2 + p3.py;
+    // Mundo (x, y, z) → pantalla. La cámara mira desde +y (girado) y desde arriba según la inclinación.
+    const pr = (x, y, z) => { const rx = (x - D.cx) * cy - (y - D.cy) * sy, ry = (x - D.cx) * sy + (y - D.cy) * cy; return [ox + rx * s, oy + (ry * st - z * ct) * s, ry * ct + z * st]; };
+    const poli = (pts, fill, stroke, alfa) => { g.globalAlpha = alfa; g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); if (fill) { g.fillStyle = fill; g.fill(); } if (stroke) { g.strokeStyle = stroke; g.lineWidth = 0.5; g.stroke(); } g.globalAlpha = 1; };
+    const rect = f => [pr(f.x, f.y, 0), pr(f.x + f.w, f.y, 0), pr(f.x + f.w, f.y + f.h, 0), pr(f.x, f.y + f.h, 0)];
+    // Piso de concreto y las zonas encima
+    poli(rect(D.piso), '#d9dde2', null, 0.55);
+    D.pisos.forEach(f => poli(rect(f), f.color, f.color, 0.14));
+    const oscuro = (hex, f) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex); if (!m) return hex; const n = parseInt(m[1], 16); return `rgb(${Math.round((n >> 16) * f)},${Math.round(((n >> 8) & 255) * f)},${Math.round((n & 255) * f)})`; };
+    // Sombra suave de cada estiba en el piso del nivel
+    const orden = D.piezas.map(b => ({ b, k: pr(b.x + b.w / 2, b.y + b.h / 2, b.z + b.d / 2)[2] + (b.est ? -0.01 : 0) })).sort((a, b) => a.k - b.k);
+    const caras = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const hits = new Map();
+    orden.forEach(({ b }) => {
+      const { x, y, z, w, h, d } = b, z2 = z + d;
+      const cel = b.cel, alfa = cel && cel.apagado ? 0.15 : 1, resalto = cel && p3.hover === cel;
+      const color = resalto ? '#3b82f6' : b.color;
+      const ps = [];
+      caras.forEach(([nx, ny]) => {
+        if (nx * sy + ny * cy <= 0) return;   // esa cara no mira a la cámara
+        let q;
+        if (nx === 1) q = [[x + w, y], [x + w, y + h]]; else if (nx === -1) q = [[x, y + h], [x, y]];
+        else if (ny === 1) q = [[x + w, y + h], [x, y + h]]; else q = [[x, y], [x + w, y]];
+        const cara = [pr(q[0][0], q[0][1], z), pr(q[1][0], q[1][1], z), pr(q[1][0], q[1][1], z2), pr(q[0][0], q[0][1], z2)];
+        poli(cara, oscuro(color, nx ? 0.7 : 0.85), b.est ? null : 'rgba(60,40,20,.35)', alfa);
+        ps.push(cara);
+      });
+      const tapa = [pr(x, y, z2), pr(x + w, y, z2), pr(x + w, y + h, z2), pr(x, y + h, z2)];
+      poli(tapa, resalto ? '#60a5fa' : b.top || color, b.est ? null : 'rgba(60,40,20,.35)', alfa);
+      ps.push(tapa);
+      if (cel) { const l = hits.get(cel) || []; hits.set(cel, l.concat(ps)); }
+    });
+    // Celdas vacías: se pueden tocar aunque no tengan nada (su caja invisible)
+    p3.hits = [];
+    D.celdas.forEach(c => {
+      if (hits.has(c)) return;
+      const { x, y, z, w, h } = c, z2 = z + 4;
+      p3.hits.push({ b: c, pts: [[pr(x, y, z2), pr(x + w, y, z2), pr(x + w, y + h, z2), pr(x, y + h, z2)]], k: pr(x + w / 2, y + h / 2, z)[2] });
+      if (p3.hover === c) poli([pr(x, y, z + 0.8), pr(x + w, y, z + 0.8), pr(x + w, y + h, z + 0.8), pr(x, y + h, z + 0.8)], '#3b82f6', '#1d4ed8', 0.45);
+    });
+    hits.forEach((pts, c) => p3.hits.push({ b: c, pts, k: pr(c.x + c.w / 2, c.y + c.h / 2, c.z + c.d)[2] }));
+    p3.hits.sort((a, b) => a.k - b.k);
+    // Nombres de zonas y filas
+    g.textBaseline = 'middle';
+    D.etqs.forEach(e => {
+      const [sx, syy] = pr(e.x, e.y, e.z);
+      g.font = e.grande ? '700 13px Inter, system-ui, sans-serif' : '700 11px Inter, system-ui, sans-serif';
+      g.textAlign = e.grande ? 'left' : 'center';
+      if (!e.grande) { const tw = g.measureText(e.txt).width + 8; g.fillStyle = 'rgba(255,255,255,.85)'; g.fillRect(sx - tw / 2, syy - 8, tw, 16); }
+      g.fillStyle = e.color || '#1b2430';
+      g.fillText(e.txt, sx, syy);
+    });
+  }
+  const p3Dentro = (pt, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) c = !c; } return c; };
+  function p3Buscar(ev) {
+    const r = $('plano3d').getBoundingClientRect(), pt = [ev.clientX - r.left, ev.clientY - r.top];
+    for (let i = p3.hits.length - 1; i >= 0; i--) if (p3.hits[i].pts.some(pl => p3Dentro(pt, pl))) return p3.hits[i].b;
+    return null;
+  }
+  function iniciar3d() {
+    const cv = $('plano3d');
+    if (!cv) return;
+    p3.datos = null;
+    if (cv.dataset.listo) return p3Pintar();
+    cv.dataset.listo = '1';
+    let movio = false;
+    cv.addEventListener('contextmenu', ev => ev.preventDefault());
+    cv.addEventListener('mousedown', ev => { p3.arr = { x: ev.clientX, y: ev.clientY, mover: ev.button === 2 || ev.shiftKey }; movio = false; });
+    if (!p3.suelta) { p3.suelta = true; window.addEventListener('mouseup', () => { p3.arr = null; }); }
+    cv.addEventListener('mousemove', ev => {
+      const arr = p3.arr;
+      if (arr) {
+        const dx = ev.clientX - arr.x, dy = ev.clientY - arr.y;
+        if (Math.abs(dx) + Math.abs(dy) > 2) movio = true;
+        if (arr.mover) { p3.px += dx; p3.py += dy; }
+        else { p3.yaw += dx * 0.008; p3.tilt = Math.min(1.5, Math.max(0.2, p3.tilt + dy * 0.006)); }
+        arr.x = ev.clientX; arr.y = ev.clientY;
+        $('p3Tip').hidden = true;
+        return p3Pintar();
+      }
+      const b = p3Buscar(ev), tip = $('p3Tip');
+      if (b !== p3.hover) { p3.hover = b; p3Pintar(); }
+      cv.style.cursor = b ? 'pointer' : 'grab';
+      if (!b) { tip.hidden = true; return; }
+      const ls = lineasDe(b.esp.id);
+      tip.innerHTML = `<b>${esc(cu(b.esp.id))}</b>${ls.length ? ls.map(l => `<span>${esc(l.nombre)} · ${cant(l)}</span>`).join('') : '<span>Vacío</span>'}`;
+      const r = $('p3Wrap').getBoundingClientRect();
+      tip.style.left = Math.min(ev.clientX - r.left + 14, r.width - 260) + 'px'; tip.style.top = (ev.clientY - r.top + 14) + 'px';
+      tip.hidden = false;
+    });
+    cv.addEventListener('mouseleave', () => { $('p3Tip').hidden = true; if (p3.hover) { p3.hover = null; p3Pintar(); } });
+    cv.addEventListener('click', ev => { if (movio) return; const b = p3Buscar(ev); if (b) abrirPos(b.rackId, b.pos, b.esp.id); });
+    cv.addEventListener('wheel', ev => { ev.preventDefault(); p3Zoom(ev.deltaY < 0 ? 1.12 : 1 / 1.12); }, { passive: false });
+    p3Pintar();
+  }
+
   /* ================= Mapa ================= */
   let zoom = null; // null = ajustar al ancho de la pantalla
 
@@ -3158,11 +3382,12 @@
       <div class="fila gap8 wrap-f">
         <label for="busca" class="oculto">Buscar producto o lote</label>
         <input id="busca" class="campo busca" placeholder="Resaltar en el plano (producto o lote)" value="${esc(busqueda)}" autocomplete="off">
-        <div class="zoom" role="group" aria-label="Zoom del plano">
+        ${usa3d() ? '' : `<div class="zoom" role="group" aria-label="Zoom del plano">
           <button onclick="cambiarZoom(1 / 1.25)" aria-label="Alejar">−</button>
           <button onclick="cambiarZoom(0)">Ajustar</button>
           <button onclick="cambiarZoom(1.25)" aria-label="Acercar">+</button>
-        </div>
+        </div>`}
+        ${pc3d() && !colocando ? `<label class="sw3d"><input type="checkbox" role="switch" ${ver3d ? 'checked' : ''} onchange="ponerVer3d(this.checked)"><span class="sw3d-i" aria-hidden="true"></span>Ver en 3D</label>` : ''}
       </div></div>
       ${zonasBarHtml()}
       <div id="mapaCont">${contenidoMapa()}</div>`;
@@ -3195,6 +3420,7 @@
   const enPlano = z => z.x !== null && z.y !== null && z.ancho && z.alto;
 
   function contenidoMapa() {
+    if (usa3d() && sede.zonas.some(enPlano)) return plano3dHtml();
     const dentro = sede.zonas.filter(enPlano);
     const fuera = sede.zonas.filter(z => !enPlano(z));
     const zv = !colocando && dentro.length > 1 ? zonaVista() : null;
@@ -3320,6 +3546,7 @@
 
   // Escala el plano para que quepa en la pantalla (o usa el zoom elegido)
   function ajustarPlano() {
+    if ($('plano3d')) return iniciar3d();
     const wrap = $('planoWrap'), pl = $('plano'), sizer = $('planoSizer');
     if (!wrap || !pl) return;
     const w = Number(pl.dataset.w), h = Number(pl.dataset.h);
@@ -3459,6 +3686,7 @@
 
   function vistaInventario() {
     if (invData === null || invSede !== ses.sedeId) {
+      if (invSede && invSede !== ses.sedeId) { invDentro = null; invVer = null; invNuevo = null; }
       invData = null; invSede = ses.sedeId;
       llamar('bdInventarioGeneral', ses.sedeId).then(d => { invData = d; if (vista === 'productos' && prodTab === 'inventario') pintarApp(); })
         .catch(e => { invData = { sap: [], carga: null, conteos: [], error: e.message }; if (vista === 'productos') pintarApp(); });
@@ -3473,19 +3701,27 @@
     if (jefe || !puede('inv_contar')) tabs.push(['tabla', jefe ? 'Avance y SAP' : 'Tabla contra SAP']);   // el avance va arriba de la tabla
     if (puedeAlguno(['ciclico', 'ciclico_asignar'])) tabs.push(['reconf', 'Reconfirmaciones']);
     if (!tabs.some(t => t[0] === invSub)) invSub = tabs[0][0];
+    // Primero la lista de inventarios (como en Cíclico). Quien solo cuenta entra de una al que está en curso.
+    const ia = invActualCli();
+    if (invDentro === null) invDentro = !jefe && ia.estado === 'ABIERTO';
+    if (ia.estado !== 'ABIERTO') invDentro = false;
+    if (!invDentro) return listaInventariosVista(jefe);
     const g = codGen();
     return `<div class="col gap12">
       <div class="fila-sb wrap-f gap8">
-        <div class="col gap4"><span class="h2">Inventario · ${esc(nombreSede(ses.sedeId))}</span>
+        <div class="col gap4"><span class="h2">${esc(ia.nombre || 'Inventario')}</span>
+          <span class="small">${fCorta(ia.fecha)} · ${esc(nombreSede(ses.sedeId))} · <span class="tag amar">En curso</span></span>
           <span class="muted small">${c ? `SAP cargado el ${fechaHora(c.fecha)} por ${esc(c.usuario || '—')} · ${c.filas} productos${c.archivo ? ' · ' + esc(c.archivo) : ''}`
-            : '<b class="txt-naranja">Todavía no se ha cargado el Excel de SAP de esta sede.</b>'}</span>
+            : '<b class="txt-naranja">Todavía no se ha cargado el Excel de SAP de este inventario.</b>'}</span>
           ${invData.error ? `<span class="error small">${esc(invData.error)}</span>` : ''}</div>
         <span class="fila gap8 wrap-f">
           ${puede('inv_sap') ? '<button class="btn btn-pri" onclick="abrirCargaSap()">Cargar Excel de SAP</button>' : ''}
           <button class="btn btn-sec" onclick="historialConteosInv()">Historial de conteos</button>
           ${puede('reportes') && jefe ? '<button class="btn btn-sec" onclick="descargarInventarioSap()">Descargar Excel</button>' : ''}
           ${puede('reportes') && jefe ? '<button class="btn btn-sec" onclick="abrirMb52()">Descargar en formato MB52</button>' : ''}
-          <button class="btn btn-sec" onclick="invData=null; pintarApp()">Actualizar</button></span>
+          <button class="btn btn-sec" onclick="invData=null; pintarApp()">Actualizar</button>
+          ${puede('inv_sap') ? '<button class="btn btn-sec txt-rojo" onclick="cerrarInventario(this)">Cerrar inventario</button>' : ''}
+          <button class="btn btn-sec" onclick="invDentro=false; invSub=''; invLista=null; pintarApp(); window.scrollTo(0, 0)">← Inventarios</button></span>
       </div>
       ${tabs.length > 1 ? subTabsHtml(invSub, tabs, 'invSub') : ''}
       ${invSub === 'reconf' ? vistaRcInv() : invSub === 'ingresar' ? cpIngresarHtml() : invSub === 'confirmar' ? cpConfirmarHtml() : `
@@ -3537,7 +3773,16 @@
   }
 
   // Une SAP + plano + conteos por producto
+  // Se calcula una sola vez mientras no cambien los datos (la pantalla lo pide varias veces y son miles de productos)
+  let diMemo = null;
   function datosInventario() {
+    const k = [invData, invData && invData.conteos, invData && invData.sap, invData && invData.otrasSedes, sede, sede && sede.lineas, sede && sede.espPorId, ini.productos, ini.productos.length, codGen()];
+    if (diMemo && diMemo.k.length === k.length && diMemo.k.every((x, i) => x === k[i])) return diMemo.v;
+    const v = calcDatosInventario();
+    diMemo = { k, v };
+    return v;
+  }
+  function calcDatosInventario() {
     const m = {};
     const fila = cod => m[cod] || (m[cod] = { cod, p: prodDe(cod), sap: null, picking: 0, aereo: 0, calidad: 0, bloqueado: 0, zonas: new Set(), pas: new Set(), ult: null, alm: {}, pk: {}, ae: {} });
     const yo = ses.sedeId, suma = (o, k, n) => { o[k] = (o[k] || 0) + n; };
@@ -3672,7 +3917,7 @@
     const o = ordT[t];
     if (o.k !== k) { o.k = k; o.dir = 1; } else if (o.dir === 1) o.dir = -1; else o.k = '';
     pagInicio(t);
-    if (t === 'inv') { if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); } else pintarCicTabla();
+    if (t === 'inv') { if ($('invTabla')) $('invTabla').innerHTML = tablaInventario(); } else if (t === 'prod') { if ($('prodLista')) $('prodLista').innerHTML = listaProdHtml(); } else pintarCicTabla();
   }
   function aplicarOrden(t, l, val) {
     const o = ordT[t], v = o.k && val(o.k);
@@ -4023,8 +4268,9 @@
   // Reconfirmaciones de inventario de este inventario (desde que se cargó SAP), con sus conteos
   async function reconfsInventario() {
     const lista = await llamar('bdCiclicos', ses.sedeId);
-    const desde = invData && invData.carga ? invData.carga.fecha : null;
-    const rcs = lista.filter(c => esRcInv(c) && (!desde || !c.creado || c.creado >= desde))
+    const ini = [invData && invData.carga ? invData.carga.fecha : null, invData && invData.inventario ? invData.inventario.desde : null].filter(Boolean).sort((a, b) => new Date(b) - new Date(a));
+    const desde = ini[0] || null;
+    const rcs = lista.filter(c => esRcInv(c) && (!desde || !c.creado || new Date(c.creado) >= new Date(desde)))
       .sort((a, b) => String(a.creado || '').localeCompare(String(b.creado || '')));
     const datos = [];
     for (const c of rcs) datos.push(await llamar('bdCiclico', c.id));
@@ -4472,6 +4718,222 @@
           <td>${c.estado === 'CERRADO' ? '<span class="tag">Cerrado</span>' : h >= n && n ? '<span class="tag ok">Contado</span>' : '<span class="tag amar">Abierto</span>'}</td>
           <td class="muted small">${esc(c.creadoPor || '—')}</td></tr>`;
       }).join('')}</tbody></table></div>${pg.barra}`;
+  }
+
+  /* ----- Inventarios (2 al mes): lista con nombre y fecha, crear uno nuevo y ver los ya cerrados ----- */
+  let invLista = null, invNuevo = null, invVer = null;   // invVer: { id, d (con la foto) }
+  let invDentro = null;   // true = adentro del inventario en curso; false = en la lista; null = se decide al entrar
+  const invVerF = { q: '', dif: false };
+  function invActualCli() { return (invData && invData.inventario) || { nombre: '', estado: 'NINGUNO' }; }
+
+  function listaInventariosVista(jefe) {
+    return `<div class="col gap12">
+      <div class="fila-sb wrap-f gap8">
+        <div class="col gap4"><span class="h2">Inventarios · ${esc(nombreSede(ses.sedeId))}</span>
+          <span class="muted small">${invVer ? '' : jefe ? 'Crea el inventario con su nombre y, si lo tienes, el Excel de SAP. Toca el que está en curso para entrar a contar.' : 'Toca el inventario en curso para entrar a contar.'}</span>
+          ${invData.error ? `<span class="error small">${esc(invData.error)}</span>` : ''}</div>
+        <span class="fila gap8 wrap-f">
+          ${puede('inv_sap') && !invNuevo && !invVer ? '<button class="btn btn-pri" onclick="nuevoInventario()">+ Nuevo inventario</button>' : ''}
+          <button class="btn btn-sec" onclick="invLista=null; invData=null; pintarApp()">Actualizar</button></span>
+      </div>
+      ${vistaInventarios()}
+    </div>`;
+  }
+  function vistaInventarios() {
+    if (invLista === null) {
+      if (!vistaInventarios.cargando) {
+        vistaInventarios.cargando = true;
+        llamar('bdInventarios').then(l => { invLista = l; }).catch(e => { invLista = []; toast(e.message, 'error'); })
+          .finally(() => { vistaInventarios.cargando = false; if (vista === 'productos' && prodTab === 'inventario' && !invDentro) pintarApp(); });
+      }
+      return '<div class="cargando">Cargando inventarios…</div>';
+    }
+    if (invVer) return detalleInventarioCerrado();
+    const a = invActualCli();
+    return `${invNuevo ? formNuevoInventario() : ''}
+      <section class="card col gap8">
+        <span class="h3">Historial de inventarios</span>
+        <div id="invsLista">${listaInventarios(a)}</div>
+      </section>`;
+  }
+  function listaInventarios(a) {
+    if (!invLista.length) return '<p class="muted small">Todavía no hay inventarios.</p>';
+    const pg = paginar('invs', invLista, () => { if ($('invsLista')) $('invsLista').innerHTML = listaInventarios(invActualCli()); });
+    // El que está en curso: cuántos van contados y con diferencia, en vivo
+    const d = datosInventario(), vivo = { contados: d.filter(f => f.contado).length, conDif: d.filter(f => f.dif && (f.sap || f.planta)).length };
+    return `<div class="tabla-wrap"><table class="tabla cic-lista">
+      <thead><tr><th>Nombre</th><th>Fecha</th><th class="num">Contados</th><th class="num">Con diferencia</th><th>Estado</th><th>Lo creó</th><th>Lo cerró</th></tr></thead>
+      <tbody>${pg.filas.map(x => {
+        const abierto = x.estado === 'ABIERTO', r = abierto ? vivo : (x.resumen || {});
+        return `<tr onclick="${abierto ? 'entrarInventario()' : `verInventario('${x.id}')`}">
+          <td><b>${esc(x.nombre || 'Inventario')}</b></td>
+          <td class="nowrap">${fCorta(x.fecha)}</td>
+          <td class="num">${r.contados === undefined ? '—' : r.contados}</td>
+          <td class="num">${r.conDif === undefined ? '—' : r.conDif}</td>
+          <td>${abierto ? '<span class="tag amar">En curso</span>' : '<span class="tag">Cerrado</span>'}</td>
+          <td class="muted small">${esc(x.creadoPor || '—')}</td>
+          <td class="muted small">${x.cerrado ? `${esc(x.cerradoPor || '—')} · ${fechaHora(x.cerrado)}` : '—'}</td></tr>`;
+      }).join('')}</tbody></table></div>${pg.barra}`;
+  }
+
+  function nuevoInventario() {
+    if (sinPermiso('inv_sap')) return;
+    const f = hoyISO();
+    invNuevo = { nombre: 'Inventario ' + fCorta(f), fecha: f, sap: 'si' };
+    pintarApp();
+  }
+  function formNuevoInventario() {
+    const n = invNuevo, a = invActualCli();
+    return `<section class="card col gap12 cic-nuevo" aria-label="Nuevo inventario">
+      <div class="col gap4"><span class="h3">Nuevo inventario</span>
+        ${a.estado === 'ABIERTO' && a.nombre ? `<span class="muted small">Al crearlo, <b>${esc(a.nombre)}</b> se cierra y queda guardado como está (SAP, picking, aéreo, calidad, bloqueado y diferencias).</span>`
+          : ''}</div>
+      <div class="dos">
+        <div><label class="lbl" for="inNombre">Nombre</label>
+          <input id="inNombre" class="campo" autocomplete="off" maxlength="80" value="${esc(n.nombre)}" oninput="invNuevo.nombre=this.value"></div>
+        <div><label class="lbl" for="inFecha">Fecha</label>
+          <input id="inFecha" class="campo" type="date" value="${esc(n.fecha)}" onchange="invNuevo.fecha=this.value"></div>
+      </div>
+      <div class="col gap8"><span class="lbl">¿Tienes el Excel de SAP de este inventario?</span>
+        <div class="seg" role="group" aria-label="Excel de SAP">${[['si', 'Sí, cargarlo ahora'], ['no', 'No, empezar a contar']].map(([k, t]) =>
+          `<button class="${n.sap === k ? 'on' : ''}" onclick="invNuevo.sap='${k}'; this.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === this))">${t}</button>`).join('')}</div>
+        <span class="muted small">Si no lo tienes, lo puedes cargar después con «Cargar Excel de SAP» dentro del inventario.</span></div>
+      <p id="inErr" class="error" hidden></p>
+      <div class="dos"><button class="btn btn-sec" onclick="invNuevo=null; pintarApp()">Cancelar</button>
+        <button id="inOk" class="btn btn-pri" onclick="crearInventario(this)">Crear inventario</button></div>
+    </section>`;
+  }
+  // La foto del inventario como quedó: lo mismo que se ve en la tabla contra SAP
+  function fotoInventario() {
+    const red = n => +Number(n || 0).toFixed(3);
+    const SD = sedesInv();
+    const filas = datosInventario().filter(f => f.sapTotal || f.planta || f.contado).map(f => {
+      const x = { c: f.cod, n: f.p ? f.p.nombre : '', s: red(f.sapTotal), pk: red(f.picking), ae: red(f.aereo), ca: red(f.calidad), bl: red(f.bloqueado),
+        t: red(f.planta), d: red(f.dif), k: f.contado ? 1 : 0, alm: f.almacenes.map(z => almCorto(z.key)).filter(Boolean).join(' / ') };
+      if (f.sap) x.sap = [red(f.sap.inventario), red(f.sap.calidad), red(f.sap.bloqueado)];
+      return x;
+    });
+    const resumen = { productos: filas.length, contados: filas.filter(x => x.k).length, conDif: filas.filter(x => x.d && (x.s || x.t)).length, sede: nombreSede(ses.sedeId) };
+    return { foto: { sedeId: ses.sedeId, sede: nombreSede(ses.sedeId), carga: invData.carga || null, sedes: SD.map(s => ({ id: s.id, nombre: s.nombre })), filas }, resumen };
+  }
+  async function crearInventario(b) {
+    const n = invNuevo, err = t => { const e = $('inErr'); e.textContent = t; e.hidden = false; };
+    if (!String(n.nombre || '').trim()) return err('Escribe el nombre del inventario.');
+    if (!n.fecha) return err('Escoge la fecha.');
+    b.disabled = true; b.textContent = 'Guardando…';
+    try {
+      invData = await llamar('bdInventarioGeneral', ses.sedeId);   // lo más reciente antes de cerrar
+      const a = invData.inventario || {};
+      const { foto, resumen } = fotoInventario();
+      const cerrar = a.estado !== 'ABIERTO' ? null : a.id ? { id: a.id } : a.virtual && a.primer ? { nombre: a.nombre, fecha: a.fecha, desde: a.primer } : null;
+      await llamar('bdCrearInventario', { sedeId: ses.sedeId, nombre: n.nombre.trim(), fecha: n.fecha, usuario: ses.nombre, usuarioId: ses.id, cerrar, foto: cerrar ? foto : null, resumen: cerrar ? resumen : null });
+      const conSap = n.sap === 'si';
+      invNuevo = null; invLista = null; invData = null; invDentro = true; invSub = ''; pagInicio('invs');
+      pitido(); toast(conSap ? 'Inventario creado. Ahora escoge el Excel de SAP.' : 'Inventario creado. Ya pueden empezar a contar.', 'ok');
+      pintarApp(); window.scrollTo(0, 0);
+      if (conSap && puede('inv_sap')) abrirCargaSap();
+    } catch (e) { b.disabled = false; b.textContent = 'Crear inventario'; err(e.message); }
+  }
+
+  function entrarInventario() { invDentro = true; invVer = null; invNuevo = null; invSub = ''; pintarApp(); window.scrollTo(0, 0); }
+  // Cerrar el inventario en curso (sin crear otro): queda guardado con su foto y ya no se cuenta en él
+  async function cerrarInventario(b) {
+    if (b.dataset.ok !== '1') { b.dataset.ok = '1'; b.textContent = '¿Seguro? Toca otra vez para cerrarlo'; return; }
+    b.disabled = true; b.textContent = 'Cerrando…';
+    try {
+      invData = await llamar('bdInventarioGeneral', ses.sedeId);
+      const a = invData.inventario || {};
+      const cerrar = a.estado !== 'ABIERTO' ? null : a.id ? { id: a.id } : a.virtual && a.primer ? { nombre: a.nombre, fecha: a.fecha, desde: a.primer } : null;
+      if (!cerrar) throw new Error('Este inventario no tiene conteos todavía: no hay nada que cerrar.');
+      const { foto, resumen } = fotoInventario();
+      await llamar('bdCerrarInventario', { cerrar, sedeId: ses.sedeId, usuario: ses.nombre, foto, resumen });
+      invDentro = false; invSub = ''; invLista = null; invData = null;
+      pitido(); toast('Inventario cerrado. Quedó guardado en la lista.', 'ok');
+      pintarApp(); window.scrollTo(0, 0);
+    } catch (e) { b.disabled = false; b.dataset.ok = ''; b.textContent = 'Cerrar inventario'; toast(e.message, 'error'); }
+  }
+  function reabrirInventario(id, b) {
+    if (b.dataset.ok !== '1') { b.dataset.ok = '1'; b.textContent = '¿Seguro? Toca otra vez'; return; }
+    b.disabled = true;
+    llamar('bdReabrirInventario', { id }).then(() => {
+      invVer = null; invLista = null; invData = null; invDentro = true; invSub = '';
+      toast('El inventario quedó abierto otra vez.', 'ok'); pintarApp();
+    }).catch(e => { b.disabled = false; b.dataset.ok = ''; b.textContent = 'Volver a abrir'; toast(e.message, 'error'); });
+  }
+  function verInventario(id) {
+    invVer = { id, d: null }; invVerF.q = ''; invVerF.dif = false; pagInicio('invv');
+    llamar('bdInventario', id).then(d => { if (invVer && invVer.id === id) { invVer.d = d; pintarApp(); } })
+      .catch(e => { invVer = null; toast(e.message, 'error'); pintarApp(); });
+    pintarApp(); window.scrollTo(0, 0);
+  }
+  function detalleInventarioCerrado() {
+    const x = invVer.d;
+    if (!x) return '<div class="cargando">Cargando inventario…</div>';
+    const fo = x.foto || { filas: [] }, r = x.resumen || {};
+    return `<section class="card col gap12">
+      <div class="fila-sb wrap-f gap8">
+        <div class="col gap4"><span class="h2">${esc(x.nombre)} <span class="tag">Cerrado</span></span>
+          <span class="muted small">${fCorta(x.fecha)}${fo.sede ? ' · ' + esc(fo.sede) : ''} · Lo cerró ${esc(x.cerradoPor || '—')} el ${fechaHora(x.cerrado)}${fo.carga ? ` · SAP cargado el ${fechaHora(fo.carga.fecha)}` : ''}</span></div>
+        <span class="fila gap8 wrap-f">
+          ${puede('reportes') && fo.filas.length ? '<button class="btn btn-sec" onclick="descargarInventarioCerrado(this)">Descargar Excel de este inventario</button>' : ''}
+          ${puede('inv_sap') && invLista && invLista[0] && invLista[0].id === x.id ? `<button class="btn btn-sec" onclick="reabrirInventario('${x.id}', this)">Volver a abrir</button>` : ''}
+          <button class="btn btn-sec" onclick="invVer=null; pintarApp()">← Volver a la lista</button></span>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><span class="muted small">Productos</span><span class="kpi-v">${r.productos ?? fo.filas.length}</span></div>
+        <div class="kpi"><span class="muted small">Contados</span><span class="kpi-v">${r.contados ?? '—'}</span></div>
+        <div class="kpi"><span class="muted small">Con diferencia</span><span class="kpi-v txt-naranja">${r.conDif ?? '—'}</span></div>
+      </div>
+      ${fo.filas.length ? `<div class="inv-filtros">
+        <div class="inv-buscar"><label class="lbl" for="ivQ">Buscar</label>
+          <input id="ivQ" class="campo" placeholder="Código o nombre" value="${esc(invVerF.q)}" autocomplete="off"
+            oninput="invVerF.q=this.value; pagInicio('invv'); $('ivTabla').innerHTML = tablaInventarioCerrado()"></div>
+        <div class="inv-estado"><span class="lbl">Mostrar</span>
+          <div class="seg inv-seg" role="group" aria-label="Mostrar">${[[false, 'Todos'], [true, 'Con diferencia']].map(([k, t]) =>
+            `<button class="${invVerF.dif === k ? 'on' : ''}" onclick="invVerF.dif=${k}; pagInicio('invv'); $('ivTabla').innerHTML = tablaInventarioCerrado(); this.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === this))">${t}</button>`).join('')}</div></div>
+      </div>
+      <div id="ivTabla">${tablaInventarioCerrado()}</div>` : '<p class="muted small">Este inventario se cerró sin productos.</p>'}
+    </section>`;
+  }
+  function filasInventarioCerrado() {
+    const pal = sinTilde(invVerF.q.trim()).split(/\s+/).filter(Boolean);
+    return ((invVer.d.foto || {}).filas || []).filter(f => (!invVerF.dif || (f.d && (f.s || f.t))) && (!pal.length || pal.every(w => sinTilde(`${f.c} ${f.n}`).includes(w))));
+  }
+  function tablaInventarioCerrado() {
+    const l = filasInventarioCerrado();
+    if (!l.length) return '<p class="muted small">No hay productos con ese filtro.</p>';
+    const pg = paginar('invv', l, () => { if ($('ivTabla')) $('ivTabla').innerHTML = tablaInventarioCerrado(); });
+    return `<div class="tabla-wrap"><table class="tabla">
+      <thead><tr><th>Código</th><th>Producto</th><th>Almacén</th><th class="num">Total SAP</th><th class="num">Picking</th><th class="num">Aéreo</th>
+        <th class="num">Calidad</th><th class="num">Bloqueado</th><th class="num">Total planta</th><th class="num">Diferencia</th></tr></thead>
+      <tbody>${pg.filas.map(f => `<tr><td class="nowrap"><b>${esc(f.c)}</b></td><td>${esc(f.n)}</td><td class="nowrap">${esc(f.alm || '—')}</td>
+        <td class="num">${nInv(f.s)}</td><td class="num">${nInv(f.pk)}</td><td class="num">${nInv(f.ae)}</td><td class="num">${nInv(f.ca)}</td><td class="num">${nInv(f.bl)}</td>
+        <td class="num"><b>${nInv(f.t)}</b></td><td class="num ${f.d < 0 ? 'txt-rojo' : f.d > 0 ? 'txt-verde' : ''}"><b>${f.d > 0 ? '+' : ''}${nInv(f.d)}</b></td></tr>`).join('')}</tbody></table></div>${pg.barra}`;
+  }
+  async function descargarInventarioCerrado(b) {
+    const x = invVer && invVer.d;
+    if (!x) return;
+    b.disabled = true;
+    try {
+      if (!window.JSZip) await cargarScript(JSZIP_URL);
+      const C = [['COD ATL', 1, 'c'], ['TEXTO BREVE DE MATERIAL', 1, 'n'], ['ALMACEN', 1, 'alm'], ['LIBRE UTILIZACIÓN', 1, 0], ['CALIDAD', 1, 1], ['BLOQUEO', 1, 2],
+        ['TOTAL SAP', 1, 's'], ['PICKING', 2, 'pk'], ['AEREO', 2, 'ae'], ['CALIDAD', 2, 'ca'], ['BLOQUEO', 2, 'bl'], ['TOTAL FISICO', 4, 't'], ['DIFERENCIA', 4, 'd']];
+      const hoja = [C.map(([h, s]) => ({ v: h, s }))];
+      x.foto.filas.forEach(f => hoja.push(C.map(([, , k]) => {
+        const v = typeof k === 'number' ? (f.sap ? f.sap[k] : 0) : f[k];
+        if (k === 'c') return { v: /^\d+$/.test(String(v)) ? Number(v) : v, s: 5 };
+        if (k === 'alm') return { v: /^\d+$/.test(String(v || '')) ? Number(v) : v || '', s: 5 };
+        if (k === 'n') return { v: v || '', s: 5 };
+        const n = Number(v) || 0;
+        return { v: n, s: k === 'd' ? (n < 0 ? 7 : n > 0 ? 8 : 6) : 6 };
+      })));
+      const blob = await xlsxConEstilo('INVENTARIO', hoja, [10, 46, 12, 12, 11, 11, 12, 12, 12, 12, 12, 13, 13]);
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = `${x.nombre} ${x.fecha}.xlsx`.replace(/[\\/:*?"<>|]/g, '-');
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) { toast('No se pudo armar el Excel: ' + e.message, 'error'); }
+    b.disabled = false;
   }
 
   /* ----- Reconfirmaciones de Inventario (van en la pestaña Inventario, aparte de los cíclicos) ----- */
@@ -5021,15 +5483,56 @@
       </section>`}`;
   }
 
+  // Cíclico cerrado: lo que quedó guardado al cerrarlo (aéreo, SAP y estibas revisadas). Lo que entre o salga después no lo cambia.
+  //  Los que se cerraron antes de guardar esto: el aéreo se calcula como estaba al cerrarlo (el de hoy menos los movimientos de después).
+  const cierreReco = {};   // id → { aereo } | 'pidiendo'
+  function cierreCiclico() {
+    const c = cicData && cicData.ciclico;
+    if (!c || c.estado !== 'CERRADO') return null;
+    if (c.base && c.base._cierre) return c.base._cierre;
+    const k = cierreReco[c.id];
+    if (k && k !== 'pidiendo') return k;
+    if (!k && c.cerrado) {
+      cierreReco[c.id] = 'pidiendo';
+      llamar('bdMovimientosDesde', { codigos: c.codigos, desde: c.cerrado }).then(ms => {
+        const aereo = {};
+        c.codigos.forEach(cod => { aereo[cod] = 0; });
+        sede.lineas.forEach(l => { const e = sede.espPorId[l.ubicacionId]; if (e && e.nivel !== 0 && aereo[l.productoId] !== undefined) aereo[l.productoId] += Number(l.unidades) || 0; });
+        ms.forEach(m => {
+          const e = sede.espPorId[m.ubicacion];
+          if (!e || e.nivel === 0 || aereo[m.codigo] === undefined) return;
+          const t = m.tipo.toUpperCase(), signo = /ENTRADA/.test(t) ? 1 : /SALIDA/.test(t) ? -1 : t === 'AJUSTE' ? 1 : 0;
+          aereo[m.codigo] -= signo * m.unidades;   // se deshace lo que pasó después del cierre
+        });
+        Object.keys(aereo).forEach(cod => { aereo[cod] = Math.max(0, +aereo[cod].toFixed(3)); });
+        cierreReco[c.id] = { aereo };
+        if (vista === 'productos' && ctxCic() && cicData && cicData.ciclico.id === c.id) pintarApp();
+      }).catch(() => { delete cierreReco[c.id]; });
+    }
+    return null;
+  }
+  // Lo que se guarda al cerrar un cíclico o una reconfirmación
+  function fotoCierreCiclico() {
+    const aereo = {}, tot = {}, ok = {}, sap = {};
+    datosCiclico().forEach(f => {
+      aereo[f.cod] = +Number(f.aereo || 0).toFixed(3);
+      if (f.aereoTot !== undefined) { tot[f.cod] = f.aereoTot; ok[f.cod] = f.aereoOk; }
+      if (f.sap) sap[f.cod] = { inventario: Number(f.sap.inventario) || 0, calidad: Number(f.sap.calidad) || 0, bloqueado: Number(f.sap.bloqueado) || 0 };
+    });
+    return { aereo, tot, ok, sap };
+  }
   function datosCiclico() {
     if (!cicData) return [];
     const sap = {}; ((invData && invData.sap) || []).forEach(x => (sap[x.codigo] = x));
     const propio = cicData.ciclico.sap && Object.keys(cicData.ciclico.sap).length ? cicData.ciclico.sap : null;   // el Excel del cíclico
     const rc = esReconf(cicData.ciclico);
     const val = new Set((cicData.validaciones || []).map(v => `${v.ubicacion}|${v.productoId}|${v.lote}`));
+    const ci = cierreCiclico();
     return cicData.ciclico.codigos.map(cod => {
       const f = { cod, p: prodDe(cod), sap: propio ? (propio[cod] ? Object.assign({ codigo: cod }, propio[cod]) : (sap[cod] || null)) : (sap[cod] || null), picking: 0, aereo: 0, calidad: 0, bloqueado: 0, contado: false, ult: null, lugares: new Set() };
-      sede.lineas.forEach(l => { const e = sede.espPorId[l.ubicacionId]; if (l.productoId === cod && e && e.nivel !== 0) f.aereo += Number(l.unidades) || 0; });
+      if (ci && ci.sap) f.sap = ci.sap[cod] ? Object.assign({ codigo: cod }, ci.sap[cod]) : null;
+      if (ci && ci.aereo && ci.aereo[cod] !== undefined) f.aereo = Number(ci.aereo[cod]) || 0;
+      else sede.lineas.forEach(l => { const e = sede.espPorId[l.ubicacionId]; if (l.productoId === cod && e && e.nivel !== 0) f.aereo += Number(l.unidades) || 0; });
       cicData.conteos.filter(c => c.codigo === cod).forEach(c => {
         f.contado = true; f.lugares.add(c.ubicacion);
         if (c.tipo === 'CALIDAD') f.calidad += c.cantidad; else if (c.tipo === 'BLOQUEADO') f.bloqueado += c.cantidad; else f.picking += c.cantidad;
@@ -5038,7 +5541,8 @@
       f.sapTotal = f.sap ? (Number(f.sap.inventario) || 0) + (Number(f.sap.calidad) || 0) + (Number(f.sap.bloqueado) || 0) : 0;
       f.planta = f.picking + f.aereo + f.calidad + f.bloqueado;
       f.dif = +(f.planta - f.sapTotal).toFixed(3);
-      if (rc) {   // en reconfirmación también tiene que estar revisado todo su aéreo
+      if (rc && ci && ci.tot && ci.tot[cod] !== undefined) { f.aereoTot = ci.tot[cod]; f.aereoOk = ci.ok[cod]; }
+      else if (rc) {   // en reconfirmación también tiene que estar revisado todo su aéreo
         const ls = sede.lineas.filter(l => l.productoId === cod && sede.espPorId[l.ubicacionId] && sede.espPorId[l.ubicacionId].nivel !== 0);
         f.aereoTot = ls.length;
         f.aereoOk = ls.filter(l => val.has(`${l.ubicacionId}|${l.productoId}|${l.lote}`)).length;
@@ -5948,6 +6452,83 @@
         En <b>Todas las sedes</b> un producto cuenta una vez aunque esté en varias.</span>
     </section>`;
   }
+  // Tablero de Inventario: todo contra el total de productos, sin fórmulas.
+  //  Contados = productos con picking registrado en este inventario (en cualquier sede).
+  let cpContadores = null;   // { inv (los datos con que se pidió), l: [{ nombre, conteos, ultimo }] }
+  function cpTableroInvHtml() {
+    const d = datosInventario();
+    const lista = new Set(ini.productos.filter(p => p.activo !== false).map(p => p.id)), N = lista.size;
+    const enLista = d.filter(f => lista.has(f.cod));
+    const contados = enLista.filter(f => f.contado).length;
+    const sapCods = new Set(((invData && invData.sap) || []).map(x => x.codigo)), M = sapCods.size;
+    const contSap = d.filter(f => sapCods.has(f.cod) && f.contado).length;
+    // Por sede: productos con picking registrado y productos con aéreo en el plano
+    const sedes = sedesInv();
+    const porSede = sedes.map(x => ({ nombre: x.nombre, pk: enLista.filter(f => f.pk[x.id] !== undefined).length, ae: enLista.filter(f => f.ae[x.id] > 0).length }));
+    const pkTodas = enLista.filter(f => Object.keys(f.pk).length).length, aeTodas = enLista.filter(f => f.aereo > 0).length;
+    // Por almacén: productos con algo contado en ese almacén (picking, calidad, bloqueado o aéreo)
+    const alms = {};
+    enLista.forEach(f => Object.values(f.alm).forEach(a => {
+      if (!a.key) return;
+      const k = almCorto(a.key) || a.key;
+      if (a.picking || a.aereo || a.calidad || a.bloqueado || f.contado || f.hayCal || f.hayBlo) (alms[k] = alms[k] || new Set()).add(f.cod);
+    }));
+    const listaAlm = Object.entries(alms).sort((a, b) => String(a[0]).localeCompare(String(b[0]), 'es', { numeric: true }));
+    // Total contado en este inventario: productos con cualquier conteo registrado
+    const total = enLista.filter(f => f.contado || f.hayCal || f.hayBlo).length;
+    const celda = n => `<td>${n} de ${N} ${cpBarra(n, N)}</td>`;
+    return `<div class="cp-kpis">
+        <div class="cp-kpi"><span class="muted small">Contados</span><b>${contados} de ${N}</b>${cpBarra(contados, N)}</div>
+        <div class="cp-kpi"><span class="muted small">Faltan</span><b class="${N - contados ? 'txt-naranja' : 'txt-verde'}">${N - contados}</b><span class="muted small">${cpPct(contados, N)}% contado</span></div>
+        <div class="cp-kpi"><span class="muted small">Contados del SAP</span>${M ? `<b>${contSap} de ${M}</b>${cpBarra(contSap, M)}` : '<b class="muted">—</b><span class="muted small">Sin Excel de SAP</span>'}</div>
+      </div>
+      <div class="cp-dos">
+        <section class="card col gap8">
+          <span class="h3">Sedes</span>
+          <div class="tabla-wrap"><table class="tabla cp-sedes"><thead><tr><th>Sede</th><th>Picking</th><th>Aéreo</th></tr></thead>
+            <tbody>${porSede.map(x => `<tr><td><b>${esc(x.nombre)}</b></td>${celda(x.pk)}${celda(x.ae)}</tr>`).join('')}
+            ${porSede.length > 1 ? `<tr class="cp-sedes-tot"><td><b>Total</b></td>${celda(pkTodas)}${celda(aeTodas)}</tr>` : ''}</tbody></table></div>
+        </section>
+        <section class="card col gap8">
+          <span class="h3">Almacenes</span>
+          ${listaAlm.length ? `<div class="tabla-wrap"><table class="tabla cp-sedes"><thead><tr><th>Almacén</th><th>Contados</th></tr></thead>
+            <tbody>${listaAlm.map(([k, set]) => `<tr><td><b>${esc(k)}</b></td>${celda(set.size)}</tr>`).join('')}</tbody></table></div>`
+            : '<p class="muted small">Todavía no hay nada contado.</p>'}
+          <div class="cp-dona">${donaHtml(total, N)}
+            <div class="col gap4"><span class="muted small">Total contado</span><b>${total} de ${N}</b><span class="muted small">${N - total} por contar</span></div></div>
+        </section>
+      </div>
+      <section class="card col gap8">
+        <span class="h3">Contadores</span>
+        <div id="cpContadores">${cpContadoresHtml()}</div>
+      </section>`;
+  }
+  function donaHtml(n, N) {
+    const p = N ? Math.min(1, n / N) : 0, r = 42, L = 2 * Math.PI * r;
+    return `<svg class="dona" viewBox="0 0 100 100" role="img" aria-label="${cpPct(n, N)}% contado">
+      <circle cx="50" cy="50" r="${r}" class="dona-fondo"/>
+      <circle cx="50" cy="50" r="${r}" class="dona-valor" stroke-dasharray="${(p * L).toFixed(2)} ${L.toFixed(2)}" transform="rotate(-90 50 50)"/>
+      <text x="50" y="55" text-anchor="middle" class="dona-txt">${cpPct(n, N)}%</text></svg>`;
+  }
+  function cpContadoresHtml() {
+    if (!cpContadores || cpContadores.inv !== invData) {
+      const pedido = invData;
+      if (!cpContadoresHtml.pidiendo) {
+        cpContadoresHtml.pidiendo = true;
+        llamar('bdContadoresInv').then(l => { cpContadores = { inv: pedido, l }; })
+          .catch(() => { cpContadores = { inv: pedido, l: null }; })
+          .finally(() => { cpContadoresHtml.pidiendo = false; if ($('cpContadores')) $('cpContadores').innerHTML = cpContadoresHtml(); });
+      }
+      if (!cpContadores) return '<div class="cargando">Cargando contadores…</div>';
+    }
+    const l = cpContadores.l;
+    if (!l) return '<p class="muted small">No se pudieron cargar los contadores. Toca «Actualizar».</p>';
+    if (!l.length) return '<p class="muted small">Todavía nadie ha contado.</p>';
+    const pg = paginar('cpc', l, () => { if ($('cpContadores')) $('cpContadores').innerHTML = cpContadoresHtml(); });
+    return `<div class="tabla-wrap"><table class="tabla cp-cont"><thead><tr><th>Contador</th><th class="num">Conteos</th><th>Último</th></tr></thead><tbody>
+      ${pg.filas.map(x => `<tr><td><b>${esc(x.nombre)}</b></td><td class="num">${x.conteos}</td><td class="small nowrap">${x.ultimo ? fechaHora(x.ultimo) : '—'}</td></tr>`).join('')}
+      </tbody></table></div>${pg.barra}`;
+  }
   function cpAvanceHtml() {
     const T = cpTodo(), S = T.S, ps = cpPasillos(T).filter(x => x.total);
     const tot = ps.reduce((a, x) => a + x.total, 0), lis = ps.reduce((a, x) => a + x.listos, 0);
@@ -5962,19 +6543,19 @@
     const jefe = conAsig && puede('ciclico_asignar') && S.abierto;
     const ver = ps.filter(x => !cpAv.soloFaltan || x.listos < x.total);
     return `<div class="col gap12">
+      ${!S.cic ? cpTableroInvHtml() : `
       <div class="cp-kpis">
         <div class="cp-kpi"><span class="muted small">Listos</span><b>${lis} de ${tot}</b>${cpBarra(lis, tot)}</div>
         <div class="cp-kpi"><span class="muted small">Faltan</span><b class="${tot - lis ? 'txt-naranja' : 'txt-verde'}">${tot - lis}</b><span class="muted small">${cpPct(lis, tot)}% hecho</span></div>
         <div class="cp-kpi"><span class="muted small">Sin lugar en el plano</span><b class="${sinUb.length ? 'txt-naranja' : ''}">${sinUb.length}</b><span class="muted small">por contar</span></div>
       </div>
-      ${S.cic ? '' : cpPorSedeHtml()}
       <section class="card col gap8">
         <span class="h3">Personas</span>
         ${Object.values(pers).length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Persona</th><th class="num">Productos listos</th><th>Último</th></tr></thead><tbody>
           ${Object.values(pers).sort((a, b) => b.listos - a.listos).map(x => `<tr><td><b>${esc(x.n)}</b></td>
               <td class="num">${x.listos}</td><td class="small nowrap">${x.ult ? fechaHora(x.ult) : '—'}</td></tr>`).join('')}
         </tbody></table></div>` : '<p class="muted small">Todavía nadie ha contado.</p>'}
-      </section>
+      </section>`}
       ${!conAsig ? '' : `<details class="card col gap8 cp-pas-det" ${cpAv.verPas ? 'open' : ''} ontoggle="cpAv.verPas=this.open">
         <summary class="h3">Pasillos y quién los cuenta</summary>
         <div class="fila-sb wrap-f gap8 mt8"><span class="muted small">Avance de cada pasillo.</span>
@@ -6592,7 +7173,10 @@
   }
 
   function estadoCiclico(estado) {
-    llamar('bdEstadoCiclico', { id: cicSel, estado, usuario: ses.nombre }).then(c => {
+    const cierre = estado === 'CERRADO' && cicData && cicData.ciclico.id === cicSel ? fotoCierreCiclico() : null;
+    if (estado === 'CERRADO' && !cierre) return toast('Espera a que cargue el cíclico y vuelve a intentarlo.', 'error');
+    llamar('bdEstadoCiclico', { id: cicSel, estado, usuario: ses.nombre, cierre }).then(c => {
+      delete cierreReco[c.id];
       cicLista = cicLista.map(x => x.id === c.id ? Object.assign(x, c) : x);
       if (cicData) cicData.ciclico = Object.assign(cicData.ciclico, c);
       toast(estado === 'CERRADO' ? 'Cíclico cerrado' : 'Cíclico abierto otra vez', 'ok'); pintarApp();
@@ -6628,57 +7212,236 @@
       'Datos': [{ 'Nombre': tituloCic(c), 'Fecha': c.fecha, 'Creó': c.creadoPor, 'Estado': c.estado }] }, 'reportes');
   }
 
+  /* ================= Productos totales: una tabla con lo que hay de cada producto en cada almacén =================
+     Picking, calidad y bloqueado: del inventario en curso (todas las sedes). Aéreo: lo ubicado en el plano.
+     El almacén de cada producto sale de la lista que se carga (un producto con dos almacenes sale en dos filas). */
+  let prodAlm = null;                    // { codigo: ['2000', ...] }
+  const prodF = { alm: '' };
+  ordT.prod = { k: '', dir: 1 };
+
+  // Ícono de ayuda: muestra el texto en una burbuja pequeña sin tapar la pantalla
+  function ayudaHtml(t) { return `<button type="button" class="ayuda-i" aria-label="¿Para qué sirve?" data-ayuda="${esc(t)}" onclick="verAyuda(event, this)">i</button>`; }
+  function verAyuda(ev, b) {
+    ev.stopPropagation();
+    const ya = document.querySelector('.ayuda-burbuja');
+    if (ya) { const mismo = ya._de === b; ya.remove(); if (mismo) return; }
+    const d = document.createElement('div');
+    d.className = 'ayuda-burbuja'; d.textContent = b.dataset.ayuda; d._de = b; d.setAttribute('role', 'tooltip');
+    document.body.appendChild(d);
+    const r = b.getBoundingClientRect(), w = Math.min(300, window.innerWidth - 24);
+    d.style.width = w + 'px';
+    d.style.left = Math.max(12, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 12)) + 'px';
+    d.style.top = (r.bottom + window.scrollY + 8) + 'px';
+    setTimeout(() => document.addEventListener('click', function fuera() { d.remove(); document.removeEventListener('click', fuera); }), 0);
+  }
+
   function vistaProductosTotales() {
+    const listo = asegurarInvData();
+    if (prodAlm === null && !vistaProductosTotales.pidiendo) {
+      vistaProductosTotales.pidiendo = true;
+      llamar('bdAlmacenesProductos').then(m => { prodAlm = m || {}; }).catch(() => { prodAlm = {}; })
+        .finally(() => { vistaProductosTotales.pidiendo = false; if (vista === 'productos' && prodTab === 'totales') pintarApp(); });
+    }
+    if (!listo || prodAlm === null) return '<div class="cargando">Cargando productos…</div>';
+    const alms = [...new Set(filasProdTotales().map(x => x.alm).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
     return `<div class="col gap12">
-      <div class="fila-sb wrap-f gap8"><span class="h2">Productos totales</span>
+      <div class="fila-sb wrap-f gap8">
+        <span class="h2 fila gap8">Productos totales ${ayudaHtml('Aquí ves lo que tienes de cada producto en cada almacén. Picking, calidad y bloqueado salen del inventario en curso (todas las sedes) y el aéreo es lo que está ubicado en el plano. Total = picking + aéreo + calidad + bloqueado. Toca «Ver» en un producto para moverlo, darle salida, ver su historial o dónde está.')}</span>
         <div class="fila gap8 wrap-f">
+          ${puede('salida') ? '<button class="btn btn-sec" onclick="abrirSalidasRecientes()">Deshacer una salida</button>' : ''}
+          ${puede('productos') ? '<button class="btn btn-sec" onclick="abrirCargaAlmProd()">Cargar almacenes</button>' : ''}
           ${puede('reportes') ? `<button class="btn btn-sec" onclick="descargarInventario()">Descargar inventario</button>
           <button class="btn btn-sec" onclick="abrirSalidas()">Salidas y rotación</button>
           <button class="btn btn-sec" onclick="pedirBitacora()">Descargar bitácora</button>` : ''}
           ${puede('productos') ? `<button class="btn btn-pri" onclick="formProducto(false)">+ Nuevo producto</button>` : ''}
+          <button class="btn btn-sec" onclick="invData=null; prodAlm=null; ptMemo=null; pintarApp()">Actualizar</button>
         </div></div>
-      <div class="fila gap8 wrap-f">
-        <div style="flex:1 1 260px">${campoConCamara(`<input id="prodQ" class="campo" autocomplete="off" spellcheck="false"
-          placeholder="Buscar por código AFS, Nutresa, barras o nombre" value="${esc(prodFiltro)}">`, 'prodQ')}</div>
-        <label class="fila gap8 small" style="cursor:pointer"><input type="checkbox" id="prodStock" ${prodSoloStock ? 'checked' : ''}> Solo los que están en esta sede</label>
+      <div class="pt-filtros">
+        <div class="pt-buscar">${campoConCamara(`<input id="prodQ" class="campo" autocomplete="off" spellcheck="false"
+          placeholder="Buscar por código AFS, Nutresa, barras o nombre" value="${esc(prodFiltro)}" aria-label="Buscar producto">`, 'prodQ')}</div>
+        <select id="prodAlmF" class="campo" aria-label="Almacén" onchange="prodF.alm=this.value; pagInicio('prod'); $('prodLista').innerHTML = listaProdHtml()">
+          <option value="">Todos los almacenes</option>${alms.map(a => `<option value="${esc(a)}" ${prodF.alm === a ? 'selected' : ''}>Almacén ${esc(a)}</option>`).join('')}
+          <option value="-" ${prodF.alm === '-' ? 'selected' : ''}>Sin almacén</option></select>
+        <label class="fila gap8 small" style="cursor:pointer"><input type="checkbox" id="prodStock" ${prodSoloStock ? 'checked' : ''}> Solo los que tienen algo</label>
       </div>
-      <div id="prodLista" class="lista-bp">${listaProdHtml()}</div>
+      <div id="prodLista">${listaProdHtml()}</div>
     </div>`;
   }
 
+  // Una fila por producto y almacén
+  let ptMemo = null;
+  function filasProdTotales() {
+    const d = datosInventario();
+    if (ptMemo && ptMemo.d === d && ptMemo.alm === prodAlm) return ptMemo.v;
+    const porCod = {}; d.forEach(f => (porCod[f.cod] = f));
+    const enPlano = new Set(sede.lineas.map(l => l.productoId));
+    const filas = [];
+    ini.productos.forEach(p => {
+      const f = porCod[p.id], asig = (prodAlm && prodAlm[p.id]) || [];
+      const vals = {};
+      if (f) Object.values(f.alm).forEach(a => {
+        const k = almCorto(a.key) || '', v = vals[k] = vals[k] || { pk: 0, ae: 0, ca: 0, bl: 0 };
+        v.pk += a.picking; v.ae += a.aereo; v.ca += a.calidad; v.bl += a.bloqueado;
+      });
+      const keys = [...new Set(asig.concat(Object.keys(vals).filter(Boolean)))];
+      if (!keys.length) keys.push('');
+      if (vals[''] && keys[0]) {   // lo que no tiene almacén (ej. calidad de SAP) va con el primero
+        const v = vals[keys[0]] = vals[keys[0]] || { pk: 0, ae: 0, ca: 0, bl: 0 };
+        ['pk', 'ae', 'ca', 'bl'].forEach(x => (v[x] += vals[''][x]));
+      }
+      keys.forEach(k => {
+        const v = vals[k] || { pk: 0, ae: 0, ca: 0, bl: 0 };
+        filas.push({ p, alm: k, otro: !!(asig.length && k && !asig.includes(k)), pk: v.pk, ae: v.ae, ca: v.ca, bl: v.bl, tot: v.pk + v.ae + v.ca + v.bl, plano: enPlano.has(p.id) });
+      });
+    });
+    ptMemo = { d, alm: prodAlm, v: filas };
+    return filas;
+  }
+  const valProd = k => ({ cod: x => x.p.id, prod: x => x.p.nombre, alm: x => x.alm, pk: x => x.pk, ae: x => x.ae, ca: x => x.ca, bl: x => x.bl, tot: x => x.tot }[k]);
+
   function listaProdHtml() {
-    const tot = {};
-    sede.lineas.forEach(l => (tot[l.productoId] = tot[l.productoId] || []).push(l));
+    if (!invData || prodAlm === null) return '';
     const palabras = sinTilde(prodFiltro.trim()).split(/\s+/).filter(Boolean);
-    let lista = ini.productos.filter(p => {
-      if (prodSoloStock && !tot[p.id]) return false;
+    const todas = filasProdTotales(), conAlgo = new Set(todas.filter(x => x.tot || x.plano).map(x => x.p.id));
+    let lista = todas.filter(x => {
+      if (prodSoloStock && !conAlgo.has(x.p.id)) return false;   // si el producto tiene algo, salen todos sus almacenes
+      if (prodF.alm === '-' ? x.alm : prodF.alm && x.alm !== prodF.alm) return false;
       if (!palabras.length) return true;
-      const t = sinTilde(p.id + ' ' + p.codigoNutresa + ' ' + p.codigoBarras + ' ' + p.nombre);
+      const t = sinTilde(x.p.id + ' ' + x.p.codigoNutresa + ' ' + x.p.codigoBarras + ' ' + x.p.nombre);
       return palabras.every(w => t.includes(w));
-    }).sort((a, b) => (!!tot[b.id]) - (!!tot[a.id]) || a.nombre.localeCompare(b.nombre));
-    const total = lista.length;
-    if (!total) return `<p class="muted">${prodSoloStock && !palabras.length ? 'Todavía no hay productos guardados en esta sede.' : 'No hay productos con ese código o nombre.'}</p>`;
+    });
+    if (!ordT.prod.k) lista = lista.slice().sort((a, b) => conAlgo.has(b.p.id) - conAlgo.has(a.p.id) || a.p.nombre.localeCompare(b.p.nombre) || String(a.alm).localeCompare(String(b.alm), 'es', { numeric: true }));
+    lista = aplicarOrden('prod', lista, valProd);
+    if (!lista.length) return `<p class="muted">${prodSoloStock && !palabras.length ? 'Todavía no hay productos con cantidad.' : 'No hay productos con ese filtro.'}</p>`;
     const pg = paginar('prod', lista, () => { if ($('prodLista')) $('prodLista').innerHTML = listaProdHtml(); });
-    return `<span class="muted small">${total} producto${total === 1 ? '' : 's'}</span>` + pg.filas.map(p => {
-      const ls = fefo(tot[p.id] || []);
-      const unds = ls.reduce((a, l) => a + l.unidades, 0);
-      return `<div class="prod-card">
-        <div class="fila gap10 inicio">
-          <span class="chip">${esc(p.id)}</span>
-          <div class="col flex1 gap4" style="min-width:0"><span class="nombre">${esc(p.nombre)}</span>
-            <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · ${p.undPorCaja} und/cj${ls.length ? ' · ' + und(unds, p) : ''}</span></div>
-        </div>
-        ${ls.length ? `<div class="lugares">${ls.map(l => `<button class="lugar-chip e2-${estadoDe([l])}" title="${esc(lugarTxt(l.ubicacionId))}"
-            onclick="abrirPos('${esc(sede.espPorId[l.ubicacionId].rackId)}', ${sede.espPorId[l.ubicacionId].posicion}, '${esc(l.ubicacionId)}')">
-            <b>${esc(cu(l.ubicacionId))}</b><small>${cant(l)} · vence ${fFecha(l.vencimiento, true)}</small></button>`).join('')}</div>`
-          : '<span class="muted small">No está en esta sede</span>'}
-        <div class="fila gap8 wrap-f">
-          ${ls.length && (puede('mover') || puede('salida')) ? `<button class="btn btn-pri" onclick="abrirFicha('${esc(p.id)}')">${[puede('mover') && 'Mover', puede('salida') && 'Salida'].filter(Boolean).join(' · ')}</button>` : ''}
-          <button class="btn btn-sec" onclick="abrirHistorial('${esc(p.id)}')">Historial</button>
-          ${ls.length ? `<button class="btn btn-sec" onclick="seguirEnMapa('${esc(p.id)}')">Ver en el mapa</button>` : ''}
-        </div>
-      </div>`;
-    }).join('') + pg.barra;
+    const n = v => v ? nInv(v) : '<span class="muted">0</span>';
+    return `<span class="muted small">${lista.length} fila${lista.length === 1 ? '' : 's'}</span>
+      <div class="tabla-wrap"><table class="tabla pt-tabla"><thead><tr>
+        ${thO('prod', 'cod', 'Código')}${thO('prod', 'prod', 'Producto')}${thO('prod', 'alm', 'Almacén')}
+        ${thO('prod', 'pk', 'Picking', 'num')}${thO('prod', 'ae', 'Aéreo', 'num')}${thO('prod', 'ca', 'Calidad', 'num')}${thO('prod', 'bl', 'Bloqueado', 'num')}${thO('prod', 'tot', 'Total', 'num')}
+        <th></th></tr></thead>
+      <tbody>${pg.filas.map(x => `<tr>
+        <td class="nowrap"><b>${esc(x.p.id)}</b></td>
+        <td><span class="pt-nom">${esc(x.p.nombre)}</span><span class="muted small">Nutresa ${esc(x.p.codigoNutresa || '—')} · ${esc(x.p.unidadMedida || 'UN')}</span></td>
+        <td class="nowrap">${x.alm ? `<b>${esc(x.alm)}</b>${x.otro ? ' <span class="tag amar" title="Este almacén no está en la lista de almacenes del producto">Otro</span>' : ''}` : '<span class="muted">—</span>'}</td>
+        <td class="num">${n(x.pk)}</td><td class="num">${n(x.ae)}</td><td class="num">${n(x.ca)}</td><td class="num">${n(x.bl)}</td>
+        <td class="num"><b>${nInv(x.tot)}</b></td>
+        <td><button class="btn btn-sec btn-mini" onclick="abrirOpcionesProd('${esc(x.p.id)}')">Ver</button></td></tr>`).join('')}</tbody></table></div>${pg.barra}`;
+  }
+
+  // Lo que se puede hacer con un producto: dónde está, mover, salida, historial, mapa y deshacer una salida
+  function abrirOpcionesProd(cod) {
+    const p = prodDe(cod);
+    if (!p) return toast('Producto no encontrado', 'error');
+    const ls = fefo(sede.lineas.filter(l => l.productoId === cod));
+    const unds = ls.reduce((a, l) => a + l.unidades, 0);
+    abrirModal(`<div class="fila-sb"><span class="h2">${esc(p.nombre)}</span>${btnCerrar()}</div>
+      <span class="muted small">Código ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')} · ${p.undPorCaja} und/cj${prodAlm && prodAlm[cod] ? ' · Almacén ' + prodAlm[cod].map(esc).join(', ') : ''}</span>
+      <span class="lbl mt12 fila gap8">Dónde está en ${esc(nombreSede(ses.sedeId))} ${ayudaHtml('Cada cuadro es un lugar del plano donde está este producto. Tócalo para abrir esa posición.')}</span>
+      ${ls.length ? `<span class="muted small">${ls.length} lugar${ls.length === 1 ? '' : 'es'} · ${und(unds, p)}</span>
+        <div class="lugares">${ls.map(l => `<button class="lugar-chip e2-${estadoDe([l])}" title="${esc(lugarTxt(l.ubicacionId))}"
+          onclick="cerrarModal(); abrirPos('${esc(sede.espPorId[l.ubicacionId].rackId)}', ${sede.espPorId[l.ubicacionId].posicion}, '${esc(l.ubicacionId)}')">
+          <b>${esc(cu(l.ubicacionId))}</b><small>${cant(l)} · vence ${fFecha(l.vencimiento, true)}</small></button>`).join('')}</div>`
+        : '<span class="muted small">No está ubicado en el plano de esta sede.</span>'}
+      <div class="pt-acciones mt12">
+        ${ls.length && puede('mover') ? `<button class="btn btn-pri" onclick="cerrarModal(); abrirFicha('${esc(cod)}')">Mover</button>` : ''}
+        ${ls.length && puede('salida') ? `<button class="btn btn-sal" onclick="cerrarModal(); abrirFicha('${esc(cod)}')">Salida</button>` : ''}
+        <button class="btn btn-sec" onclick="cerrarModal(); abrirHistorial('${esc(cod)}')">Historial</button>
+        ${ls.length ? `<button class="btn btn-sec" onclick="cerrarModal(); seguirEnMapa('${esc(cod)}')">Ver en el mapa</button>` : ''}
+      </div>
+      ${puede('salida') ? `<span class="lbl mt16 fila gap8">Salidas de los últimos 5 días ${ayudaHtml('Si le diste salida a este producto por error, toca «Deshacer» y vuelve al mismo lugar, con su rótulo, vencimiento y cantidad. Se puede durante 5 días.')}</span>
+        <div id="ptSalidas"><div class="cargando">Buscando…</div></div>` : ''}`);
+    if (puede('salida')) cargarSalidasRecientes(cod);
+  }
+
+  // Salidas recientes (de un producto o de todos en esta sede) con su botón para deshacer
+  let salRec = null;   // { cod, l }
+  function cargarSalidasRecientes(cod) {
+    llamar('bdSalidasRecientes', cod || '').then(l => {
+      salRec = { cod: cod || '', l: l.filter(m => sede.espPorId[m.ubicacionId]) };   // solo las de esta sede
+      if ($('ptSalidas')) $('ptSalidas').innerHTML = salidasRecHtml();
+    }).catch(e => { if ($('ptSalidas')) $('ptSalidas').innerHTML = `<p class="error small">${esc(e.message)}</p>`; });
+  }
+  function salidasRecHtml() {
+    const l = salRec ? salRec.l : [];
+    if (!l.length) return `<p class="muted small">No hay salidas en los últimos 5 días${salRec && salRec.cod ? ' de este producto' : ' en esta sede'}.</p>`;
+    return `<div class="lista-bp">${l.map(m => `<div class="pt-salida">
+      <span class="col gap4 flex1" style="min-width:0">
+        <b>${salRec.cod ? '' : esc(m.productoId) + ' · ' + esc(m.nombre) + ' · '}${esc(cu(m.ubicacionId))}</b>
+        <span class="muted small">${fechaHora(m.fecha)} · ${esc(m.usuario || '—')} · ${nInv(m.unidades)} und${m.lote ? ' · Lote ' + esc(m.lote) : ''}${m.motivo ? ' · ' + esc(m.motivo) : ''}</span></span>
+      ${m.deshecha ? '<span class="tag ok">Deshecha</span>' : `<button class="btn btn-sec btn-mini" onclick="deshacerSalida('${esc(m.id)}', this)">Deshacer</button>`}
+    </div>`).join('')}</div>`;
+  }
+  function abrirSalidasRecientes() {
+    if (sinPermiso('salida')) return;
+    abrirModal(`<div class="fila-sb"><span class="h2 fila gap8">Deshacer una salida ${ayudaHtml('Aquí están las salidas de los últimos 5 días en esta sede. Si alguna fue por error, toca «Deshacer»: el producto vuelve al mismo lugar del plano, con su rótulo, vencimiento y cantidad. Cada salida se puede deshacer una sola vez.')}</span>${btnCerrar()}</div>
+      <div id="ptSalidas" class="mt12"><div class="cargando">Buscando…</div></div>`);
+    cargarSalidasRecientes('');
+  }
+  function deshacerSalida(id, b) {
+    if (b.dataset.ok !== '1') { b.dataset.ok = '1'; b.textContent = '¿Seguro? Toca otra vez'; b.classList.add('btn-pri'); return; }
+    const m = (salRec ? salRec.l : []).find(x => x.id === id);
+    b.disabled = true; b.textContent = 'Devolviendo…';
+    llamar('bdDeshacerSalida', { movimientoId: id, usuario: ses.nombre, sedeId: ses.sedeId }).then(s => {
+      setSede(s); ptMemo = null;
+      if (m) m.deshecha = true;
+      if ($('ptSalidas')) $('ptSalidas').innerHTML = salidasRecHtml();
+      pitido(); toast(m ? `Listo: volvió a ${cu(m.ubicacionId)}` : 'Listo: volvió a su lugar', 'ok');
+      if (vista === 'productos' && prodTab === 'totales' && $('prodLista')) $('prodLista').innerHTML = listaProdHtml();
+    }).catch(e => { b.disabled = false; b.dataset.ok = ''; b.textContent = 'Deshacer'; b.classList.remove('btn-pri'); toast(e.message, 'error'); });
+  }
+
+  // Cargar la lista de almacenes de cada producto (Excel con código y almacén; sirve la MB52)
+  let almTmp = null;
+  function abrirCargaAlmProd() {
+    if (sinPermiso('productos')) return;
+    almTmp = null;
+    abrirModal(`<div class="fila-sb"><span class="h2 fila gap8">Cargar almacenes ${ayudaHtml('Sube un Excel con el código del producto y su almacén (sirve la MB52). Si un producto viene con dos almacenes, en la tabla sale una fila por cada almacén. La lista que subas reemplaza la anterior.')}</span>${btnCerrar()}</div>
+      <label for="almArch" class="btn btn-pri btn-xl mt12" role="button" tabindex="0">Escoger Excel</label>
+      <input id="almArch" type="file" accept=".xlsx,.xls,.csv" class="oculto">
+      <div id="almCaja" class="mt12"></div>
+      <p id="fErr" class="error" hidden></p>`);
+    $('almArch').addEventListener('change', ev => { const f = ev.target.files[0]; if (f) leerAlmProd(f); });
+  }
+  function leerAlmProd(f) {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        let filas;
+        if (window.XLSX && !/\.csv$/i.test(f.name)) {
+          const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+          filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+        } else filas = new TextDecoder('utf-8').decode(r.result).split(/\r?\n/).map(l => l.split(/[;,\t]/).map(c => c.replace(/^"|"$/g, '').trim()));
+        const t = v => sinTilde(String(v || '')).toUpperCase().trim();
+        const iCab = filas.findIndex(x => x.some(c => /COD/.test(t(c))) && x.some(c => /ALMACEN/.test(t(c))));
+        if (iCab < 0) return errForm('No encontré las columnas de código y ALMACEN en ese archivo.');
+        const cab = filas[iCab].map(t), col = re => cab.findIndex(c => re.test(c));
+        const cCod = [col(/COD.*(ATL|AFS)/), col(/^COD/), col(/COD/)].find(i => i >= 0), cAlm = col(/ALMACEN/);
+        const cod = v => String(v ?? '').trim().replace(/\.0+$/, '').replace(/^0+(?=\d)/, '');
+        const ok = [], malos = new Set();
+        filas.slice(iCab + 1).forEach(x => {
+          const c = cod(x[cCod]), a = cod(x[cAlm]);
+          if (!c || !a) return;
+          const p = prodDe(c) || buscarProducto(c);
+          if (p && p.id === c) ok.push({ codigo: c, almacen: a }); else malos.add(c);
+        });
+        almTmp = { archivo: f.name, filas: ok };
+        const prods = new Set(ok.map(x => x.codigo)).size, dobles = Object.values(ok.reduce((m, x) => ((m[x.codigo] = (m[x.codigo] || 0) + 1), m), {})).filter(n => n > 1).length;
+        $('almCaja').innerHTML = `<div class="info"><b>${prods}</b> productos con almacén${dobles ? ` · <b>${dobles}</b> con más de un almacén` : ''}${malos.size ? ` · <span class="txt-naranja">${malos.size} códigos no están en Productos</span>` : ''}</div>
+          ${malos.size ? `<span class="muted small">No están: ${[...malos].slice(0, 12).map(esc).join(', ')}${malos.size > 12 ? '…' : ''}</span>` : ''}
+          <div class="dos mt12"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+            <button id="almOk" class="btn btn-pri btn-xl" onclick="guardarAlmProd()" ${ok.length ? '' : 'disabled'}>Guardar</button></div>`;
+      } catch (e) { errForm('No se pudo leer el archivo: ' + e.message); }
+    };
+    r.readAsArrayBuffer(f);
+  }
+  function guardarAlmProd() {
+    const b = $('almOk'); b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdCargarAlmacenesProductos', { filas: almTmp.filas, usuario: ses.nombre }).then(r => {
+      cerrarModal(); prodAlm = null; ptMemo = null;
+      pitido(); toast(`Listo: ${r.guardados} filas de almacén guardadas`, 'ok');
+      pintarApp();
+    }).catch(e => { b.disabled = false; b.textContent = 'Guardar'; errForm(e.message); });
   }
 
   /* ================= Identificador del producto (rótulo) ================= */
@@ -6983,11 +7746,7 @@
         <td>${impresoHtml(e)}</td>
         <td>${e.ultimoImpresor ? `${esc(e.ultimoImpresor)}<br><span class="muted small nowrap">${fechaHora(e.ultimaImpresion)}</span>` : '<span class="muted">—</span>'}</td>
         <td>${esc(e.creadoPor || '—')}${e.responsable && e.responsable !== e.creadoPor ? `<br><span class="muted small">Resp.: ${esc(e.responsable)}</span>` : ''}</td>
-        <td class="rt-acc"><span class="rt-acc-btns">${e.estado === 'ANULADA' ? '' : `<button class="btn ${nunca ? 'btn-pri' : 'btn-sec'} btn-mini" onclick="reimprimir(${i})">${nunca ? 'Imprimir' : 'Reimprimir'}</button>`}
-          ${puede('rotular') && e.estado !== 'ANULADA' ? `<button class="btn btn-sec btn-mini" onclick="duplicarRotulo(${i})" title="Otra estiba con la misma información y otro código">Duplicar</button>` : ''}
-          ${puede('rotular') && (e.estado === 'PENDIENTE' || e.estado === 'UBICADA') ? `<button class="btn btn-sec btn-mini" onclick="editarRotulo(${i})" title="Corregir producto, cantidad o fechas">Editar</button>` : ''}
-          ${puede('rotular') && e.estado === 'PENDIENTE' && ini.sedes.length > 1 ? `<button class="btn btn-sec btn-mini" onclick="trasladarRotulo(${i})" title="Pasarlo a otra sede">Trasladar</button>` : ''}
-          ${puede('rotular') && e.estado === 'PENDIENTE' ? `<button class="btn btn-sec btn-mini txt-rojo" onclick="anularRotulo(${i})" title="Se creó por error: no se podrá ubicar">Anular</button>` : ''}</span></td>
+        <td class="rt-acc"><button class="btn btn-sec btn-mini" onclick="abrirOpcionesRotulo(${i})">Ver</button></td>
       </tr>`;
     }).join('');
     const sinImp2 = rotulos.filter(noImpreso).length;
@@ -7007,6 +7766,34 @@
         <thead><tr><th class="rt-chk"><input type="checkbox" class="us-chk" ${todos ? 'checked' : ''} onchange="rtMarcarTodos(this.checked)" aria-label="Marcar todos los del filtro"></th><th>Creado</th><th>Rótulo</th><th>Códigos</th><th>Producto</th><th>Cantidad</th><th>Vence</th>
           <th>Estado</th><th>Sede</th><th>Impreso</th><th>Último que imprimió</th><th>Registró</th><th class="rt-acc"></th></tr></thead>
         <tbody>${filas || '<tr><td colspan="13" class="muted">No hay rótulos con ese filtro.</td></tr>'}</tbody></table></div>${pg.barra}`;
+  }
+
+  // Detalle de un rótulo con lo que se puede hacer (imprimir, duplicar, editar, trasladar, anular)
+  function abrirOpcionesRotulo(i) {
+    const e = rotulos && rotulos[i];
+    if (!e) return;
+    const st = estadoRotulo(e), nunca = noImpreso(e), anulado = e.estado === 'ANULADA';
+    const dato = (t, v) => `<div><span class="muted small">${t}</span><b>${v}</b></div>`;
+    const acc = (cond, cls, txt, fn) => cond ? `<button class="btn ${cls}" onclick="cerrarModal(); ${fn}(${i})">${txt}</button>` : '';
+    const r = puede('rotular');
+    const botones = [
+      acc(!anulado, nunca ? 'btn-pri' : 'btn-sec', nunca ? 'Imprimir' : 'Reimprimir', 'reimprimir'),
+      acc(r && !anulado, 'btn-sec', 'Duplicar', 'duplicarRotulo'),
+      acc(r && (e.estado === 'PENDIENTE' || e.estado === 'UBICADA'), 'btn-sec', 'Editar', 'editarRotulo'),
+      acc(r && e.estado === 'PENDIENTE' && ini.sedes.length > 1, 'btn-sec', 'Trasladar a otra sede', 'trasladarRotulo'),
+      acc(r && e.estado === 'PENDIENTE', 'btn-sec txt-rojo', 'Anular', 'anularRotulo')
+    ].filter(Boolean);
+    abrirModal(`<div class="fila-sb"><span class="h2">Rótulo ${esc(e.id)}</span>${btnCerrar()}</div>
+      <span class="fila gap8 wrap-f mt8"><span class="tag ${st.cls}">${st.txt}</span>${st.det ? `<span class="small">${esc(st.det)}</span>` : ''}</span>
+      <span class="nombre mt8">${esc(e.producto)}</span>
+      <div class="ficha-datos mt8">
+        ${dato('Código Atlantic', esc(e.codigo))}${dato('Código Nutresa', esc(e.codigoNutresa || '—'))}
+        ${dato('Cantidad', e.tipo === 'PESO' ? `${kg(e.total)} · ${e.cajas} cavas` : `${e.cajas} cj · ${e.total} und`)}${dato('Vence', fCorta(e.vencimiento))}
+        ${dato('Sede', esc(e.sede || '—'))}${dato('Creado', `${fechaHora(e.creado)}${e.creadoPor ? ' · ' + esc(e.creadoPor) : ''}`)}
+        ${dato('Impreso', impresoHtml(e))}${dato('Último que imprimió', e.ultimoImpresor ? `${esc(e.ultimoImpresor)} · ${fechaHora(e.ultimaImpresion)}` : '—')}
+      </div>
+      ${botones.length ? `<span class="lbl mt16 fila gap8">¿Qué quieres hacer? ${ayudaHtml('Imprimir: saca el rótulo otra vez. Duplicar: otra estiba con la misma información y otro código. Editar: corrige producto, cantidad o fechas. Trasladar: lo pasa a otra sede (solo si no está ubicado). Anular: si se creó por error; ya no se podrá ubicar.')}</span>
+        <div class="pt-acciones mt8">${botones.join('')}</div>` : '<span class="muted small mt16">Este rótulo está anulado: no tiene acciones.</span>'}`);
   }
 
   function cargarRotulos() {
@@ -7303,26 +8090,26 @@
     }).catch(err => { errForm(err.message); b.disabled = false; });
   }
 
+  // Rótulo (opción 1): arriba el código a todo lo ancho con su código de barras centrado; el vencimiento más grande que el recibo;
+  // abajo, pequeños y a la misma altura, el código Nutresa y el responsable
   function rotuloHtml(e) {
     const peso = e.tipo === 'PESO';
     return `<div class="rotulo">
-      <div class="rt-fila" style="grid-template-columns:1fr 2fr">
-        <div class="rt-celda rt-empresa">${esc(ini.empresa || '')}</div>
-        <div class="rt-celda rt-cod"><div class="rt-num">${esc(e.codigo)}</div><svg data-cb="${esc(e.id)}"></svg></div>
+      <div class="rt2-cab"><span class="rt2-emp">${esc(ini.empresa || '')}</span>
+        <div class="rt2-num">${esc(e.codigo)}</div><svg class="rt2-cb" data-cb="${esc(e.id)}"></svg></div>
+      <div class="rt2-nombre">${esc(e.producto)}</div>
+      <div class="rt2-fila rt2-3">
+        <div class="rt2-celda"><span class="rt2-tit">CAJAS</span><span class="rt2-cant">${e.cajas}</span></div>
+        <div class="rt2-celda"><span class="rt2-tit">EMBALAJE</span><span class="rt2-cant">${peso ? +Number(e.pesoCava || e.embalaje).toFixed(2) : e.embalaje}</span></div>
+        <div class="rt2-celda"><span class="rt2-tit">TOTAL</span><span class="rt2-cant">${peso ? +Number(e.total).toFixed(2) : e.total}</span></div>
       </div>
-      <div class="rt-fila"><div class="rt-celda rt-nombre">${esc(e.producto)}</div></div>
-      <div class="rt-fila" style="grid-template-columns:repeat(3,1fr)">
-        <div class="rt-celda"><div class="rt-tit">CAJAS</div><div class="rt-val">${e.cajas}</div></div>
-        <div class="rt-celda"><div class="rt-tit">EMBALAJE</div><div class="rt-val">${peso ? +Number(e.pesoCava || e.embalaje).toFixed(2) : e.embalaje}</div></div>
-        <div class="rt-celda"><div class="rt-tit">TOTAL</div><div class="rt-val">${peso ? +Number(e.total).toFixed(2) : e.total}</div></div>
+      <div class="rt2-fila rt2-fechas">
+        <div class="rt2-celda"><span class="rt2-tit rt2-tit-g">FECHA DE VENCIMIENTO</span><span class="rt2-venc">${fCorta(e.vencimiento)}</span></div>
+        <div class="rt2-celda"><span class="rt2-tit">FECHA DE RECIBO</span><span class="rt2-rec">${fCorta(e.recibo)}</span></div>
       </div>
-      <div class="rt-fila" style="grid-template-columns:1fr 1.5fr">
-        <div class="rt-celda"><div class="rt-tit">FECHA DE RECIBO</div><div class="rt-val2">${fCorta(e.recibo)}</div></div>
-        <div class="rt-celda"><div class="rt-tit">FECHA DE VENCIMIENTO</div><div class="rt-val2 rt-grande">${fCorta(e.vencimiento)}</div></div>
-      </div>
-      <div class="rt-fila" style="grid-template-columns:1fr 1fr">
-        <div class="rt-celda"><div class="rt-tit">CÓDIGO NUTRESA</div><div class="rt-val2">${esc(e.codigoNutresa || '')}</div></div>
-        <div class="rt-celda"><div class="rt-tit">RESPONSABLE</div><div class="rt-resp">${esc(e.responsable)}</div></div>
+      <div class="rt2-fila rt2-pie">
+        <div class="rt2-celda rt2-linea"><span class="rt2-tit">CÓDIGO NUTRESA</span><span class="rt2-peq">${esc(e.codigoNutresa || '')}</span></div>
+        <div class="rt2-celda rt2-linea"><span class="rt2-tit">RESPONSABLE</span><span class="rt2-peq">${esc(e.responsable)}</span></div>
       </div>
     </div>`;
   }
@@ -7339,7 +8126,7 @@
     st.textContent = tam === '10x15' ? '@page { size: 150mm 100mm; margin: 3mm; }' : '@page { size: letter landscape; margin: 8mm; }';
     if (window.JsBarcode) {
       pr.querySelectorAll('svg[data-cb]').forEach(el => {
-        try { JsBarcode(el, el.dataset.cb, { format: 'CODE128', height: 70, width: 2.6, margin: 14, displayValue: true, font: 'Arial', fontOptions: 'bold', fontSize: 18, textMargin: 4, background: '#FFFFFF', lineColor: '#000000' }); } catch (x) {}
+        try { JsBarcode(el, el.dataset.cb, { format: 'CODE128', height: 44, width: 4, margin: 6, displayValue: true, font: 'Arial', fontOptions: 'bold', fontSize: 16, textMargin: 3, background: '#FFFFFF', lineColor: '#000000' }); } catch (x) {}
       });
     }
     setTimeout(() => window.print(), 150);
@@ -8416,7 +9203,8 @@
       tareas.push(llamar('bdCiclicos', ses.sedeId).then(l => { cicLista = l; if (cicSel && !l.some(c => c.id === cicSel)) { cicSel = null; cicData = null; } }).catch(() => {}));
       if (cicSel) tareas.push(llamar('bdCiclico', cicSel).then(d => { if (cicSel === d.ciclico.id) cicData = d; }).catch(() => {}));
     }
-    if (vista === 'productos' && prodTab !== 'totales' && invData && hay('inv_conteos', 'inv_sap', 'inv_sap_cargas', 'inv_validaciones', 'conteo_asignaciones', ...TABLAS_SEDE))
+    if (hay('ciclicos') && invLista && !invNuevo) invLista = null;   // otro creó un inventario
+    if (vista === 'productos' && prodTab !== 'totales' && invData && hay('inv_conteos', 'inv_sap', 'inv_sap_cargas', 'inv_validaciones', 'conteo_asignaciones', 'ciclicos', ...TABLAS_SEDE))
       tareas.push(llamar('bdInventarioGeneral', ses.sedeId).then(d => { invData = d; }).catch(() => {}));
     if (vista === 'usuarios' && usLista && !usEdit && !pfEdit && hay('operarios'))
       tareas.push(Promise.all([llamar('bdUsuarios', ses.token), pfFalta ? Promise.resolve(pfLista) : llamar('bdPerfiles', ses.token)])

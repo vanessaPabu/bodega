@@ -269,26 +269,26 @@
     /* Horizontal: un rótulo ocupa toda la hoja */
     .rt-carta .rotulo { width: 262mm; height: 198mm; font-size: 10.5pt; overflow: hidden; }
     .rt-10x15 .rotulo { width: 143mm; height: 93mm; font-size: 5.4pt; overflow: hidden; }
-    /* Número grande para leerlo de lejos; código de barras más pequeño debajo */
-    .rt-carta .rt-cod svg { height: 6em; width: 70%; margin-top: .1em; }
-    .rt-carta .rt-num { font-size: 11.5em; line-height: .9; }
-    .rt-10x15 .rt-cod svg { height: 5.5em; width: 70%; margin-top: .1em; }
-    .rt-10x15 .rt-num { font-size: 11em; line-height: .9; }
-    .rt-fila { display: grid; grid-template-columns: 1fr; border-bottom: 2px solid #000; flex: 1 1 auto; }
-    .rt-fila:last-child { border-bottom: none; }
-    .rt-celda { border-right: 2px solid #000; text-align: center; padding: .4em .6em; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-    .rt-celda:last-child { border-right: none; }
-    .rt-empresa { font-size: 3em; font-weight: 900; letter-spacing: .04em; }
-    .rt-num { font-size: 8em; font-weight: 900; line-height: .95; font-style: italic; }
-    .rt-cod svg { width: 82%; height: 6.2em; margin-top: .3em; }
-    .rt-nombre { font-size: 3.6em; font-weight: 900; font-style: italic; line-height: 1.1; text-transform: uppercase; }
-    .rt-tit { white-space: nowrap; font-size: 2em; font-style: italic; text-transform: uppercase; border-bottom: 2px solid #000; width: 100%; }
-    .rt-val { font-size: 6em; font-weight: 900; line-height: 1.1; }
-    .rt-val2 { font-size: 3.6em; font-weight: 900; line-height: 1.2; }
-    .rt-grande { font-size: 4.6em; }
-    .rt-resp { font-size: 2.2em; font-weight: 700; padding: .4em 0; }
-    .rt-fila .rt-celda { padding-top: 0; }
-    .rt-fila .rt-celda:has(.rt-tit) { padding: 0 0 .3em; }
+    /* Arriba el código a todo lo ancho y su código de barras grande y centrado (se lee y se escanea de lejos) */
+    .rt2-cab { position: relative; border-bottom: 2px solid #000; display: flex; flex-direction: column; align-items: center; padding: .2em 1em .5em; }
+    .rt2-emp { position: absolute; left: .9em; top: .6em; font-size: 1.1em; font-weight: 700; letter-spacing: .06em; }
+    .rt2-num { font-size: 17em; font-weight: 900; line-height: .9; letter-spacing: .02em; white-space: nowrap; }
+    .rt2-cb { display: block; width: 64%; height: 7em; }
+    .rt2-nombre { border-bottom: 2px solid #000; text-align: center; font-size: 3.4em; font-weight: 900; line-height: 1.12; padding: .12em .5em; text-transform: uppercase; }
+    .rt2-fila { display: grid; border-bottom: 2px solid #000; }
+    .rt2-fila:last-child { border-bottom: none; }
+    .rt2-3 { grid-template-columns: repeat(3, 1fr); }
+    .rt2-fechas { grid-template-columns: 2fr 1fr; flex: 1 1 auto; }
+    .rt2-pie { grid-template-columns: 1fr 2fr; }
+    .rt2-celda { border-right: 2px solid #000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: .3em .8em; min-width: 0; }
+    .rt2-celda:last-child { border-right: none; }
+    .rt2-linea { flex-direction: row; justify-content: flex-start; gap: .8em; }
+    .rt2-tit { font-size: 1em; font-weight: 700; white-space: nowrap; }
+    .rt2-tit-g { font-size: 1.3em; }
+    .rt2-cant { font-size: 3.7em; font-weight: 900; line-height: 1.05; }
+    .rt2-venc { font-size: 6.8em; font-weight: 900; line-height: 1; white-space: nowrap; }
+    .rt2-rec { font-size: 2.9em; font-weight: 800; line-height: 1.1; white-space: nowrap; }
+    .rt2-peq { font-size: 1.55em; font-weight: 800; }
   }
 
   /* ---------- Cámara ---------- */
@@ -912,6 +912,40 @@
   .cp-kpi { background: var(--card); border: 1px solid var(--borde); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
   .cp-kpi b { font-size: 22px; }
   .cp-kpi .cp-barra { width: 100%; }
+  /* Plano en 3D (PC) */
+  .p3-wrap { position: relative; border: 1px solid var(--borde); border-radius: 14px; background: linear-gradient(180deg, var(--card), var(--bg)); overflow: hidden; margin-top: 8px; }
+  .p3-wrap canvas { display: block; cursor: grab; }
+  .p3-wrap canvas:active { cursor: grabbing; }
+  .p3-ctrl { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; align-items: center; }
+  .p3-ctrl button:not(.ayuda-i) { height: 34px; min-width: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--borde); background: var(--card); color: inherit; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .p3-tip { position: absolute; z-index: 5; max-width: 250px; background: #1b2430; color: #fff; font-size: 12px; line-height: 1.4; padding: 8px 10px; border-radius: 8px; pointer-events: none; display: flex; flex-direction: column; gap: 2px; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+  .p3-tip[hidden] { display: none; }
+  .sw3d { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; cursor: pointer; user-select: none; }
+  .sw3d input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .sw3d-i { width: 40px; height: 22px; border-radius: 11px; background: var(--vacio); position: relative; transition: background .15s; flex: none; }
+  .sw3d-i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  .sw3d input:checked + .sw3d-i { background: var(--pri); }
+  .sw3d input:checked + .sw3d-i::after { transform: translateX(18px); }
+  .sw3d input:focus-visible + .sw3d-i { outline: 2px solid var(--pri); outline-offset: 2px; }
+  /* Productos totales */
+  .pt-filtros { display: grid; grid-template-columns: minmax(0, 1fr) 220px auto; gap: 8px; align-items: center; }
+  @media (max-width: 700px) { .pt-filtros { grid-template-columns: 1fr; } }
+  .tabla.pt-tabla { min-width: 860px; }
+  .pt-tabla td { vertical-align: middle; }
+  .pt-nom { display: block; font-weight: 600; }
+  .pt-acciones { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+  .pt-salida { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--card); }
+  .ayuda-i { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--pri); background: var(--pri-suave); color: var(--pri); font: italic 700 13px/1 Georgia, serif; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; flex: none; vertical-align: middle; }
+  .ayuda-burbuja { position: absolute; z-index: 9999; background: #1b2430; color: #fff; font-size: 13px; line-height: 1.45; padding: 10px 12px; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+  .cp-dos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+  @media (max-width: 760px) { .cp-dos { grid-template-columns: 1fr; } }
+  .cp-dos .tabla, .tabla.cp-cont { min-width: 0; }
+  .cp-dona { display: flex; align-items: center; gap: 16px; padding-top: 4px; }
+  .cp-dona b { font-size: 20px; }
+  .dona { width: 110px; height: 110px; flex: none; }
+  .dona-fondo { fill: none; stroke: var(--borde); stroke-width: 12; }
+  .dona-valor { fill: none; stroke: #2e7d32; stroke-width: 12; stroke-linecap: round; }
+  .dona-txt { font-size: 18px; font-weight: 700; fill: currentColor; }
   @media (max-width: 600px) { .cp-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; } .cp-kpi { padding: 8px; } .cp-kpi b { font-size: 18px; } }
   .cp-personas { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow: auto; }
   .cp-per { padding: 8px; border: 1px solid var(--borde); border-radius: 8px; cursor: pointer; }
@@ -951,7 +985,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-CTZv1XI9.js"></script>
+  <script type="module" crossorigin src="./assets/index-DWVqIvXG.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>
