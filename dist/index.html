@@ -927,6 +927,15 @@
   .sw3d input:checked + .sw3d-i { background: var(--pri); }
   .sw3d input:checked + .sw3d-i::after { transform: translateX(18px); }
   .sw3d input:focus-visible + .sw3d-i { outline: 2px solid var(--pri); outline-offset: 2px; }
+  /* Ventana al escanear (producto o lugar) */
+  .ean-mini { margin-top: 6px; }
+  .ean-mini summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--pri); list-style: none; width: fit-content; }
+  .ean-mini summary::-webkit-details-marker { display: none; }
+  .hoja-acc { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  @media (min-width: 640px) { .hoja-acc { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .hoja-niv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .hoja-niv .btn { height: auto; min-height: 56px; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 8px 12px; }
+  .hoja-niv small { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   /* Productos totales */
   .pt-filtros { display: grid; grid-template-columns: minmax(0, 1fr) 220px auto; gap: 8px; align-items: center; }
   @media (max-width: 700px) { .pt-filtros { grid-template-columns: 1fr; } }
@@ -985,7 +994,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-DWVqIvXG.js"></script>
+  <script type="module" crossorigin src="./assets/index-HSgaJBDl.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>

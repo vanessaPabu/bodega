@@ -852,10 +852,11 @@
   function buscarLugar(txt) {
     const c = sinGuion(txt);
     if (!c) return toast('Escribe o escanea el código del lugar', 'error');
+    const hoja = !ubicando && !moviendo && !lugarCtx && !flujo;   // sin nada pendiente: sale la ventana con lo que se puede hacer
     const e = espDeTexto(txt);
-    if (e) { cerrarModal(); pitido(); return abrirPos(e.rackId, e.posicion, e.id); }
+    if (e) { pitido(); if (hoja) return hojaLugar(e.id); cerrarModal(); return abrirPos(e.rackId, e.posicion, e.id); }
     const pp = posDeTexto(txt);
-    if (pp) { cerrarModal(); pitido(); return abrirPos(pp.rackId, pp.posicion); }
+    if (pp) { pitido(); if (hoja) return hojaPos(pp.rackId, pp.posicion); cerrarModal(); return abrirPos(pp.rackId, pp.posicion); }
     for (const r of sede.racks) {
       const m = c.match(new RegExp('^' + sinGuion(r.id) + 'P0*(\\d+)$'));
       if (m) {
@@ -871,7 +872,7 @@
     const v = String(txt || '').trim();
     if (/^E\d{4,}$/i.test(v)) return buscarCodigo(v);
     const p = buscarProducto(v);
-    if (p) { pitido(); return elegirProducto(p.id); }
+    if (p) { pitido(); return hojaProducto(p); }
     abrirBuscarProducto(v);
     toast('No hay un producto con ese código exacto. Revisa la lista.', 'error');
   }
@@ -3131,7 +3132,10 @@
       if (pistola.txt.length >= 3) {
         ev.preventDefault();
         const t = pistola.txt; pistola.txt = '';
-        if (flujo && flujo.paso === 'lugar') flujoLugarCodigo(t);
+        if ($('eanTxt')) { $('eanTxt').value = t; guardarEan(); }
+        else if ($('eanMini') && $('eanMini').offsetParent) { $('eanMini').value = t; guardarEanMini($('eanMini').dataset.pid); }
+        else if ($('raTxt')) rotuloAquiTexto(t);
+        else if (flujo && flujo.paso === 'lugar') flujoLugarCodigo(t);
         else if (flujo && flujo.paso === 'origen') flujoOrigenCodigo(t);
         else { cerrarModal(); buscarCodigo(t); }
       }
@@ -7297,7 +7301,7 @@
     ptMemo = { d, alm: prodAlm, v: filas };
     return filas;
   }
-  const valProd = k => ({ cod: x => x.p.id, prod: x => x.p.nombre, alm: x => x.alm, pk: x => x.pk, ae: x => x.ae, ca: x => x.ca, bl: x => x.bl, tot: x => x.tot }[k]);
+  const valProd = k => ({ cod: x => x.p.id, ean: x => x.p.codigoBarras || '', prod: x => x.p.nombre, alm: x => x.alm, pk: x => x.pk, ae: x => x.ae, ca: x => x.ca, bl: x => x.bl, tot: x => x.tot }[k]);
 
   function listaProdHtml() {
     if (!invData || prodAlm === null) return '';
@@ -7317,11 +7321,12 @@
     const n = v => v ? nInv(v) : '<span class="muted">0</span>';
     return `<span class="muted small">${lista.length} fila${lista.length === 1 ? '' : 's'}</span>
       <div class="tabla-wrap"><table class="tabla pt-tabla"><thead><tr>
-        ${thO('prod', 'cod', 'Código')}${thO('prod', 'prod', 'Producto')}${thO('prod', 'alm', 'Almacén')}
+        ${thO('prod', 'cod', 'Código')}${thO('prod', 'ean', 'EAN')}${thO('prod', 'prod', 'Producto')}${thO('prod', 'alm', 'Almacén')}
         ${thO('prod', 'pk', 'Picking', 'num')}${thO('prod', 'ae', 'Aéreo', 'num')}${thO('prod', 'ca', 'Calidad', 'num')}${thO('prod', 'bl', 'Bloqueado', 'num')}${thO('prod', 'tot', 'Total', 'num')}
         <th></th></tr></thead>
       <tbody>${pg.filas.map(x => `<tr>
         <td class="nowrap"><b>${esc(x.p.id)}</b></td>
+        <td class="nowrap small">${x.p.codigoBarras ? esc(x.p.codigoBarras) : '<span class="muted">—</span>'}</td>
         <td><span class="pt-nom">${esc(x.p.nombre)}</span><span class="muted small">Nutresa ${esc(x.p.codigoNutresa || '—')} · ${esc(x.p.unidadMedida || 'UN')}</span></td>
         <td class="nowrap">${x.alm ? `<b>${esc(x.alm)}</b>${x.otro ? ' <span class="tag amar" title="Este almacén no está en la lista de almacenes del producto">Otro</span>' : ''}` : '<span class="muted">—</span>'}</td>
         <td class="num">${n(x.pk)}</td><td class="num">${n(x.ae)}</td><td class="num">${n(x.ca)}</td><td class="num">${n(x.bl)}</td>
@@ -7652,7 +7657,7 @@
       if (p) {
         info.hidden = false;
         info.innerHTML = `<span class="fuerte">${esc(p.nombre)}</span>
-          <span class="muted small">Código AFS ${esc(p.id)} · Código Nutresa ${esc(p.codigoNutresa || '—')} · Embalaje ${p.undPorCaja} und x caja${p.unidadMedida ? ' · ' + esc(p.unidadMedida) : ''}</span>`;
+          <span class="muted small">Código AFS ${esc(p.id)} · Código Nutresa ${esc(p.codigoNutresa || '—')} · Embalaje ${p.undPorCaja} und x caja${p.unidadMedida ? ' · ' + esc(p.unidadMedida) : ''}</span>${eanMiniHtml(p.id)}`;
         if (p.id !== ultimo) {
           ultimo = p.id;
           // Producto por kilo: se sugiere peso variable
@@ -8290,6 +8295,7 @@
       </div>
       ${lleno ? `<p class="error">Este espacio ya tiene ${yaHay.length} productos (${esc(yaHay.map(l => l.nombre).join(', '))}) y el máximo es ${maxEsp()}. Elige otro.</p>`
         : yaHay.length ? `<p class="muted small">En este espacio ya está: ${esc(yaHay.map(l => l.nombre).join(', '))}. Quedará junto (${yaHay.length + 1} de ${maxEsp()}).</p>` : ''}
+      ${eanMiniHtml(e.codigo)}
       <p id="fErr" class="error" hidden></p>
       <div class="dos mt16">
         <button class="btn btn-sec btn-xl" onclick="otroLugar()">Otro lugar</button>
@@ -8456,7 +8462,7 @@
     const act = () => {
       const p = buscarProducto(c.value);
       $('cmInfo').hidden = !c.value.trim();
-      $('cmInfo').innerHTML = p ? `<span class="fuerte">${esc(p.nombre)}</span><span class="muted small">AFS ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')} · ${p.undPorCaja} und x caja</span>`
+      $('cmInfo').innerHTML = p ? `<span class="fuerte">${esc(p.nombre)}</span><span class="muted small">AFS ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')} · ${p.undPorCaja} und x caja</span>${eanMiniHtml(p.id)}`
         : '<span class="txt-rojo small">Producto no encontrado. Elígelo de la lista.</span>';
       if (p) {
         const t = (p.unidadMedida || '').toUpperCase() === 'KG' ? 'PESO' : 'NORMAL';
@@ -8587,6 +8593,8 @@
     if (d === 'scanLugar' || d === 'lgCod' || d === 'flujoLugar') return 'Escanea el código del lugar';
     if (d === 'flujoOrigen') return 'Escanea el lugar de origen';
     if (d === 'scan') return 'Escanea un rótulo, lugar o producto';
+    if (d === 'ean') return 'Escanea el código de barras de la caja (EAN)';
+    if (d === 'rotuloAqui') return 'Escanea el código de barras del rótulo';
     return 'Escanea el código del producto';
   }
 
@@ -8884,7 +8892,7 @@
      2. Si el lector no manda Enter al final, el código se toma solo cuando termina de escribir. */
   const lectorT = { buf: '', ult: 0, rap: 0, t: null, campo: null, n: 0 };
   const editable = el => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
-  const CAMPOS_COD = ['ingCod', 'cfQ', 'cpQ', 'invProd', 'invLug', 'prQ', 'bpQ', 'rtCod', 'scan'];
+  const CAMPOS_COD = ['eanTxt', 'eanMini', 'raTxt', 'ingCod', 'cfQ', 'cpQ', 'invProd', 'invLug', 'prQ', 'bpQ', 'rtCod', 'scan'];
   function codigoSinCampo(t) {
     const id = CAMPOS_COD.find(k => $(k) && $(k).offsetParent !== null);
     if (!id) return toast('Código leído: ' + t + '. Abre la pantalla donde lo vas a usar.', 'error');
@@ -8960,6 +8968,9 @@
   function codigoLeido(texto) {
     pitido();
     const valor = String(texto).trim();
+    if (camDestino === 'eanMini' && $('eanMini')) { $('eanMini').value = valor.replace(/\s+/g, ''); return guardarEanMini($('eanMini').dataset.pid); }
+    if ((camDestino === 'ean' || camDestino === 'eanTxt') && $('eanTxt')) { $('eanTxt').value = valor.replace(/\s+/g, ''); return guardarEan(); }
+    if (camDestino === 'rotuloAqui' || camDestino === 'raTxt') { if ($('raTxt')) $('raTxt').value = valor; return rotuloAquiTexto(valor); }
     if (camDestino === 'scan') return buscarCodigo(valor);
     if (camDestino === 'scanProd') return buscarProductoCod(valor);
     if (camDestino === 'flujoLugar') return flujoLugarCodigo(valor);
@@ -8982,6 +8993,173 @@
     if (!p && camDestino !== 'npCb') toast('Código leído: ' + valor + ' (no está en la lista de productos)', 'error');
   }
 
+  /* ================= Al escanear: una ventana abajo con lo que se puede hacer =================
+     Producto o rótulo → Asignar en un lugar (solo el rótulo que falta ubicar) · Mover · Salida · Agregar EAN
+     Lugar → Agregar un rótulo (se escanea el rótulo) · Cargar sin código de barras */
+  let hojaCtx = null;     // { p, e } producto y rótulo (si se escaneó un rótulo)
+  let ubicarAqui = null;  // espacio donde va el próximo rótulo que se escanee ("Agregar un rótulo")
+
+  function hojaRotuloCod(cod) {
+    return llamar('bdEtiqueta', cod, ses.sedeId).then(e => {
+      // Venía de "Agregar un rótulo" en un lugar: va directo a confirmar en ese lugar
+      if (ubicarAqui && sede.espPorId[ubicarAqui]) {
+        const aqui = ubicarAqui, msg = rotuloNoUsable(e);
+        if (msg) return toast(msg, 'error');
+        if (sinPermiso('ubicar')) return;
+        ubicarAqui = null; ubicando = e; moviendo = null; pitido();
+        return pedirConfirmUbicar(e, aqui);
+      }
+      const p = prodDe(e.codigo) || { id: e.codigo, nombre: e.producto, codigoNutresa: e.codigoNutresa };
+      pitido(); hojaProducto(p, e);
+    }).catch(err => toast(err.message, 'error'));
+  }
+
+  function hojaProducto(p, e) {
+    hojaCtx = { p, e: e || null };
+    const ls = lineasProd(p.id), unds = ls.reduce((a, l) => a + l.unidades, 0);
+    const lineaRot = e ? sede.lineas.find(l => l.lote === e.id) : null;
+    const asignar = e && e.estado === 'PENDIENTE' && puede('ubicar');
+    const sale = e ? lineaRot : ls.length;
+    const est = e ? (e.estado === 'PENDIENTE' ? ['amar', 'Falta ubicar'] : e.estado === 'UBICADA' ? ['ok', 'Ubicado en ' + cu(e.ubicacion)]
+      : e.estado === 'SALIDA' ? ['', 'Ya salió de la bodega'] : ['venc', 'Anulado']) : null;
+    const b = [
+      asignar ? '<button class="btn btn-ent-solido btn-xl" onclick="hojaAsignar()">Asignar en un lugar</button>' : '',
+      sale && puede('mover') ? `<button class="btn btn-pri btn-xl" onclick="hojaAccion('MOVER')">Mover</button>` : '',
+      sale && puede('salida') ? `<button class="btn btn-sal btn-xl" onclick="hojaAccion('SALIDA')">Salida</button>` : '',
+      prodDe(p.id) && puede('productos') ? `<button class="btn btn-sec btn-xl" onclick="hojaEan()">${p.codigoBarras ? 'Cambiar EAN' : 'Agregar EAN'}</button>` : ''
+    ].filter(Boolean);
+    abrirModal(`<div class="fila-sb"><span class="h2">${e ? 'Rótulo ' + esc(e.id) : 'Producto'}</span>${btnCerrar()}</div>
+      ${est ? `<span class="mt8"><span class="tag ${est[0]}">${esc(est[1])}</span></span>` : ''}
+      <span class="nombre mt8">${esc(p.nombre)}</span>
+      <span class="muted small">Código ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')} · ${p.codigoBarras ? 'EAN ' + esc(p.codigoBarras) : '<b class="txt-naranja">Sin EAN</b>'}</span>
+      ${e ? `<span class="muted small">${e.tipo === 'PESO' ? kg(e.total) + ' · ' + e.cajas + ' cavas' : e.cajas + ' cj · ' + e.total + ' und'} · vence ${fCorta(e.vencimiento)}</span>`
+        : `<span class="muted small">${ls.length ? `En ${ls.length} lugar${ls.length === 1 ? '' : 'es'} de esta sede · ${und(unds, p)}` : 'No está ubicado en esta sede'}</span>`}
+      ${b.length ? `<div class="hoja-acc mt16">${b.join('')}</div>` : '<p class="muted small mt16">No hay acciones para esto.</p>'}`);
+  }
+  function hojaAsignar() {
+    const e = hojaCtx && hojaCtx.e;
+    if (!e || sinPermiso('ubicar')) return;
+    ubicando = e; moviendo = null; ubicarAqui = null;
+    vista = 'mapa'; espSel = null; pintarApp();
+    abrirModal(`<div class="fila-sb"><span class="h2">¿Dónde lo vas a poner?</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Rótulo <b>${esc(e.id)}</b> · ${esc(e.producto)}</span>
+      <div class="hoja-acc mt16">
+        ${botonCamara('scanLugar', 'btn btn-pri btn-xl btn-acceso', 'Escanear el lugar')}
+        <button class="btn btn-sec btn-xl" onclick="abrirLugar()">Elegir el lugar</button>
+        <button class="btn btn-sec btn-xl" onclick="ubicando=null; cerrarModal(); pintarApp()">Cancelar</button>
+      </div>`);
+  }
+  function hojaAccion(a) {
+    const c = hojaCtx;
+    if (!c) return;
+    cerrarModal();
+    abrirFicha(c.p.id);
+    if (!flujo) return;
+    flujoAccion(a);
+    const l = c.e ? sede.lineas.find(x => x.lote === c.e.id) : null;   // el rótulo escaneado: sale de su lugar
+    if (l && flujo && flujo.paso === 'origen') flujoOrigen(idxLinea(l));
+  }
+
+  // EAN: foto del código del fabricante (o la pistola / escribirlo) y se guarda en el producto
+  function hojaEan() {
+    const p = hojaCtx && hojaCtx.p;
+    if (!p || sinPermiso('productos')) return;
+    abrirModal(`<div class="fila-sb"><span class="h2">EAN de ${esc(p.nombre)}</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Escanea el código de barras que trae la caja del fabricante. Queda guardado en el código ${esc(p.id)} y desde ahí, al escanearlo, la app ya sabe qué producto es.</span>
+      ${p.codigoBarras ? `<span class="small mt8">EAN actual: <b>${esc(p.codigoBarras)}</b></span>` : ''}
+      <div class="mt12">${botonCamara('ean', 'btn btn-pri btn-xl btn-acceso', 'Escanear EAN con la cámara')}</div>
+      <label class="lbl mt12" for="eanTxt">O escanéalo con la pistola o escríbelo</label>
+      <input id="eanTxt" class="campo" inputmode="numeric" autocomplete="off" placeholder="Ej. 7702011012345" onkeydown="if (event.key === 'Enter') guardarEan()">
+      <p id="fErr" class="error" hidden></p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="hojaProducto(hojaCtx.p, hojaCtx.e)">Volver</button>
+        <button id="eanOk" class="btn btn-pri btn-xl" onclick="guardarEan()">Guardar EAN</button></div>`);
+    if (!('ontouchstart' in window)) $('eanTxt').focus();
+  }
+  function guardarEan() {
+    const p = hojaCtx && hojaCtx.p, b = $('eanOk');
+    if (!p || !b || b.disabled) return;
+    const ean = String($('eanTxt').value || '').replace(/\s+/g, '');
+    if (!/^\d{8,14}$/.test(ean)) return errForm('El EAN debe tener entre 8 y 14 números. Escanéalo otra vez.');
+    b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdGuardarEan', { codigo: p.id, ean, usuario: ses.nombre }).then(r => {
+      ini.productos = r.productos;
+      $('dlProductos').innerHTML = r.productos.map(x => `<option value="${esc(x.id + ' · ' + x.nombre)}">`).join('');
+      pitido(); toast(`EAN ${ean} guardado en ${p.id}`, 'ok');
+      hojaProducto(prodDe(p.id) || p, hojaCtx.e);
+    }).catch(e => { b.disabled = false; b.textContent = 'Guardar EAN'; errForm(e.message); });
+  }
+
+  // Lugar escaneado: una posición pide el nivel y el lado; un espacio muestra lo que se puede hacer ahí
+  function hojaPos(rackId, p) {
+    const esps = espaciosDe(rackId, p).sort((a, b) => b.nivel - a.nivel || a.lado.localeCompare(b.lado));
+    const r = sede.rackPorId[rackId];
+    if (!esps.length) return abrirPos(rackId, p);
+    abrirModal(`<div class="fila-sb"><span class="h2">${esc(posCodigo(rackId, p))}</span>${btnCerrar()}</div>
+      <span class="muted small mt8">${esc(r ? r.nombre : '')} · Posición ${p}. Toca el nivel y el lado.</span>
+      <div class="hoja-niv mt12">${esps.map(e => `<button class="btn btn-sec" onclick="hojaLugar('${esc(e.id)}')"><b>${esc(etiqueta(e))}</b>
+        <small class="muted">${lineasDe(e.id).length ? esc(lineasDe(e.id).map(l => l.nombre).join(', ')) : 'Vacío'}</small></button>`).join('')}</div>`);
+  }
+  function hojaLugar(espId) {
+    const esp = sede.espPorId[espId];
+    if (!esp) return;
+    ubicarAqui = null;
+    posSel = { rackId: esp.rackId, posicion: esp.posicion }; espSel = espId;
+    const ls = lineasDe(espId), lleno = ls.length >= maxEsp();
+    const b = [
+      puede('ubicar') && !lleno ? `<button class="btn btn-ent-solido btn-xl" onclick="hojaAgregarRotulo('${esc(espId)}')">Agregar un rótulo</button>` : '',
+      puede('carga_manual') && !lleno ? '<button class="btn btn-sec btn-xl" onclick="cerrarModal(); abrirCargaManual()">Cargar sin código de barras</button>' : '',
+      `<button class="btn btn-sec btn-xl" onclick="cerrarModal(); abrirPos('${esc(esp.rackId)}', ${esp.posicion}, '${esc(espId)}')">Ver en el plano</button>`
+    ].filter(Boolean);
+    abrirModal(`<div class="fila-sb"><span class="h2">${esc(cu(espId))}</span>${btnCerrar()}</div>
+      <span class="muted small mt8">${esc(lugarTxt(espId))}</span>
+      ${ls.length ? `<div class="lista-bp mt8">${ls.map(l => `<div class="pt-salida"><span class="col gap4 flex1" style="min-width:0"><b>${esc(l.nombre)}</b>
+        <span class="muted small">${cant(l)} · vence ${fFecha(l.vencimiento, true)}${l.lote ? ' · ' + esc(l.lote) : ''}</span></span></div>`).join('')}</div>`
+        : '<span class="small mt8">Este lugar está vacío.</span>'}
+      ${lleno ? `<p class="small txt-naranja mt8">Ya tiene ${ls.length} productos (el máximo es ${maxEsp()}).</p>` : ''}
+      <div class="hoja-acc mt16">${b.join('')}</div>`);
+  }
+  function hojaAgregarRotulo(espId) {
+    if (sinPermiso('ubicar')) return;
+    ubicarAqui = espId; ubicando = null; moviendo = null;
+    abrirModal(`<div class="fila-sb"><span class="h2">Agregar un rótulo</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Va en <b>${esc(cu(espId))}</b>. Escanea el código de barras del rótulo.</span>
+      <div class="mt12">${botonCamara('rotuloAqui', 'btn btn-pri btn-xl btn-acceso', 'Escanear rótulo')}</div>
+      <label class="lbl mt12" for="raTxt">O escanéalo con la pistola o escríbelo</label>
+      <input id="raTxt" class="campo" autocomplete="off" autocapitalize="characters" placeholder="Ej. E000123" onkeydown="if (event.key === 'Enter') { event.preventDefault(); rotuloAquiTexto(this.value); }">
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="hojaLugar('${esc(espId)}')">Volver</button>
+        <button class="btn btn-pri btn-xl" onclick="rotuloAquiTexto($('raTxt').value)">Buscar rótulo</button></div>`);
+    if (!('ontouchstart' in window)) $('raTxt').focus();
+  }
+  // Pequeño "+ Agregar EAN" para el producto que todavía no tiene (al ubicar un rótulo, rotular o cargar sin código)
+  function eanMiniHtml(pid) {
+    const p = prodDe(pid);
+    if (!p || p.codigoBarras || !puede('productos')) return '';
+    return `<details class="ean-mini" id="eanMiniCaja"><summary>+ Agregar EAN de este producto</summary>
+      <div class="fila gap8 mt8"><input id="eanMini" data-pid="${esc(pid)}" class="campo" style="flex:1;min-width:0" inputmode="numeric" autocomplete="off" placeholder="Escanea o escribe el EAN"
+        onkeydown="if (event.key === 'Enter') { event.preventDefault(); guardarEanMini('${esc(pid)}'); }">
+        ${botonCamara('eanMini', 'btn btn-sec btn-cam2')}
+        <button type="button" class="btn btn-pri" onclick="guardarEanMini('${esc(pid)}')">Guardar</button></div></details>`;
+  }
+  function guardarEanMini(pid) {
+    const inp = $('eanMini');
+    if (!inp || inp.dataset.guardando) return;
+    const ean = String(inp.value || '').replace(/\s+/g, '');
+    if (!/^\d{8,14}$/.test(ean)) return toast('El EAN debe tener entre 8 y 14 números. Escanéalo otra vez.', 'error');
+    inp.dataset.guardando = '1';
+    llamar('bdGuardarEan', { codigo: pid, ean, usuario: ses.nombre }).then(r => {
+      ini.productos = r.productos;
+      $('dlProductos').innerHTML = r.productos.map(x => `<option value="${esc(x.id + ' · ' + x.nombre)}">`).join('');
+      pitido(); toast(`EAN ${ean} guardado en ${pid}`, 'ok');
+      const caja = $('eanMiniCaja');
+      if (caja) caja.outerHTML = `<span class="small txt-verde">✓ EAN ${esc(ean)} guardado</span>`;
+    }).catch(e => { delete inp.dataset.guardando; toast(e.message, 'error'); });
+  }
+  function rotuloAquiTexto(t) {
+    const v = String(t || '').trim().toUpperCase();
+    if (!/^E\d{4,}$/.test(v)) return toast('Escanea el código de barras del rótulo (empieza por E)', 'error');
+    hojaRotuloCod(v);
+  }
+
   /* ================= Escaneo y selección ================= */
   // Acepta una posición (S1-R01-P003) o un espacio exacto (S1-R01-P003-2A)
   function escanear(txt) { return buscarCodigo(txt); }
@@ -8991,13 +9169,12 @@
     const cod = String(txt || '').trim().toUpperCase();
     if ($('scan')) $('scan').value = '';
     if (!cod) return toast('Escribe o escanea un código', 'error');
-    if (/^E\d{4,}$/.test(cod)) {
-      return llamar('bdEtiqueta', cod, ses.sedeId).then(empezarUbicar).catch(err => toast(err.message, 'error'));
-    }
+    if (/^E\d{4,}$/.test(cod)) return hojaRotuloCod(cod);
+    const hoja = !ubicando && !moviendo;
     const e = espDeTexto(cod);
-    if (e) { pitido(); return abrirPos(e.rackId, e.posicion, e.id); }
+    if (e) { pitido(); return hoja ? hojaLugar(e.id) : abrirPos(e.rackId, e.posicion, e.id); }
     const pp = posDeTexto(cod);
-    if (pp) { pitido(); return abrirPos(pp.rackId, pp.posicion); }
+    if (pp) { pitido(); return hoja ? hojaPos(pp.rackId, pp.posicion) : abrirPos(pp.rackId, pp.posicion); }
     const m = cod.match(/^(.+)-P(\d+)$/);
     if (m) {
       const r = sede.racks.find(x => x.id.toUpperCase() === m[1]);
@@ -9005,7 +9182,7 @@
       if (r && p >= 1 && p <= r.posiciones && !r.omitidas.includes(p)) { pitido(); return abrirPos(r.id, p); }
     }
     const prod = buscarProducto(String(txt).trim());
-    if (prod) { pitido(); return abrirFicha(prod.id); }
+    if (prod) { pitido(); return hojaProducto(prod); }
     toast(`No se encontró el código ${cod}`, 'error');
   }
 
