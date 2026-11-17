@@ -7342,6 +7342,8 @@
     const unds = ls.reduce((a, l) => a + l.unidades, 0);
     abrirModal(`<div class="fila-sb"><span class="h2">${esc(p.nombre)}</span>${btnCerrar()}</div>
       <span class="muted small">Código ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')} · ${p.undPorCaja} und/cj${prodAlm && prodAlm[cod] ? ' · Almacén ' + prodAlm[cod].map(esc).join(', ') : ''}</span>
+      <span class="small">${p.codigoBarras ? `EAN <b>${esc(p.codigoBarras)}</b>` : '<b class="txt-naranja">Sin EAN</b>'}
+        ${puede('productos') ? `<button class="link" onclick="hojaCtx = { p: prodDe('${esc(cod)}'), e: null, volver: () => abrirOpcionesProd('${esc(cod)}') }; hojaEan()">${p.codigoBarras ? 'Cambiar EAN' : '+ Agregar EAN'}</button>` : ''}</span>
       <span class="lbl mt12 fila gap8">Dónde está en ${esc(nombreSede(ses.sedeId))} ${ayudaHtml('Cada cuadro es un lugar del plano donde está este producto. Tócalo para abrir esa posición.')}</span>
       ${ls.length ? `<span class="muted small">${ls.length} lugar${ls.length === 1 ? '' : 'es'} · ${und(unds, p)}</span>
         <div class="lugares">${ls.map(l => `<button class="lugar-chip e2-${estadoDe([l])}" title="${esc(lugarTxt(l.ubicacionId))}"
@@ -9031,10 +9033,32 @@
     abrirModal(`<div class="fila-sb"><span class="h2">${e ? 'Rótulo ' + esc(e.id) : 'Producto'}</span>${btnCerrar()}</div>
       ${est ? `<span class="mt8"><span class="tag ${est[0]}">${esc(est[1])}</span></span>` : ''}
       <span class="nombre mt8">${esc(p.nombre)}</span>
-      <span class="muted small">Código ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')} · ${p.codigoBarras ? 'EAN ' + esc(p.codigoBarras) : '<b class="txt-naranja">Sin EAN</b>'}</span>
+      <span class="hoja-cod">Código Atlantic <b>${esc(p.id)}</b></span>
+      <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · ${p.codigoBarras ? 'EAN ' + esc(p.codigoBarras) : '<b class="txt-naranja">Sin EAN</b>'}</span>
       ${e ? `<span class="muted small">${e.tipo === 'PESO' ? kg(e.total) + ' · ' + e.cajas + ' cavas' : e.cajas + ' cj · ' + e.total + ' und'} · vence ${fCorta(e.vencimiento)}</span>`
         : `<span class="muted small">${ls.length ? `En ${ls.length} lugar${ls.length === 1 ? '' : 'es'} de esta sede · ${und(unds, p)}` : 'No está ubicado en esta sede'}</span>`}
-      ${b.length ? `<div class="hoja-acc mt16">${b.join('')}</div>` : '<p class="muted small mt16">No hay acciones para esto.</p>'}`);
+      ${b.length ? `<div class="hoja-acc mt16">${b.join('')}</div>` : '<p class="muted small mt16">No hay acciones para esto.</p>'}
+      ${e ? '' : `<span class="lbl mt16">Rótulos de este producto</span><div id="hojaRot"><div class="cargando">Buscando rótulos…</div></div>`}`);
+    if (!e) cargarRotulosProducto(p);
+  }
+  // Rótulos del producto (por ubicar o ubicados): al tocar uno se abre con lo que se puede hacer. Si no tiene, se ofrece crearlo.
+  function cargarRotulosProducto(p) {
+    llamar('bdRotulosProducto', p.id, ses.sedeId).then(l => {
+      if (!$('hojaRot') || !hojaCtx || hojaCtx.p.id !== p.id || hojaCtx.e) return;
+      hojaCtx.rots = l;
+      $('hojaRot').innerHTML = l.length ? `<div class="lista-bp mt8">${l.map((e, i) => `<button class="bp-item" onclick="hojaProducto(hojaCtx.p, hojaCtx.rots[${i}])">
+          <span class="col flex1 gap4" style="min-width:0"><b class="mono-c">${esc(e.id)}</b>
+            <span class="muted small">${e.tipo === 'PESO' ? kg(e.total) : e.cajas + ' cj · ' + e.total + ' und'} · vence ${fCorta(e.vencimiento)}</span></span>
+          ${e.estado === 'UBICADA' ? `<span class="tag ok">${esc(cu(e.ubicacion))}</span>` : '<span class="tag amar">Falta ubicar</span>'}</button>`).join('')}</div>`
+        : `<p class="small mt8">Este producto no tiene rótulos en esta sede.</p>
+          ${puede('rotular') ? `<button class="btn btn-pri btn-xl mt8" onclick="crearRotuloDe('${esc(p.id)}')">Crear rótulo</button>` : ''}`;
+    }).catch(err => { if ($('hojaRot')) $('hojaRot').innerHTML = `<p class="error small">${esc(err.message)}</p>`; });
+  }
+  function crearRotuloDe(pid) {
+    cerrarModal(); vista = 'rotulo'; pintarApp();
+    const c = $('rtCod');
+    if (c) { c.value = pid; c.dispatchEvent(new Event('input')); c.dispatchEvent(new Event('change')); }
+    window.scrollTo(0, 0);
   }
   function hojaAsignar() {
     const e = hojaCtx && hojaCtx.e;
@@ -9060,6 +9084,7 @@
     if (l && flujo && flujo.paso === 'origen') flujoOrigen(idxLinea(l));
   }
 
+  const hojaVolver = () => (hojaCtx && hojaCtx.volver ? hojaCtx.volver() : hojaProducto(hojaCtx.p, hojaCtx.e));
   // EAN: foto del código del fabricante (o la pistola / escribirlo) y se guarda en el producto
   function hojaEan() {
     const p = hojaCtx && hojaCtx.p;
@@ -9071,7 +9096,7 @@
       <label class="lbl mt12" for="eanTxt">O escanéalo con la pistola o escríbelo</label>
       <input id="eanTxt" class="campo" inputmode="numeric" autocomplete="off" placeholder="Ej. 7702011012345" onkeydown="if (event.key === 'Enter') guardarEan()">
       <p id="fErr" class="error" hidden></p>
-      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="hojaProducto(hojaCtx.p, hojaCtx.e)">Volver</button>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="hojaVolver()">Volver</button>
         <button id="eanOk" class="btn btn-pri btn-xl" onclick="guardarEan()">Guardar EAN</button></div>`);
     if (!('ontouchstart' in window)) $('eanTxt').focus();
   }
@@ -9085,7 +9110,9 @@
       ini.productos = r.productos;
       $('dlProductos').innerHTML = r.productos.map(x => `<option value="${esc(x.id + ' · ' + x.nombre)}">`).join('');
       pitido(); toast(`EAN ${ean} guardado en ${p.id}`, 'ok');
-      hojaProducto(prodDe(p.id) || p, hojaCtx.e);
+      hojaCtx.p = prodDe(p.id) || p;
+      if ($('prodLista') && typeof listaProdHtml === 'function') $('prodLista').innerHTML = listaProdHtml();
+      hojaVolver();
     }).catch(e => { b.disabled = false; b.textContent = 'Guardar EAN'; errForm(e.message); });
   }
 
@@ -9150,6 +9177,7 @@
       ini.productos = r.productos;
       $('dlProductos').innerHTML = r.productos.map(x => `<option value="${esc(x.id + ' · ' + x.nombre)}">`).join('');
       pitido(); toast(`EAN ${ean} guardado en ${pid}`, 'ok');
+      if ($('prodLista')) $('prodLista').innerHTML = listaProdHtml();
       const caja = $('eanMiniCaja');
       if (caja) caja.outerHTML = `<span class="small txt-verde">✓ EAN ${esc(ean)} guardado</span>`;
     }).catch(e => { delete inp.dataset.guardando; toast(e.message, 'error'); });
