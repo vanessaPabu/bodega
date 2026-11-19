@@ -78,6 +78,8 @@
   /* ---------- Botones ---------- */
   .btn { min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid transparent; font-size: 15px; font-weight: 600; }
   .btn-xl { min-height: 56px; font-size: 17px; border-radius: 12px; }
+  /* Botón grande para escoger archivo: el texto centrado */
+  label.btn.btn-xl { display: flex; align-items: center; justify-content: center; text-align: center; cursor: pointer; }
   .btn-pri { background: var(--pri); color: var(--pri-tx); }
   .btn-sec { background: var(--card); color: var(--txt); border-color: var(--borde2); }
   .btn-sal { background: var(--sal-bg); color: var(--sal-tx); border-color: var(--sal-bd); }
@@ -222,6 +224,7 @@
   .pz-lbl small { font-size: 10px; }
   .pr .pasillo { flex: 1; }
   .muro { position: absolute; background: #5A6673; border-radius: 2px; pointer-events: none; }
+  .pasillo-area { position: absolute; border: 2px dashed #5A6673; border-radius: 4px; pointer-events: none; display: flex; align-items: center; justify-content: center; background: transparent; }
   :root[data-tema="oscuro"] .muro { background: #E8EDF2; }
   .pr .fila-lbl { position: absolute; top: -13px; left: 0; right: 0; text-align: center; font-size: 10px; font-weight: 700; color: var(--txt); pointer-events: none; white-space: nowrap; }
   .colocando .plano { cursor: crosshair; }
@@ -545,6 +548,14 @@
   .er-n { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 800; color: var(--muted); white-space: nowrap; pointer-events: none; }
   .em { position: absolute; z-index: 4; height: 6px; background: #4a5563; border-radius: 3px; transform-origin: 0 50%; }
   .em.sel { background: var(--pri); }
+  /* Pasillos: recuadro rayado con su nombre (debajo de las filas) */
+  .ep { position: absolute; z-index: 2; border: 2px dashed #5A6673; border-radius: 4px; display: flex; align-items: center; justify-content: center; overflow: hidden; background: transparent; }
+  .ep.sel { border-color: var(--pri); box-shadow: 0 0 0 3px var(--pri); }
+  .ep span, .pasillo-area span { font-size: 11px; font-weight: 800; white-space: nowrap; background: var(--card); border: 1px solid; padding: 1px 6px; border-radius: 4px; pointer-events: none; }
+  .ep span.vert, .pasillo-area span.vert { transform: rotate(-90deg); }
+  .er.en-pas { outline: 3px solid var(--pri); outline-offset: 1px; }
+  .ed-pas-filas { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow: auto; padding: 6px 8px; border: 1px solid var(--borde); border-radius: 8px; }
+  .ed-pas-filas input { width: 18px; height: 18px; }
   .ed-h { position: absolute; z-index: 21; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 3px solid var(--pri); cursor: nwse-resize !important; }
   .ed-prev { position: absolute; z-index: 22; border: 2px dashed var(--pri); background: rgba(30,100,200,.08); pointer-events: none; }
   .ed-prev.linea { height: 4px; border: none; background: var(--pri); transform-origin: 0 50%; }
@@ -698,8 +709,10 @@
   .cp-sedes .cp-barra { display: block; margin: 4px auto 0; max-width: 140px; }
   @media (max-width: 600px) { .tabla.cp-sedes { min-width: 0; font-size: 13px; } .tabla.cp-sedes th, .tabla.cp-sedes td { white-space: normal; padding: 6px 3px; } .tabla.cp-sedes th { font-size: 11px; } .tabla.cp-sedes .cp-barra { max-width: 50px; min-width: 0; } }
   .cp-sedes-tot td { border-top: 2px solid var(--borde); background: rgba(26,95,208,.05); }
-  .inv-filtros { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 2fr) auto; gap: 10px; }
-  @media (max-width: 760px) { .inv-filtros { grid-template-columns: 1fr; } }
+  .inv-filtros { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .inv-filtros > div { min-width: 0; }
+  .inv-filtros .campo { width: 100%; }
+  @media (max-width: 760px) { .inv-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); } .inv-filtros .inv-buscar { grid-column: 1 / -1; } }
   .inv-res { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
   .inv-res > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--card); }
   .inv-res b { font-size: 20px; }
@@ -855,6 +868,41 @@
   .th-ord.on { color: #1a5fd0; }
   .inv-sede { font-weight: 400; font-size: 11px; opacity: .75; white-space: nowrap; }
   .inv-tabla td.g-ae, .inv-tabla th.g-ae { background: rgba(232,163,61,.07); }
+  /* Columnas de reconfirmación (al lado de cada una) */
+  .inv-tabla td.g-rc, .inv-tabla th.g-rc { background: rgba(197,90,17,.10); }
+  /* Pasillos del inventario: «Faltan» centrado */
+  .cp-av th.cp-faltan, .cp-av td.cp-faltan { text-align: center; }
+  .cp-av .cp-alm-c { display: none; }
+  @media (max-width: 600px) {
+    .cp-av .cp-alm-l, .cp-av .cp-ult { display: none; }
+    .cp-av .cp-alm-c { display: inline; }
+    .tabla.cp-av { min-width: 0; } .tabla.cp-av th, .tabla.cp-av td { padding: 6px 4px; }
+    .tabla.cp-av .cp-barra { max-width: 50px; min-width: 0; }
+  }
+  /* Reconfirmación de inventario: lista para contar */
+  .rc-filtros { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .rc-filtros > div { min-width: 0; } .rc-filtros .campo { width: 100%; }
+  .rc-tabla td { vertical-align: middle; }
+  .rc-tabla .rc-prod { white-space: normal; min-width: 200px; }
+  .rc-tabla .rc-in { width: 130px; font-size: 18px; font-weight: 700; text-align: center; min-height: 44px; }
+  .rc-tabla tr.rc-hecho td { background: rgba(46,125,50,.06); }
+  .rc-tabla .rc-est { width: 40px; text-align: center; font-size: 18px; }
+  .rc-listo { padding: 12px 14px; border-radius: 10px; background: #E6F4EA; color: #1E6B34; border: 1px solid #A8D5B5; }
+  @media (max-width: 760px) {
+    .rc-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rc-filtros .inv-buscar { grid-column: 1 / -1; }
+    .rc-tabla thead { display: none; }
+    .rc-tabla, .rc-tabla tbody { display: block; min-width: 0; }
+    .tabla-wrap:has(> .rc-tabla) { border: 0; background: transparent; overflow: visible; }
+    .rc-tabla tr { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px 8px; padding: 10px; border: 1px solid var(--borde, #d8dde3) !important; border-radius: 10px; margin-bottom: 8px; background: var(--card, #fff); }
+    .rc-tabla td { display: block; padding: 0; border: 0; white-space: normal; min-width: 0; }
+    .rc-tabla td.rc-prod { grid-column: 1 / -1; order: 0; }
+    .rc-tabla td[data-l="Código"] { order: 1; } .rc-tabla td[data-l="Almacén"] { order: 2; } .rc-tabla td[data-l="Pasillo"] { order: 3; }
+    .rc-tabla td[data-l="Rack"] { order: 4; grid-column: 1 / -1; }
+    .rc-tabla td[data-l]:not(.rc-prod)::before { content: attr(data-l); display: block; font-size: 12px; opacity: .7; }
+    .rc-tabla td.rc-cant { order: 5; grid-column: 1 / 3; text-align: left; }
+    .rc-tabla td.rc-cant .rc-in { width: 100%; }
+    .rc-tabla td.rc-est { order: 6; align-self: end; padding-bottom: 10px; }
+  }
   .inv-alm-btn { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--borde); background: var(--card); color: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
   .inv-alm-btn[aria-expanded="true"] { border-color: #1a5fd0; color: #1a5fd0; }
   .inv-alm-txt { display: block; font-size: 11px; opacity: .65; }
@@ -995,7 +1043,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-C3zq0Rac.js"></script>
+  <script type="module" crossorigin src="./assets/index-B3P_AnmE.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>
