@@ -125,7 +125,10 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
   }
 
+  // Sonido de la app (al escanear, guardar, avisos): se apaga en Configuración → Ajustes
+  const conSonido = () => !(ini && ini.parametros && ini.parametros.sonido === false);
   function pitido() {
+    if (!conSonido()) return;
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const o = ctx.createOscillator();
@@ -1490,13 +1493,91 @@
       .catch(e => { rcLista = []; toast(e.message, 'error'); });
   }
 
+  /* ----- Proveedores: al crear o editar la factura solo se escoge uno de la lista (o se crea) ----- */
+  let provLista = null;   // [{ nombre, nit }] · false si todavía no se corrió el script 37
+  function asegurarProv(luego) {
+    if (provLista !== null) return luego && luego();
+    llamar('bdProveedores').then(l => { provLista = l === null ? false : l; }).catch(() => { provLista = false; }).finally(() => luego && luego());
+  }
+  const provNombres = () => provLista ? provLista.map(p => p.nombre) : [...new Set((rcLista || []).map(r => r.proveedor))];
+  const provDe = v => provLista && provLista.find(p => p.nombre.toUpperCase() === String(v || '').trim().toUpperCase());
+  // Campo de proveedor: con lista, solo deja escoger de ella; si no está, ofrece crearlo
+  function provCampoHtml(id, valor) {
+    const hay = provLista && provLista.length;
+    return `<div class="mt12"><label class="lbl fila gap8" for="${id}">Proveedor ${hay ? ayudaHtml('Escoge el proveedor de la lista. Si no está, créalo con el botón que aparece debajo.') : ''}</label>
+      <input id="${id}" class="campo" list="dl${id}" autocomplete="off" value="${esc(valor)}" oninput="provRevisar('${id}')">
+      <datalist id="dl${id}">${provNombres().map(p => `<option value="${esc(p)}">`).join('')}</datalist>
+      <div id="${id}Aviso" class="mt4"></div>
+      ${puede('rc_facturas') && provLista !== false ? `<button class="link mt4" style="align-self:flex-start" onclick="abrirCargaProv()">${hay ? 'Actualizar' : 'Cargar'} lista de proveedores (Excel)</button>` : ''}</div>`;
+  }
+  function provRevisar(id) {
+    const el = $(id), av = $(id + 'Aviso');
+    if (!el || !av) return true;
+    const v = el.value.trim();
+    if (!provLista || !provLista.length || !v || provDe(v)) { av.innerHTML = ''; return true; }
+    av.innerHTML = `<span class="small txt-naranja">«${esc(v)}» no está en la lista de proveedores.</span>
+      ${puede('rc_facturas') ? ` <button class="btn btn-sec btn-mini" onclick="crearProveedor('${id}')">+ Crear proveedor ${esc(v.toUpperCase())}</button>` : ''}`;
+    return false;
+  }
+  function crearProveedor(id) {
+    const v = $(id).value.trim();
+    if (!v) return;
+    llamar('bdCrearProveedor', { nombre: v, usuario: ses.nombre }).then(l => {
+      provLista = l; $(id).value = v.toUpperCase();
+      const dl = $('dl' + id); if (dl) dl.innerHTML = provNombres().map(p => `<option value="${esc(p)}">`).join('');
+      provRevisar(id); toast(`Proveedor ${v.toUpperCase()} creado`, 'ok');
+    }).catch(e => errForm(e.message));
+  }
+  // Cargar la lista de proveedores desde Excel (la columna del nombre; el NIT es opcional). Solo agrega, no borra.
+  let provVolver = null;
+  function abrirCargaProv() {
+    provVolver = $('efFac') ? 'editar' : 'nueva';
+    abrirModal(`<div class="fila-sb"><span class="h2 fila gap8">Lista de proveedores ${ayudaHtml('Sube un Excel con una columna PROVEEDOR (o NOMBRE / RAZÓN SOCIAL) y, si quieres, otra con el NIT. Se agregan los que no están; no se borra ninguno.')}</span>${btnCerrar()}</div>
+      <label for="pvArch" class="btn btn-pri btn-xl mt12" role="button" tabindex="0">Escoger el Excel</label>
+      <input id="pvArch" type="file" accept=".xlsx,.xls,.csv" class="oculto">
+      <div id="pvCaja" class="mt12"></div><p id="fErr" class="error" hidden></p>
+      <button class="btn btn-sec btn-xl mt12" onclick="provVolverA()">Volver</button>`);
+    $('pvArch').addEventListener('change', ev => { const f = ev.target.files[0]; if (f) leerProv(f); ev.target.value = ''; });
+  }
+  function provVolverA() { if (provVolver === 'editar' && rcAct) editarFactura(); else nuevaRecepcion(); }
+  let pvTmp = [];
+  function leerProv(f) {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        let filas;
+        if (window.XLSX && !/\.csv$/i.test(f.name)) {
+          const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+          filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '' });
+        } else filas = new TextDecoder('utf-8').decode(r.result).split(/\r?\n/).map(l => l.split(/[;\t]/).map(c => c.replace(/^"|"$/g, '').trim()));
+        const t = v => sinTilde(String(v || '')).toUpperCase().trim();
+        let iCab = filas.findIndex(x => x.some(c => /PROVEEDOR|RAZON SOCIAL|^NOMBRE/.test(t(c))));
+        let cNom = 0, cNit = -1;
+        if (iCab >= 0) { const cab = filas[iCab].map(t); cNom = cab.findIndex(c => /PROVEEDOR|RAZON SOCIAL|^NOMBRE/.test(c)); cNit = cab.findIndex(c => /NIT|IDENTIFICACION/.test(c)); }
+        pvTmp = []; const vistos = new Set();
+        filas.slice(iCab + 1).forEach(x => { const n = String(x[cNom] ?? '').trim().replace(/\s+/g, ' '); if (!n || vistos.has(n.toUpperCase())) return; vistos.add(n.toUpperCase()); pvTmp.push({ nombre: n, nit: cNit >= 0 ? String(x[cNit] ?? '').trim() : '' }); });
+        const ya = new Set((provLista || []).map(p => p.nombre.toUpperCase())), nuevos = pvTmp.filter(p => !ya.has(p.nombre.toUpperCase()));
+        $('pvCaja').innerHTML = `<div class="info"><b>${pvTmp.length}</b> proveedores en el archivo · <b>${nuevos.length}</b> nuevos</div>
+          ${nuevos.length ? `<span class="muted small mt8">${nuevos.slice(0, 15).map(p => esc(p.nombre)).join(' · ')}${nuevos.length > 15 ? '…' : ''}</span>
+          <button id="pvOk" class="btn btn-pri btn-xl mt12" onclick="guardarProv()">Agregar ${nuevos.length} proveedor${nuevos.length === 1 ? '' : 'es'}</button>` : '<span class="muted small mt8">Todos ya están en la lista.</span>'}`;
+      } catch (e) { errForm('No se pudo leer el archivo: ' + e.message); }
+    };
+    r.readAsArrayBuffer(f);
+  }
+  function guardarProv() {
+    const b = $('pvOk'); b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdCargarProveedores', { filas: pvTmp, usuario: ses.nombre }).then(r => {
+      provLista = r.proveedores; toast(`Listo: ${r.agregados} proveedores agregados`, 'ok'); provVolverA();
+    }).catch(e => { b.disabled = false; b.textContent = 'Agregar'; errForm(e.message); });
+  }
+
   function nuevaRecepcion() {
     if (sinPermiso('rc_facturas')) return;
-    const provs = [...new Set((rcLista || []).map(r => r.proveedor))];
+    if (provLista === null) return asegurarProv(nuevaRecepcion);
+    const def = !provLista || !provLista.length || provDe('NUTRESA') ? 'NUTRESA' : '';
     abrirModal(`<div class="fila-sb"><span class="h2">Nueva factura</span>${btnCerrar()}</div>
       <div class="mt12"><label class="lbl" for="nfFac">Número de factura</label><input id="nfFac" class="campo" autocomplete="off"></div>
-      <div class="mt12"><label class="lbl" for="nfProv">Proveedor</label><input id="nfProv" class="campo" list="dlProv" autocomplete="off" value="NUTRESA">
-        <datalist id="dlProv">${provs.map(p => `<option value="${esc(p)}">`).join('')}</datalist></div>
+      ${provCampoHtml('nfProv', def)}
       <div class="mt12"><label class="lbl" for="nfFecha">Fecha de ingreso</label><input id="nfFecha" type="date" class="campo" value="${hoyISO()}"></div>
       <p id="fErr" class="error" hidden></p>
       <button id="nfOk" class="btn btn-pri btn-xl mt16" onclick="crearRecepcion()">Crear factura</button>`);
@@ -1504,6 +1585,7 @@
   }
 
   function crearRecepcion() {
+    if (!provRevisar('nfProv')) return errForm('Escoge un proveedor de la lista o créalo.');
     const b = $('nfOk'); b.disabled = true; b.textContent = 'Creando…';
     llamar('bdCrearRecepcion', { factura: $('nfFac').value, proveedor: $('nfProv').value, fecha: $('nfFecha').value,
       sedeId: ses.sedeId, usuario: ses.nombre })
@@ -1512,7 +1594,7 @@
   }
 
   function abrirRecepcion(id) {
-    llamar('bdRecepcion', id).then(r => { rcAct = r; rcEdit = null; rcTab = 'recibir'; vista = 'recibidor'; pintarApp(); window.scrollTo(0, 0); })
+    llamar('bdRecepcion', id).then(r => { rcAct = r; rcEdit = null; rcPendQ = ''; rcTab = 'recibir'; vista = 'recibidor'; pintarApp(); window.scrollTo(0, 0); })
       .catch(e => toast(e.message, 'error'));
   }
 
@@ -1568,14 +1650,9 @@
           ${abierta && pend.length && puede('rc_lista') ? `<span class="fila gap8 wrap-f">
             <button class="btn btn-sec" onclick="abrirLista()">+ Agregar a la lista</button>
             <button class="btn btn-sec txt-rojo" onclick="vaciarLista()">Borrar toda la lista</button></span>` : ''}</div>
-        ${pend.length ? `<div class="lista-bp">${pend.map(i => `<div class="pend-item">
-            <span class="chip">${esc(i.codigo)}</span>
-            <span class="col gap4 flex1" style="min-width:0"><span class="nombre">${esc(i.producto)}</span>
-              <span class="muted small">Debe llegar <b>${nfmt(i.cantFactura)} ${unidadTxt(i.unidad, i.cantFactura)}</b></span></span>
-            ${abierta ? (puede('recibir') || puede('rc_lista') ? `<span class="fila gap4">${puede('recibir') ? `<button class="btn btn-pri" onclick="recibirDeLista('${i.id}')">Recibir</button>` : ''}
-              ${puede('rc_lista') ? `<button class="icono icono-claro" aria-label="Quitar de la lista" onclick="quitarDeLista('${i.id}')">${ICONOS.cerrar}</button>` : ''}</span>` : '<span class="tag amar">Por recibir</span>') : '<span class="tag venc">No llegó</span>'}
-          </div>`).join('')}</div>`
-          : `<span class="muted small">${r.items.some(i => i.cantFactura !== null) ? 'No hay nada pendiente por recibir. Si falta algo de la factura, agrégalo a la lista.'
+        ${pend.length > 1 ? `<div class="rc-pend-buscar">${campoConCamara(`<input id="rcPendQ" class="campo" type="search" autocomplete="off" spellcheck="false" placeholder="Buscar por código Nutresa, Atlantic, nombre o EAN" value="${esc(rcPendQ)}" aria-label="Buscar en lo que debe llegar" oninput="rcPendQ=this.value; rcPintarPend()">`, 'rcPendQ')}</div>` : ''}
+        ${pend.length ? `<div class="lista-bp" id="rcPendLista">${rcPendHtml(pend, abierta)}</div>` : ''}
+        ${pend.length ? '' : `<span class="muted small">${r.items.some(i => i.cantFactura !== null) ? 'No hay nada pendiente por recibir. Si falta algo de la factura, agrégalo a la lista.'
               : 'Copia aquí lo que dice la factura (código y cantidad) para que el personal solo llene lo que llegó.'}</span>
             ${abierta && puede('rc_lista') ? '<button class="btn btn-pri btn-xl" onclick="abrirLista()">Copiar lista de la factura</button>' : ''}`}
       </div>
@@ -1598,7 +1675,7 @@
                 ${puede('rc_fotos') || i.fotos ? `<button class="btn ${i.fotos ? 'btn-sec' : 'btn-pri'} btn-mini" onclick="abrirEvidencias('${r.id}', '${i.id}')">${ICONOS.camara}<span>${i.fotos ? `Fotos (${i.fotos})` : 'Foto'}</span></button>` : ''}
                 ${i.etiquetas.length && (puede('recibir') || puede('rotular')) ? `<button class="btn btn-sec btn-mini" onclick="imprimirDeItem('${i.id}')">Imprimir</button>` : ''}
                 ${abierta && puede('rc_corregir') ? `<button class="btn btn-sec btn-mini" onclick="corregirItem('${i.id}')">Corregir</button>` : ''}
-                ${abierta && puede('recibir') ? `<button class="btn btn-sec btn-mini" onclick="otroVencimiento('${esc(i.codigo)}')">+ Otro venc.</button>` : ''}</span>
+                ${abierta && puede('recibir') ? `<button class="btn btn-sec btn-mini" onclick="otroVencimiento('${esc(i.codigo)}')">+ Agregar más</button>` : ''}</span>
             </div>`).join('')}
           </div>`;
         }).join('') : '<p class="muted">Todavía no has recibido productos en esta factura.</p>'}
@@ -1608,16 +1685,76 @@
         : `<button class="btn btn-sec btn-xl btn-cerrar-fac" onclick="estadoRecepcion('ABIERTA')">Reabrir factura</button>`}`;
   }
 
+  // Lo que debe llegar, con buscador (código Nutresa, Atlantic, nombre o EAN)
+  let rcPendQ = '';
+  function rcPendHtml(pend, abierta) {
+    const t = rcPendQ.trim(), pr = t && buscarProducto(t), pal = sinTilde(t).split(/\s+/).filter(Boolean);
+    const l = pend.filter(i => { if (!t) return true; if (pr) return i.codigo === pr.id; const q = prodDe(i.codigo) || {};
+      return pal.every(w => sinTilde(`${i.codigo} ${i.producto} ${q.codigoNutresa || ''} ${q.codigoBarras || ''} ${q.ean2 || ''} ${q.ean14 || ''}`).includes(w)); });
+    if (!l.length) return `<p class="muted small">${pr ? `${esc(pr.nombre)} no está en lo que debe llegar. Si llegó, recíbelo arriba.` : 'Ningún producto de la lista coincide con la búsqueda.'}</p>`;
+    return l.map(i => { const q = prodDe(i.codigo) || {}; return `<div class="pend-item">
+            <span class="chip">${esc(i.codigo)}</span>
+            <span class="col gap4 flex1" style="min-width:0"><span class="nombre">${esc(i.producto)}</span>
+              <span class="muted small">${q.codigoNutresa ? `Nutresa ${esc(q.codigoNutresa)} · ` : ''}Debe llegar <b>${nfmt(i.cantFactura)} ${unidadTxt(i.unidad, i.cantFactura)}</b></span></span>
+            ${abierta ? (puede('recibir') || puede('rc_lista') ? `<span class="fila gap4">${puede('recibir') ? `<button class="btn btn-pri" onclick="recibirDeLista('${i.id}')">Recibir</button>` : ''}
+              ${puede('rc_lista') ? `<button class="icono icono-claro" aria-label="Quitar de la lista" onclick="quitarDeLista('${i.id}')">${ICONOS.cerrar}</button>` : ''}</span>` : '<span class="tag amar">Por recibir</span>') : '<span class="tag venc">No llegó</span>'}
+          </div>`; }).join('');
+  }
+  function rcPintarPend() {
+    const c = $('rcPendLista');
+    if (c && rcAct) c.innerHTML = rcPendHtml(rcAct.items.filter(i => i.pendiente), rcAct.estado === 'ABIERTA');
+  }
+
   /* ----- Recibir un producto por partes (cada parte = una estiba = un rótulo) ----- */
   // Borrador del producto que se está bajando; se guarda en el celular por si se recarga la página
   let rb = null;
   const guardarRb = () => guardarLS('rcBorrador', rb);
 
+  const mismoTxt = (a, b) => String(a || '').trim().toUpperCase() === String(b || '').trim().toUpperCase();
+  // Unidad en que llega un producto: la del proveedor (UM proveedor) y, si no tiene, la unidad de medida del producto
+  function umRecibo(p) {
+    const u = sinTilde((p && (p.umProveedor || p.unidadMedida)) || '').toUpperCase().trim();
+    if (/^K/.test(u)) return 'KG';
+    if (/^(UN|UND|UNIDAD|U$|ST|PZ|PAQ|BOL|BL)/.test(u)) return 'UND';
+    return 'CJ';
+  }
+  // Lotes de este producto: los que ya se guardaron en la factura y los que van en este borrador
+  function rbLotes(cod) {
+    const l = [];
+    const poner = (lote, venc, guardado) => { if (lote && venc && !l.some(x => mismoTxt(x.lote, lote) && x.venc === venc)) l.push({ lote, venc, guardado }); };
+    rb.partes.forEach(x => poner(x.lote, x.venc, false));
+    rcAct.items.filter(i => i.codigo === cod && !i.pendiente).forEach(i => poner(i.lote, i.vencimiento, true));
+    return l;
+  }
+  // Partes anotadas, agrupadas por lote y vencimiento
+  function rbGrupos() {
+    const g = [];
+    rb.partes.forEach((x, i) => {
+      let y = g.find(z => mismoTxt(z.lote, x.lote) && z.venc === x.venc);
+      if (!y) g.push(y = { lote: x.lote || '', venc: x.venc || '', partes: [], idx: [] });
+      y.partes.push(x); y.idx.push(i);
+    });
+    return g;
+  }
+  function rbGruposHtml() {
+    return rbGrupos().map(g => {
+      const tot = rb.tipo === 'PESO' ? kg(g.partes.reduce((a, x) => a + x.neto, 0)) : `${g.partes.reduce((a, x) => a + x.cajas, 0)} cj · ${g.partes.reduce((a, x) => a + x.cajas * x.und, 0)} und`;
+      return `<div class="rb-lote"><div class="fila-sb gap8"><b>Lote ${esc(g.lote || '—')} · vence ${fFecha(g.venc)}</b><span class="small">${tot}</span></div>
+        <div class="lista-bp">${g.partes.map((x, k) => { const i = g.idx[k]; return `<div class="estiba">
+        <span class="chip">${i + 1}</span>
+        <span class="col gap4 flex1" style="min-width:0">${rb.tipo === 'PESO'
+          ? `<b>${kg(x.neto)}</b><span class="muted small">${x.nc} cavas × ${x.pc} kg · estiba ${x.pe} kg · báscula ${x.pb} kg</span>`
+          : `<b>${x.cajas} cj × ${x.und} = ${x.cajas * x.und} und</b>`}</span>
+        ${rb.final ? '' : `<button class="icono icono-claro" aria-label="Quitar parte ${i + 1}" onclick="rb.partes.splice(${i}, 1); guardarRb(); pintarRbForm()">${ICONOS.cerrar}</button>`}
+      </div>`; }).join('')}</div></div>`;
+    }).join('');
+  }
+
   function borradorNuevo(codigo) {
     const p = codigo ? prodDe(codigo) : null;
-    const peso = p && (p.unidadMedida || '').toUpperCase() === 'KG';
-    const b = { recId: rcAct.id, codigo: p ? p.id : '', tipo: peso ? 'PESO' : 'NORMAL', fac: '', unidadFac: peso ? 'KG' : 'CJ',
-      partes: [], pc: '', pe: '', final: false };
+    const um = umRecibo(p), peso = um === 'KG';
+    const b = { recId: rcAct.id, codigo: p ? p.id : '', tipo: peso ? 'PESO' : 'NORMAL', fac: '', unidadFac: um,
+      partes: [], pc: '', pe: '', final: false, lote: '', venc: '' };
     // Si el producto está en la lista de la factura, se llena esa línea
     const pend = p && rcAct.items.find(i => i.pendiente && i.codigo === p.id);
     if (pend) {
@@ -1661,13 +1798,15 @@
         ${campoConCamara('<input id="rcProd" class="campo" list="dlProductos" autocomplete="off">', 'rcProd')}
         <p id="fErr" class="error" hidden></p>`;
       const c = $('rcProd');
-      const elegir = () => { const pr = buscarProducto(c.value); if (pr) { rb = borradorNuevo(pr.id); guardarRb(); pintarRbForm(); } };
-      c.addEventListener('change', elegir);
-      c.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); elegir(); } });
+      const elegir = enter => rcElegirProd(c.value, enter);
+      c.addEventListener('change', () => elegir(false));
+      c.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); elegir(true); } });
       return;
     }
     const previas = facturaPrevia(p.id);
     const n = rb.partes.length + 1;
+    const lotes = rbLotes(p.id);
+    const loteSel = lotes.find(l => mismoTxt(l.lote, rb.lote) && l.venc === rb.venc);
     caja.innerHTML = `
       <div class="fila-sb inicio gap8"><div class="fila gap10 inicio" style="min-width:0"><span class="chip">${esc(p.id)}</span>
         <span class="nombre">${esc(p.nombre)}</span></div>
@@ -1675,20 +1814,28 @@
 
       ${pendDeRb() ? `<div class="total-op"><span>Según la factura debe llegar <b>${nfmt(pendDeRb().cantFactura)} ${unidadTxt(pendDeRb().unidad, pendDeRb().cantFactura)}</b>. Anota lo que llegó de verdad.</span></div>`
         : previas.length ? `<span class="muted small">Factura de este producto: <b>${nfmt(previas.reduce((a, i) => a + i.cantFactura, 0))} ${esc(previas[0].unidad || '')}</b> (ya escrita en la otra línea)</span>`
-        : `<div><label class="lbl" for="rbFac">2. ¿Cuánto debe llegar? (según factura)</label>
+        : `<div><label class="lbl" for="rbFac">¿Cuánto debe llegar? (según factura)</label>
         <div class="fila gap8"><input id="rbFac" class="campo flex1" type="number" inputmode="decimal" step="any" min="0" value="${esc(rb.fac)}">
           <select id="rbUF" class="campo" style="width:auto" ${rb.partes.length ? 'disabled' : ''}>${[['CJ', 'Cajas'], ['UND', 'Unidades'], ['KG', 'Kilogramos']]
             .map(([v, t]) => `<option value="${v}" ${rb.unidadFac === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
         </div></div>`}
 
-      <span class="lbl">3. Tipo de mercancía</span>
-      <div class="seg" role="group" aria-label="Tipo de mercancía">
-        <button class="${rb.tipo === 'NORMAL' ? 'on' : ''}" onclick="rbTipo('NORMAL')" ${rb.partes.length ? 'disabled' : ''}>Normal</button>
-        <button class="${rb.tipo === 'PESO' ? 'on' : ''}" onclick="rbTipo('PESO')" ${rb.partes.length ? 'disabled' : ''}>Peso variable</button>
-      </div>
-
       ${rb.final ? '' : `<div class="peso-caja">
         <span class="h3">Parte ${n}</span>
+        <span class="lbl">1. Lote y vencimiento ${ayudaHtml('Si lo que llegó tiene varios vencimientos, agrega una parte por cada lote. Para sumarle a un lote que ya anotaste (o que ya se guardó en esta factura), escógelo en la lista.')}</span>
+        ${lotes.length ? `<select id="rbLoteSel" class="campo" aria-label="Lote">
+            ${lotes.map((l, k) => `<option value="${k}" ${loteSel === l ? 'selected' : ''}>Lote ${esc(l.lote)} · vence ${fFecha(l.venc)}${l.guardado ? ' (ya guardado)' : ''}</option>`).join('')}
+            <option value="nuevo" ${loteSel ? '' : 'selected'}>+ Otro lote (nuevo)</option></select>` : ''}
+        <div class="dos" id="rbLoteNuevo" ${loteSel ? 'hidden' : ''}>
+          <div><label class="lbl" for="rbLote">Lote</label><input id="rbLote" class="campo" autocomplete="off" value="${esc(loteSel ? '' : rb.lote || '')}"></div>
+          <div><label class="lbl" for="rbVen">Fecha de vencimiento</label><input id="rbVen" type="date" class="campo" value="${esc(loteSel ? '' : rb.venc || '')}"></div>
+        </div>
+        <span class="lbl">2. Tipo de mercancía</span>
+        <div class="seg" role="group" aria-label="Tipo de mercancía">
+          <button class="${rb.tipo === 'NORMAL' ? 'on' : ''}" onclick="rbTipo('NORMAL')" ${rb.partes.length ? 'disabled' : ''}>Normal</button>
+          <button class="${rb.tipo === 'PESO' ? 'on' : ''}" onclick="rbTipo('PESO')" ${rb.partes.length ? 'disabled' : ''}>Peso variable</button>
+        </div>
+        <span class="lbl">3. Cantidad</span>
         ${rb.tipo === 'NORMAL' ? `<div class="dos">
             <div><label class="lbl" for="rbCj">Número de cajas</label><input id="rbCj" class="campo" type="number" inputmode="numeric" min="1"></div>
             <div><label class="lbl" for="rbUnd">Unidades por caja</label><input id="rbUnd" class="campo" type="number" inputmode="numeric" min="1" value="${rb.undX || p.undPorCaja}"></div>
@@ -1700,30 +1847,20 @@
             <div><label class="lbl" for="rbPB">Peso en báscula (kg)</label><input id="rbPB" class="campo" type="number" inputmode="decimal" step="any" min="0"></div>
           </div>`}
         <div id="rbCalc" class="calc"></div>
+        <p id="fErr" class="error" hidden></p>
         <button class="btn btn-pri btn-xl" onclick="agregarParte()">+ Agregar parte ${n}</button>
       </div>`}
 
-      ${rb.partes.length ? `<div class="lista-bp">${rb.partes.map((x, i) => `<div class="estiba">
-        <span class="chip">${i + 1}</span>
-        <span class="col gap4 flex1" style="min-width:0">${rb.tipo === 'PESO'
-          ? `<b>${kg(x.neto)}</b><span class="muted small">${x.nc} cavas × ${x.pc} kg · estiba ${x.pe} kg · báscula ${x.pb} kg</span>`
-          : `<b>${x.cajas} cj × ${x.und} = ${x.cajas * x.und} und</b>`}</span>
-        ${rb.final ? '' : `<button class="icono icono-claro" aria-label="Quitar parte ${i + 1}" onclick="rb.partes.splice(${i}, 1); guardarRb(); pintarRbForm()">${ICONOS.cerrar}</button>`}
-      </div>`).join('')}</div>` : ''}
+      ${rb.partes.length ? rbGruposHtml() : ''}
 
       <div id="rbResumen" class="total-op" aria-live="polite">${resumenRbHtml()}</div>
 
       ${rb.partes.length && !rb.final ? `<button class="btn btn-ent btn-xl" onclick="rb.final = true; guardarRb(); pintarRbForm()">Terminé de bajar este producto</button>` : ''}
-
       ${rb.final ? `<div class="peso-caja">
-        <span class="h3">Datos del rótulo</span>
+        <span class="h3">Para terminar</span>
         <div class="dos">
           <div><label class="lbl" for="rbRec">Fecha de recibo</label><input id="rbRec" type="date" class="campo" value="${esc(rcAct.fecha || hoyISO())}"></div>
-          <div><label class="lbl" for="rbVen">Fecha de vencimiento</label><input id="rbVen" type="date" class="campo"></div>
-        </div>
-        <div class="dos">
           <div class="resp-fijo"><span class="lbl">Responsable</span><span class="resp-nom">${esc(ses.nombre)}</span></div>
-          <div><label class="lbl" for="rbLote">Lote</label><input id="rbLote" class="campo" autocomplete="off"></div>
         </div>
         <label class="lbl" for="rbNov">Novedad (opcional)</label><input id="rbNov" class="campo" placeholder="Ej. 2 cajas golpeadas" autocomplete="off">
         <p id="fErr" class="error" hidden></p>
@@ -1731,16 +1868,33 @@
           <button class="btn btn-sec btn-xl" onclick="rb.final = false; guardarRb(); pintarRbForm()">Volver</button>
           <button id="rbOk" class="btn btn-pri btn-xl flex1" onclick="guardarRecibido()">Guardar y crear ${rb.partes.length} rótulo${rb.partes.length === 1 ? '' : 's'}</button>
         </div>
-      </div>` : '<p id="fErr" class="error" hidden></p>'}`;
+      </div>` : ''}`;
 
     const f = $('rbFac');
     if (f) f.addEventListener('input', () => { rb.fac = f.value; guardarRb(); actualizarResumenRb(); });
     const uf = $('rbUF');
     if (uf) uf.addEventListener('change', () => { rb.unidadFac = uf.value; rb.tipo = uf.value === 'KG' ? 'PESO' : 'NORMAL'; guardarRb(); pintarRbForm(); });
+    const ls = $('rbLoteSel');
+    if (ls) ls.addEventListener('change', () => {
+      const l = lotes[Number(ls.value)];
+      if (l) { rb.lote = l.lote; rb.venc = l.venc; } else { rb.lote = ''; rb.venc = ''; }
+      $('rbLoteNuevo').hidden = !!l;
+      if (!l) { $('rbLote').value = ''; $('rbVen').value = ''; $('rbLote').focus(); }
+      guardarRb();
+    });
+    ['rbLote', 'rbVen'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', () => { rb[id === 'rbLote' ? 'lote' : 'venc'] = el.value.trim(); guardarRb(); }); });
     ['rbCj', 'rbUnd', 'rbPC', 'rbNC', 'rbPE', 'rbPB'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', calcParte); });
     calcParte();
   }
 
+  // Producto escrito, escaneado (código, EAN del producto o de la caja) o buscado
+  function rcElegirProd(v, enter) {
+    const t = String(v || '').trim(), pr = buscarProducto(t.split(' · ')[0]) || buscarProducto(t);
+    if (pr) { rb = borradorNuevo(pr.id); guardarRb(); pintarRbForm(); setTimeout(() => { const l = $('rbLote'); if (l && !l.closest('[hidden]')) l.focus(); }, 30); return; }
+    const e = t.replace(/\s+/g, '');
+    if (pareceEan(e)) return eanNuevoEn(e, 'rcProd');   // EAN que no está: ponérselo a un producto
+    if (enter && t) errForm('No hay un producto con ese código. Búscalo por código o nombre.');
+  }
   function actualizarResumenRb() { if ($('rbResumen')) $('rbResumen').innerHTML = resumenRbHtml(); }
 
   // Suma de lo que llevan contra lo que dice la factura
@@ -1781,19 +1935,24 @@
   }
 
   function agregarParte() {
+    const nuevo = !$('rbLoteSel') || $('rbLoteSel').value === 'nuevo';
+    const lote = nuevo ? $('rbLote').value.trim() : rb.lote, venc = nuevo ? $('rbVen').value : rb.venc;
+    if (!lote) { if ($('rbLote')) $('rbLote').focus(); return errForm('Escribe el lote de esta parte.'); }
+    if (!venc) { if ($('rbVen')) $('rbVen').focus(); return errForm('Escribe la fecha de vencimiento de esta parte.'); }
+    rb.lote = lote; rb.venc = venc;
     if (rb.tipo === 'NORMAL') {
       const cj = num($('rbCj').value), u = num($('rbUnd').value);
       if (!(cj > 0)) return errForm('Escribe el número de cajas de esta parte.');
       if (!(u > 0)) return errForm('Escribe las unidades por caja.');
       rb.undX = u;
-      rb.partes.push({ cajas: cj, und: u });
+      rb.partes.push({ cajas: cj, und: u, lote, venc });
     } else {
       const pc = num($('rbPC').value) || 0, nc = num($('rbNC').value), pe = num($('rbPE').value) || 0, pb = num($('rbPB').value);
       if (!(nc > 0)) return errForm('Escribe cuántas cavas trae esta parte.');
       if (!(pb > 0)) return errForm('Escribe el peso de la báscula.');
       const neto = +(pb - pe - pc * nc).toFixed(2);
       if (neto <= 0) return errForm(`El peso neto da ${kg(neto)}. Revisa los pesos.`);
-      rb.partes.push({ pc, nc, pe, pb, neto });
+      rb.partes.push({ pc, nc, pe, pb, neto, lote, venc });
     }
     guardarRb();
     pitido();
@@ -1813,30 +1972,30 @@
   // Al terminar: crea un rótulo por cada parte y guarda el producto en la factura
   async function guardarRecibido() {
     const p = prodDe(rb.codigo);
-    const recibo = $('rbRec').value, venc = $('rbVen').value, resp = ses.nombre;
+    const recibo = $('rbRec').value, resp = ses.nombre;
     if (!recibo) return errForm('Escribe la fecha de recibo.');
-    if (!venc) return errForm('Escribe la fecha de vencimiento.');
-    if (!$('rbLote').value.trim()) return errForm('Escribe el lote.');
+    if (rb.partes.some(x => !x.lote || !x.venc)) return errForm('Hay partes sin lote o sin vencimiento: quítalas y agrégalas otra vez.');
     if (!resp) return errForm('Elige el responsable.');
     guardarLS('ultResp', resp);
     const b = $('rbOk'); b.disabled = true; b.textContent = 'Guardando…';
-    const creados = [];
+    const creados = [], etqDe = [];
     try {
       for (const x of rb.partes) {
         const datos = rb.tipo === 'PESO'
-          ? { tipo: 'PESO', codigo: p.id, numCavas: x.nc, pesoCava: x.pc, pesoEstiba: x.pe, pesoBascula: x.pb, recibo, vencimiento: venc, responsable: resp, usuario: ses.nombre }
-          : { tipo: 'NORMAL', codigo: p.id, cajas: x.cajas, undXCaja: x.und, recibo, vencimiento: venc, responsable: resp, usuario: ses.nombre };
-        creados.push(await llamar('bdCrearEtiqueta', Object.assign({ sedeId: ses.sedeId }, datos)));
+          ? { tipo: 'PESO', codigo: p.id, numCavas: x.nc, pesoCava: x.pc, pesoEstiba: x.pe, pesoBascula: x.pb, recibo, vencimiento: x.venc, responsable: resp, usuario: ses.nombre }
+          : { tipo: 'NORMAL', codigo: p.id, cajas: x.cajas, undXCaja: x.und, recibo, vencimiento: x.venc, responsable: resp, usuario: ses.nombre };
+        const e = await llamar('bdCrearEtiqueta', Object.assign({ sedeId: ses.sedeId }, datos));
+        creados.push(e); etqDe.push(e.id);
       }
       if (rb.tipo === 'NORMAL' && rb.undX) p.undPorCaja = rb.undX;
-      const t = totalPartes();
-      const previas = facturaPrevia(p.id);
-      const pend = pendDeRb();
-      rcAct = await llamar('bdGuardarItem', {
-        id: pend ? pend.id : undefined, deLista: !!pend,
-        recepcionId: rcAct.id, codigo: p.id, tipo: rb.tipo, partes: rb.partes, etiquetas: creados.map(e => e.id),
-        unidad: t.unidad, cantFactura: pend ? pend.cantFactura : previas.length ? '' : rb.fac, cantRecibida: t.valor,
-        lote: $('rbLote').value, vencimiento: venc, novedad: $('rbNov').value, usuario: ses.nombre
+      const previas = facturaPrevia(p.id), pend = pendDeRb();
+      // Cada lote + vencimiento va en su línea, con la cantidad en la unidad de la factura
+      const cantDe = ps => rb.tipo === 'PESO' ? +ps.reduce((a, x) => a + x.neto, 0).toFixed(2)
+        : rb.unidadFac === 'UND' ? ps.reduce((a, x) => a + x.cajas * x.und, 0) : ps.reduce((a, x) => a + x.cajas, 0);
+      const grupos = rbGrupos().map(g => ({ lote: g.lote, vencimiento: g.venc, partes: g.partes, etiquetas: g.idx.map(i => etqDe[i]), cantidad: cantDe(g.partes) }));
+      rcAct = await llamar('bdGuardarRecibido', {
+        recepcionId: rcAct.id, codigo: p.id, tipo: rb.tipo, unidad: totalPartes().unidad, pendId: pend ? pend.id : null,
+        cantFactura: pend || previas.length ? '' : rb.fac, novedad: $('rbNov').value, usuario: ses.nombre, grupos
       });
     } catch (err) {
       errForm(err.message + (creados.length ? ` (alcanzaron a crearse los rótulos ${creados.map(e => e.id).join(', ')})` : ''));
@@ -1897,11 +2056,11 @@
   // Datos de la factura: número, proveedor y fecha
   function editarFactura() {
     if (sinPermiso('rc_facturas')) return;
-    const r = rcAct, provs = [...new Set((rcLista || []).map(x => x.proveedor))];
+    if (provLista === null) return asegurarProv(editarFactura);
+    const r = rcAct;
     abrirModal(`<div class="fila-sb"><span class="h2">Editar datos de la factura</span>${btnCerrar()}</div>
       <div class="mt12"><label class="lbl" for="efFac">Número de factura</label><input id="efFac" class="campo" autocomplete="off" value="${esc(r.factura)}"></div>
-      <div class="mt12"><label class="lbl" for="efProv">Proveedor</label><input id="efProv" class="campo" list="dlProvE" autocomplete="off" value="${esc(r.proveedor)}">
-        <datalist id="dlProvE">${provs.map(p => `<option value="${esc(p)}">`).join('')}</datalist></div>
+      ${provCampoHtml('efProv', r.proveedor)}
       <div class="mt12"><label class="lbl" for="efFecha">Fecha de ingreso</label><input id="efFecha" type="date" class="campo" value="${esc(r.fecha || '')}"></div>
       <span class="muted small mt8">Lo recibido, los rótulos y las fotos se quedan igual.</span>
       <p id="fErr" class="error" hidden></p>
@@ -1912,6 +2071,7 @@
     const factura = $('efFac').value.trim(), proveedor = $('efProv').value.trim(), fecha = $('efFecha').value;
     if (!factura) return errForm('Escribe el número de la factura.');
     if (!proveedor) return errForm('Escribe el proveedor.');
+    if (proveedor.toUpperCase() !== String(rcAct.proveedor).toUpperCase() && !provRevisar('efProv')) return errForm('Escoge un proveedor de la lista o créalo.');
     if (!fecha) return errForm('Elige la fecha de ingreso.');
     const b = $('efOk'); b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdGuardarRecepcion', { id: rcAct.id, factura, proveedor, fecha }).then(r => {
@@ -2004,11 +2164,12 @@
     if (prev && prev.unidad) rb.unidadFac = prev.unidad;
     guardarRb(); pintarRbForm();
     $('rcForm').scrollIntoView();
-    toast('Anota las partes del otro vencimiento', 'ok');
+    toast('Escoge el lote (o uno nuevo) y anota lo que falta', 'ok');
   }
 
   /* ----- Lista de la factura: lo que debe llegar (se copia de la factura o de Excel) ----- */
   let lsManual = [];   // productos agregados uno por uno
+  let lsUnid = {};     // unidad cambiada a mano en una línea de la lista
 
   function abrirLista() {
     if (sinPermiso('rc_lista')) return;
@@ -2016,18 +2177,12 @@
   }
 
   function abrirListaYa() {
-    lsManual = [];
-    const uDef = leerLS('lsUnidad') || 'CJ';
+    lsManual = []; lsUnid = {};
     abrirModal(`<div class="fila-sb"><span class="h2">Lo que debe llegar · Factura ${esc(rcAct.factura)}</span>${btnCerrar()}</div>
       <span class="muted small mt8">Copia de la factura o de Excel las columnas <b>código, nombre y cantidad</b> y pégalas aquí (una fila por producto). El nombre es opcional.</span>
       <textarea id="lsTxt" class="campo ls-txt mt8" rows="6" autocomplete="off" spellcheck="false"
         placeholder="2680	GALLETA FESTIVAL MINICHIPS	20&#10;1125	CHOCOLATINA JET	10"></textarea>
-      <div class="dos mt8">
-        <div><label class="lbl" for="lsU">La cantidad viene en</label>
-          <select id="lsU" class="campo">${[['CJ', 'Cajas'], ['UND', 'Unidades'], ['KG', 'Kilogramos']]
-            .map(([v, t]) => `<option value="${v}" ${uDef === v ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
-        <span class="muted small" style="align-self:end">Los productos que se manejan en kg quedan en kilogramos solos.</span>
-      </div>
+      <span class="muted small mt8">La unidad de cada producto (cajas, unidades o kg) sale sola de Productos. Si en esta factura viene en otra, cámbiala en la lista de abajo.</span>
       <details class="mt12"><summary class="small">O agrégalos uno por uno</summary>
         <div class="col gap8 mt8">
           ${campoConCamara('<input id="lsProd" class="campo" list="dlProductos" autocomplete="off" placeholder="Código o nombre">', 'lsProd')}
@@ -2040,7 +2195,6 @@
       <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
         <button id="lsOk" class="btn btn-pri btn-xl" onclick="guardarLista()" disabled>Guardar lista</button></div>`);
     $('lsTxt').addEventListener('input', pintarPrevLista);
-    $('lsU').addEventListener('change', () => { guardarLS('lsUnidad', $('lsU').value); pintarPrevLista(); });
     $('lsCant').addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); agregarALista(); } });
     $('lsTxt').focus();
     pintarPrevLista();
@@ -2056,10 +2210,9 @@
 
   // Lee lo pegado: el primer dato es el código y el último número es la cantidad
   function leerLista() {
-    const uDef = $('lsU').value;
     const buenos = {}, malos = [];
     const sumar = (p, cant, u) => {
-      const unidad = (p.unidadMedida || '').toUpperCase() === 'KG' ? 'KG' : (u || uDef);
+      const unidad = lsUnid[p.id] || u || umRecibo(p);
       const x = buenos[p.id] || (buenos[p.id] = { codigo: p.id, nombre: p.nombre, cantidad: 0, unidad });
       x.cantidad = +(x.cantidad + cant).toFixed(3);
     };
@@ -2094,7 +2247,9 @@
         <span class="col gap4 flex1" style="min-width:0"><span class="nombre">${esc(l.nombre)}</span>
           ${recibido.has(l.codigo) ? '<span class="small txt-naranja">Ya se recibió en esta factura: no se agrega otra vez</span>'
             : enLista.has(l.codigo) ? '<span class="small txt-naranja">Ya estaba en la lista: se cambia la cantidad</span>' : ''}</span>
-        <b class="nowrap">${nfmt(l.cantidad)} ${unidadTxt(l.unidad, l.cantidad)}</b>
+        <span class="fila gap4 nowrap"><b>${nfmt(l.cantidad)}</b>
+          <select class="campo ls-u" aria-label="Unidad de ${esc(l.codigo)}" onchange="lsUnid['${esc(l.codigo)}']=this.value; pintarPrevLista()">${[['CJ', 'Cajas'], ['UND', 'Unidades'], ['KG', 'Kg']]
+            .map(([v, t]) => `<option value="${v}" ${l.unidad === v ? 'selected' : ''}>${t}</option>`).join('')}</select></span>
       </div>`).join('')}</div>` : '<span class="muted small">Aquí vas a ver los productos antes de guardar.</span>')
       + (malos.length ? `<div class="alerta-fefo mt8"><b>No se pudieron leer (${malos.length}):</b><br>${malos.map(m => `${esc(m.linea)} <span class="small">(${m.motivo})</span>`).join('<br>')}</div>` : '');
   }
@@ -3734,8 +3889,12 @@
     if (ia.estado !== 'ABIERTO') invDentro = false;
     if (!invDentro) return listaInventariosVista(jefe);
     asegurarRcInv();
-    const g = codGen(), SDf = sedesInv();
-    const pasOp = invF.alm ? ((g.almacenes[invF.alm] || {}).pasillos || []) : [...new Set(Object.values(g.almacenes).flatMap(a => a.pasillos))].sort((a, b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+    const g = codGen(), SDf = sedesInv(), carg = usarPasCargado();
+    asegurarUbicSede(ses.sedeId);
+    // Con «Usar el pasillo cargado» encendido, los filtros son los almacenes y pasillos cargados (no los del plano)
+    const almOp = carg ? cargadosSede().map(x => ({ key: x.alm, nombre: x.alm, pasillos: x.pasillos })) : Object.values(g.almacenes);
+    if (invF.alm && !almOp.some(a => a.key === invF.alm)) { invF.alm = ''; invF.pas = ''; }
+    const pasOp = invF.alm ? ((almOp.find(a => a.key === invF.alm) || {}).pasillos || []) : [...new Set(almOp.flatMap(a => a.pasillos))].sort((a, b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
     if (invF.pas && !pasOp.includes(invF.pas)) invF.pas = '';
     return `<div class="col gap12">
       <div class="fila-sb wrap-f gap8">
@@ -3758,9 +3917,9 @@
       <div class="card col gap12">
         <div class="inv-filtros">
           <div><label class="lbl" for="invAlm">Almacén</label>
-            <select id="invAlm" class="campo"><option value="">Todos</option>${Object.values(g.almacenes).map(a => `<option value="${esc(a.key)}" ${invF.alm === a.key ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></div>
+            <select id="invAlm" class="campo"><option value="">Todos</option>${almOp.map(a => `<option value="${esc(a.key)}" ${invF.alm === a.key ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></div>
           <div><label class="lbl" for="invPas">Pasillo</label>
-            <select id="invPas" class="campo"><option value="">Todos</option>${pasOp.map(x => `<option value="${esc(x)}" ${invF.pas === String(x) ? 'selected' : ''}>Pasillo ${esc(x)}</option>`).join('')}</select></div>
+            <select id="invPas" class="campo"><option value="">Todos</option>${pasOp.map(x => `<option value="${esc(x)}" ${invF.pas === String(x) ? 'selected' : ''}>${esc(pasTxt(x))}</option>`).join('')}</select></div>
           <div><label class="lbl" for="invSede">Sede</label>
             <select id="invSede" class="campo"><option value="">Todas</option>${SDf.map(x => `<option value="${esc(x.id)}" ${invF.sede === x.id ? 'selected' : ''}>${esc(x.nombre)}</option>`).join('')}</select></div>
           <div><label class="lbl" for="invZona">Zona</label>
@@ -3929,8 +4088,14 @@
     return l.filter(f => {
       if (invF.zona === '-' && f.zonas.size) return false;
       if (invF.zona && invF.zona !== '-' && !f.zonas.has(invF.zona)) return false;
-      if (invF.alm && ![...f.pas].some(k => k.split('|')[0] === invF.alm) && !f.almacenes.some(a => a.key === invF.alm && a.planta)) return false;
-      if (invF.pas && ![...f.pas].some(k => { const [a, x] = k.split('|'); return x === String(invF.pas) && (!invF.alm || a === invF.alm); })) return false;
+      if (usarPasCargado()) {   // lo cargado para esta sede
+        const cg = (invF.alm || invF.pas) ? cargadoDe(f.cod) : [];
+        if (invF.alm && !cg.some(y => y.almacen === invF.alm)) return false;
+        if (invF.pas && !cg.some(y => y.pasillo === String(invF.pas) && (!invF.alm || y.almacen === invF.alm))) return false;
+      } else {
+        if (invF.alm && ![...f.pas].some(k => k.split('|')[0] === invF.alm) && !f.almacenes.some(a => a.key === invF.alm && a.planta)) return false;
+        if (invF.pas && ![...f.pas].some(k => { const [a, x] = k.split('|'); return x === String(invF.pas) && (!invF.alm || a === invF.alm); })) return false;
+      }
       if (invF.sede && !((f.pk[invF.sede] || 0) + (f.ae[invF.sede] || 0) > 0)) return false;   // solo los que tienen cantidad en esa sede
       const dif = f.difRc !== undefined ? f.difRc : f.dif;
       if ((invF.soloDif || invF.estado === 'dif') && !dif) return false;
@@ -5182,7 +5347,11 @@
       try { const e = await llamar('bdEtiqueta', v.toUpperCase()); p = prodDe(e.codigo); }   // solo importa de qué producto es
       catch (err) { return toast(err.message, 'error'); }
     } else p = buscarProducto(v) || buscarProducto(v.replace(/\s+/g, ''));
-    if (!p) { if (!silencio || pareceEan(v)) toast(pareceEan(v) ? 'Ese EAN no está en ningún producto. Escanea el rótulo de la caja para encontrarlo.' : 'No hay un producto con ese código', 'error'); return; }
+    if (!p) {
+      if (pareceEan(v)) return eanNuevoEn(String(v).replace(/\s+/g, ''), 'rc');   // EAN que no está: ponérselo a un producto
+      if (!silencio) toast('No hay un producto con ese código', 'error');
+      return;
+    }
     if (!(cpScope().cic.codigos || []).includes(p.id)) return toast(`${p.nombre} no está en esta reconfirmación`, 'error');
     pitido();
     rcc.q = p.id; rcc.pas = ''; rcc.rack = ''; rcc.eanPid = p.codigoBarras ? '' : p.id; pagInicio('rcc');
@@ -6527,32 +6696,33 @@
     const ult = {}, contado = new Set();
     S.conteos.forEach(c => { if (c.tipo === 'PICKING') contado.add(c.codigo); if (!ult[c.codigo] || c.fecha > ult[c.codigo].fecha) ult[c.codigo] = c; });
     const keyAlm = a => { const x = Object.values(g.almacenes).find(y => String(y.alm) === String(a)); return x ? x.key : String(a); };
-    const grupos = {}, nCarg = new Set();
+    const grupos = {}, nCarg = new Set(), carg = usarPasCargado();
     datosInventario().forEach(f => {
       const cod = f.cod;
       if (!f.p) return;
       if (f.contado) contado.add(cod);
-      const ks = new Set(f.pas);
-      if (usarPasCargado()) pasCargadosDe(cod, sid).forEach(y => { ks.add(keyAlm(y.almacen) + '|' + y.pasillo); nCarg.add(cod); });
-      if (!ks.size && enOtro[cod]) enOtro[cod].forEach(k => ks.add(k));
+      // Encendido: solo lo cargado (almacén y pasillo como se cargaron). Apagado: los pasillos del plano.
+      const ks = new Set(carg ? [] : f.pas);
+      if (carg) pasCargadosDe(cod, sid).forEach(y => { ks.add(y.almacen + '|' + y.pasillo); nCarg.add(cod); });
+      if (!carg && !ks.size && enOtro[cod]) enOtro[cod].forEach(k => ks.add(k));
       // Sin pasillo: los del inventario (con SAP o contados) que no tienen pasillo cargado ni están en el plano
       if (!ks.size && (f.sap || f.contado || f.planta)) ks.add('|');
       ks.forEach(k => (grupos[k] = grupos[k] || []).push(cod));
     });
     const resumen = cs => ({ total: cs.length, listos: cs.filter(c => contado.has(c)).length, ult: cs.reduce((u, c) => ult[c] && (!u || ult[c].fecha > u.fecha) ? ult[c] : u, null) });
     const out = [], vistos = new Set(['|']);
-    Object.values(g.almacenes).forEach(a => a.pasillos.forEach(pas => {
+    if (!carg) Object.values(g.almacenes).forEach(a => a.pasillos.forEach(pas => {
       const k = a.key + '|' + pas; vistos.add(k);
       out.push(Object.assign({ key: a.key, alm: a.nombre, pas, asig: S.asig.filter(x => x.almacen === a.key && x.pasillo === pas) }, resumen(grupos[k] || [])));
     }));
     // Pasillos cargados que no están en el plano (ej. «Conge»)
     Object.keys(grupos).filter(k => !vistos.has(k)).sort((x, y) => x.localeCompare(y, 'es', { numeric: true })).forEach(k => {
       const [key, pas] = k.split('|');
-      out.push(Object.assign({ key, alm: key ? nombreAlm(key) : '—', pas, asig: S.asig.filter(x => x.almacen === key && x.pasillo === pas) }, resumen(grupos[k])));
+      out.push(Object.assign({ key, alm: key ? (carg ? key : nombreAlm(key)) : '—', pas, asig: S.asig.filter(x => x.almacen === key && x.pasillo === pas) }, resumen(grupos[k])));
     });
     const num_ = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true });
     out.sort((a, b) => (a.key ? 0 : 1) - (b.key ? 0 : 1) || num_(a.key, b.key) || num_(a.pas, b.pas));
-    if (grupos['|']) out.push(Object.assign({ key: '', alm: 'Sin pasillo', pas: '', asig: [] }, resumen(grupos['|'])));
+    if (grupos['|']) out.push(Object.assign({ key: '', alm: carg ? 'Sin pasillo cargado' : 'Sin pasillo', pas: '', asig: [] }, resumen(grupos['|'])));
     out.cargados = nCarg.size;
     return out;
   }
@@ -6914,7 +7084,7 @@
       ${!conAsig ? '' : `<details class="card col gap8 cp-pas-det" ${cpAv.verPas ? 'open' : ''} ontoggle="cpAv.verPas=this.open">
         <summary class="h3">Pasillos</summary>
         <div class="fila-sb wrap-f gap8 mt8"><span class="muted small">${S.cic ? 'Avance de cada pasillo.' : usarPasCargado()
-            ? 'Avance de cada pasillo: los mismos productos que salen en la lista al filtrar por ese pasillo, más los que tienen <b>ese pasillo cargado</b>. ' + (!ubOk ? '<span class="muted">(cargando pasillos…)</span> ' : ps0.cargados ? `<b>${ps0.cargados}</b> productos con pasillo cargado en esta sede. ` : '<span class="txt-naranja">Esta sede no tiene pasillos cargados: usa «Actualizar almacenes y pasillos» y escoge esta sede.</span> ') + ayudaHtml('Un producto cuenta en cada pasillo del plano donde está (picking o aéreo) y, como está encendido «Usar el pasillo cargado» en Configuración → Ajustes, también en el pasillo que se le cargó con «Actualizar almacenes y pasillos». Si está en dos pasillos, sale en los dos. Contado = ya le contaron el picking. En «Sin pasillo» quedan solo los que no tienen pasillo cargado y tampoco están en el plano.')
+            ? 'Avance de cada <b>pasillo cargado</b> (almacén y pasillo como se cargaron). ' + (!ubOk ? '<span class="muted">(cargando pasillos…)</span> ' : ps0.cargados ? `<b>${ps0.cargados}</b> productos con pasillo cargado en esta sede. ` : '<span class="txt-naranja">Esta sede no tiene pasillos cargados: usa «Actualizar almacenes y pasillos» y escoge esta sede.</span> ') + ayudaHtml('Está encendido «Usar el pasillo cargado» en Configuración → Ajustes: cada producto cuenta en el almacén y pasillo que se le cargó con «Actualizar almacenes y pasillos» para esta sede (no se usan los pasillos del plano). Son los mismos productos que salen en la lista al filtrar por ese almacén y pasillo. Contado = ya le contaron el picking. En «Sin pasillo cargado» quedan los que tienen SAP o conteo pero no tienen pasillo cargado.')
             : 'Avance de cada pasillo: los mismos productos que salen en la lista al filtrar por ese pasillo (<b>pasillo del plano</b>). ' + ayudaHtml('Está apagado «Usar el pasillo cargado» en Configuración → Ajustes: un producto cuenta en cada pasillo del plano donde está (picking o aéreo). Si está en dos pasillos, sale en los dos. Contado = ya le contaron el picking. En «Sin pasillo» quedan solo los que no están en el plano.')}</span>
           <span class="fila gap8 wrap-f"><label class="fila gap8 small"><input type="checkbox" ${cpAv.soloFaltan ? 'checked' : ''} onchange="cpAv.soloFaltan=this.checked; cpRepintar()"> Solo los que faltan</label>
             ${jefe ? `<button class="btn btn-pri btn-mini" onclick="cpAsignar()" ${cpMarcados.size ? '' : 'disabled'}>Asignar ${cpMarcados.size ? cpMarcados.size + ' ' : ''}marcado${cpMarcados.size === 1 ? '' : 's'}</button>` : ''}</span></div>
@@ -6922,7 +7092,7 @@
         <div class="tabla-wrap"><table class="tabla cp-av"><thead><tr>${jefe ? '<th></th>' : ''}<th>Almacén</th><th>Pasillo</th><th>Avance</th><th class="cp-faltan">Faltan</th><th class="cp-ult">Último</th></tr></thead><tbody>
           ${ver.map(x => { const k = x.key + '|' + x.pas; return `<tr class="${x.listos === x.total ? 'cp-listo' : ''}">
             ${jefe ? `<td>${x.key ? `<input type="checkbox" aria-label="Marcar pasillo ${esc(x.pas)}" ${cpMarcados.has(k) ? 'checked' : ''} onchange="cpMarcar('${esc(k)}', this.checked)">` : ''}</td>` : ''}
-            <td><span class="cp-alm-l">${esc(x.alm)}</span><span class="cp-alm-c">${esc(almCorto(x.key) || x.alm)}</span></td><td>${x.pas ? `<b>${/^Fila /.test(x.pas) ? '' : 'Pasillo '}${esc(x.pas)}</b>` : '<span class="muted">—</span>'}</td>
+            <td><span class="cp-alm-l">${esc(x.alm)}</span><span class="cp-alm-c">${esc(almCorto(x.key) || x.alm)}</span></td><td>${x.pas ? `<b>${/^Fila /.test(x.pas) ? esc(x.pas) : esc(pasTxt(x.pas))}</b>` : '<span class="muted">—</span>'}</td>
             <td class="small nowrap">${x.listos} de ${x.total} ${cpBarra(x.listos, x.total)}</td>
             <td class="cp-faltan ${x.total - x.listos ? 'fuerte' : 'txt-verde'}">${x.total - x.listos || '✓'}</td>
             <td class="small nowrap cp-ult">${x.ult ? `${esc(x.ult.usuario || '')} · ${fechaHora(x.ult.fecha)}` : '—'}</td></tr>`; }).join('') || `<tr><td colspan="5" class="muted">${ps.length ? 'Todos los pasillos están listos.' : 'No hay productos ubicados en el plano.'}</td></tr>`}
@@ -7053,6 +7223,18 @@
     const m = (ubicSede[sid] || {}).m, l = m && m[cod];
     return l && l.length ? [...new Set(l.map(x => x.almacen))] : ((prodAlm && prodAlm[cod]) || []);
   }
+  // Lo cargado de un producto en una sede (almacén y pasillo, ya arreglado), con o sin pasillo
+  function cargadoDe(cod, sid) {
+    const m = (ubicSede[sid || ses.sedeId] || {}).m, l = (m && m[cod]) || [];
+    return l.map(y => ({ almacen: String(y.almacen), pasillo: normPas(y.pasillo) }));
+  }
+  // Almacenes y pasillos cargados en la sede (para los filtros cuando se usa lo cargado)
+  function cargadosSede(sid) {
+    const m = (ubicSede[sid || ses.sedeId] || {}).m || {}, alms = {}, num_ = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true });
+    Object.values(m).forEach(l => l.forEach(y => { const a = String(y.almacen), pa = normPas(y.pasillo); (alms[a] = alms[a] || new Set()); if (pa) alms[a].add(pa); }));
+    return Object.keys(alms).sort(num_).map(a => ({ alm: a, pasillos: [...alms[a]].sort(num_) }));
+  }
+  const pasTxt = x => /^\d/.test(String(x)) ? 'Pasillo ' + x : String(x);
   // Configuración → Ajustes: si se apaga, el pasillo es siempre el del plano
   const usarPasCargado = () => !(ini && ini.parametros && ini.parametros.pasillo_cargado === false);
   // Pasillo como lo escriben en el Excel → como lo usa la app: «PASILLO 3», «PAISLLO 3», «P-3» → «3»; «PASILLO» solo → sin pasillo; «Conge» queda igual
@@ -7124,6 +7306,84 @@
       } catch (e) { errForm('No se pudo leer el archivo: ' + e.message); }
     };
     r.readAsArrayBuffer(f);
+  }
+  /* ----- Cargar el Excel maestro de productos (COD, Texto breve, Unidad medida base, Equiv Kg, Categoría, EAN 13, EAN 13, EAN 14, UND / CJ…) ----- */
+  let maeTmp = null;
+  function abrirCargaMaestro() {
+    if (sinPermiso('productos')) return;
+    maeTmp = null;
+    abrirModal(`<div class="fila-sb"><span class="h2 fila gap8">Cargar datos de productos ${ayudaHtml('Sube el Excel maestro con las columnas COD, Texto breve de material, Unidad medida base, Equiv Kg, Categoría, Subcategoría, Observaciones Abastecimiento, EAN 13, EAN 13, EAN 14, UM PROVEEDOR, UND / CJ, LARGO, ANCHO, ALTO y OBSERVACIONES. Los datos que vengan en el Excel se actualizan; si una celda viene vacía, se deja lo que ya tenía el producto. El nombre de los productos que ya existen no se cambia.')}</span>${btnCerrar()}</div>
+      <label for="maeArch" class="btn btn-pri btn-xl mt12" role="button" tabindex="0">Escoger el Excel</label>
+      <input id="maeArch" type="file" accept=".xlsx,.xls,.csv" class="oculto">
+      <div id="maeCaja" class="mt12"></div>
+      <p id="fErr" class="error" hidden></p>`);
+    $('maeArch').addEventListener('change', ev => { const f = ev.target.files[0]; if (f) leerMaestro(f); ev.target.value = ''; });
+  }
+  function leerMaestro(f) {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        let filas;
+        if (window.XLSX && !/\.csv$/i.test(f.name)) {
+          const wb = XLSX.read(new Uint8Array(r.result), { type: 'array' });
+          filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
+        } else filas = new TextDecoder('utf-8').decode(r.result).split(/\r?\n/).map(l => l.split(/[;\t]/).map(c => c.replace(/^"|"$/g, '').trim()));
+        const t = v => sinTilde(String(v || '')).toUpperCase().replace(/\s+/g, ' ').trim();
+        const iCab = filas.findIndex(x => x.some(c => /^COD/.test(t(c))) && x.some(c => /^EAN/.test(t(c))));
+        if (iCab < 0) return errForm('No encontré las columnas COD y EAN en ese archivo. Revisa que sea el maestro de productos.');
+        const cab = filas[iCab].map(t), col = re => cab.findIndex(c => re.test(c));
+        const e13 = cab.map((c, i) => /^EAN ?13/.test(c) ? i : -1).filter(i => i >= 0);
+        const C = { codigo: [col(/^COD(IGO)?$/), col(/^COD/)].find(i => i >= 0), nombre: col(/TEXTO BREVE|DESCRIPCION/), unidadMedida: col(/UNIDAD MEDIDA BASE|^UMB$/),
+          equivKg: col(/EQUIV/), categoria: col(/^CATEGORIA/), subcategoria: col(/SUBCATEGORIA/), obsAbast: col(/OBSERVACIONES ABAST/),
+          ean: e13[0] ?? -1, ean2: e13[1] ?? -1, ean14: col(/^EAN ?14/), umProveedor: col(/UM PROVEEDOR/), undPorCaja: col(/^UND ?\/ ?CJ|UND.*CJ/),
+          largo: col(/^LARGO/), ancho: col(/^ANCHO/), alto: col(/^ALTO/), observaciones: cab.findIndex(c => c === 'OBSERVACIONES') };
+        const val = (x, k) => { const i = C[k]; if (i < 0 || i === undefined) return ''; const v = x[i]; return typeof v === 'number' ? String(v) : String(v ?? '').trim(); };
+        const cod = v => String(v ?? '').trim().replace(/\.0+$/, '').replace(/^0+(?=\d)/, '');
+        const ean = v => String(v ?? '').replace(/\.0+$/, '').replace(/[\s-]/g, '');
+        const lista = [], vistos = new Set();
+        filas.slice(iCab + 1).forEach(x => {
+          const c = cod(x[C.codigo]);
+          if (!c || vistos.has(c)) return;
+          vistos.add(c);
+          const o = { codigo: c };
+          Object.keys(C).forEach(k => { if (k !== 'codigo') o[k] = /^ean/.test(k) ? ean(val(x, k)) : val(x, k); });
+          lista.push(o);
+        });
+        if (!lista.length) return errForm('El archivo no trae productos debajo de los títulos.');
+        const existen = lista.filter(o => prodDe(o.codigo)).length, nuevos = lista.length - existen;
+        const con13 = lista.filter(o => o.ean || o.ean2).length, con14 = lista.filter(o => o.ean14).length;
+        const faltanCols = [['nombre', 'Texto breve'], ['unidadMedida', 'Unidad medida base'], ['ean14', 'EAN 14'], ['undPorCaja', 'UND / CJ']].filter(([k]) => C[k] < 0).map(([, n]) => n);
+        maeTmp = { archivo: f.name, filas: lista };
+        $('fErr').hidden = true;
+        $('maeCaja').innerHTML = `<div class="info"><b>${lista.length}</b> productos en el archivo · <b>${existen}</b> ya están en Productos${nuevos ? ` · <span class="txt-naranja"><b>${nuevos}</b> no están</span>` : ''}<br>
+            <b>${con13}</b> con EAN 13 · <b>${con14}</b> con EAN 14 (caja)</div>
+          ${faltanCols.length ? `<span class="small txt-naranja mt8">No encontré estas columnas: ${faltanCols.map(esc).join(', ')}. Esos datos no se cargan.</span>` : ''}
+          ${nuevos ? `<label class="fila gap8 mt12"><input type="checkbox" id="maeCrear" checked> <span>${nuevos === 1 ? 'Crear el que no está' : `Crear los ${nuevos} que no están`} ${ayudaHtml('Se crean con el nombre del Excel y el código Nutresa igual al código. Después los puedes corregir en «Editar productos».')}</span></label>` : ''}
+          <label class="fila gap8 mt8"><input type="checkbox" id="maeReemp" onchange="$('maeAviso').hidden = !this.checked"> <span>Esta vez, <b>reemplazar los EAN</b> que ya tienen ${ayudaHtml('Úsalo solo para quitar EAN de prueba: los EAN de los productos del archivo quedan exactamente como vienen en el Excel (si en el Excel no traen EAN, se les quita). Sin marcar, solo se llenan los EAN que estén vacíos y no se cambia ninguno que ya exista.')}</span></label>
+          <p id="maeAviso" class="small txt-rojo" hidden>Se borran los EAN que tienen hoy los ${existen} productos del archivo y quedan los del Excel.</p>
+          <div class="dos mt12"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+            <button id="maeOk" class="btn btn-pri btn-xl" onclick="guardarMaestro()">Cargar ${lista.length} productos</button></div>`;
+      } catch (e) { errForm('No se pudo leer el archivo: ' + e.message); }
+    };
+    r.readAsArrayBuffer(f);
+  }
+  function guardarMaestro() {
+    const b = $('maeOk');
+    if (!b || b.disabled || !maeTmp) return;
+    b.disabled = true; b.textContent = 'Cargando…';
+    const reemplazarEan = !!($('maeReemp') && $('maeReemp').checked), crear = !!($('maeCrear') && $('maeCrear').checked);
+    llamar('bdCargarMaestroProductos', { filas: maeTmp.filas, reemplazarEan, crear, usuario: ses.nombre }).then(r => {
+      ini.productos = r.productos; prodRefrescado();
+      pitido();
+      const lst = (l, n) => l.length ? `<span class="small mt8">${n} (${l.length}): ${l.slice(0, 20).map(esc).join(' · ')}${l.length > 20 ? '…' : ''}</span>` : '';
+      $('maeCaja').innerHTML = `<div class="info"><b>Listo.</b> ${plural(r.actualizados, 'producto actualizado', 'productos actualizados')}${r.creados ? ` · ${plural(r.creados, 'creado', 'creados')}` : ''}${r.sinCambios ? ` · ${plural(r.sinCambios, 'ya estaba igual', 'ya estaban iguales')}` : ''}<br>
+          ${plural(r.eanPuestos, 'EAN puesto', 'EAN puestos')}${r.eanQuitados ? ` · ${plural(r.eanQuitados, 'EAN quitado', 'EAN quitados')}` : ''}</div>
+        ${lst(r.repetidos, '<b class="txt-naranja">EAN que no se pusieron porque ya son de otro producto</b>')}
+        ${lst(r.malos, '<b class="txt-naranja">EAN con números de más o de menos</b>')}
+        ${lst(r.noEstan, '<b class="txt-naranja">Códigos que no están (no se crearon)</b>')}
+        <button class="btn btn-pri btn-xl mt12" onclick="cerrarModal(); pintarApp()">Cerrar</button>`;
+      if (vista === 'productos' && prodTab === 'totales') { ptMemo = null; if ($('prodLista')) $('prodLista').innerHTML = listaProdHtml(); }
+    }).catch(e => { b.disabled = false; b.textContent = `Cargar ${maeTmp.filas.length} productos`; errForm(e.message); });
   }
   function guardarUbicSede() {
     const b = $('ubOk'); b.disabled = true; b.textContent = 'Guardando…';
@@ -7246,7 +7506,12 @@
   function ingProducto(txt, enter) {
     const p = buscarProducto(String(txt || '').split(' · ')[0]) || buscarProducto(txt);
     const S = cpScope();
-    if (!p) { if (enter && String(txt).trim()) toast('No hay un producto con ese código', 'error'); return; }
+    if (!p) {
+      const t = String(txt || '').replace(/\s+/g, '');
+      if (pareceEan(t)) return eanNuevoEn(t, 'ing');   // EAN que no está: ponérselo a un producto
+      if (enter && t) toast('No hay un producto con ese código', 'error');
+      return;
+    }
     if (S.cic && !S.cic.codigos.includes(p.id)) { toast(`${p.nombre} no está en este cíclico. Solo se cuentan los productos que mandaron a contar.`, 'error'); $('ingCod').value = ''; return; }
     ing.cod = p.id;
     if (!S.cic) { const o = ingAlmsProd(p.id); ing.alm = o.registrado && o.lista.length === 1 ? o.lista[0].key : ''; }   // 2 o más: que escojan
@@ -7737,7 +8002,7 @@
      Picking, calidad y bloqueado: del inventario en curso (todas las sedes). Aéreo: lo ubicado en el plano.
      El almacén de cada producto sale de la lista que se carga (un producto con dos almacenes sale en dos filas). */
   let prodAlm = null;                    // { codigo: ['2000', ...] }
-  const prodF = { alm: '' };
+  const prodF = { alm: '', cat: '', sub: '', um: '', ump: '' };
   ordT.prod = { k: '', dir: 1 };
 
   // Ícono de ayuda: muestra el texto en una burbuja pequeña sin tapar la pantalla
@@ -7757,6 +8022,7 @@
   }
 
   function vistaProductosTotales() {
+    if (ptEd && puede('productos')) return ptEdVista();
     const listo = asegurarInvData();
     if (prodAlm === null && !vistaProductosTotales.pidiendo) {
       vistaProductosTotales.pidiendo = true;
@@ -7767,14 +8033,16 @@
     const alms = [...new Set(filasProdTotales().map(x => x.alm).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
     return `<div class="col gap12">
       <div class="fila-sb wrap-f gap8">
-        <span class="h2 fila gap8">Productos totales ${ayudaHtml('Aquí ves lo que tienes de cada producto en cada almacén. Picking, calidad y bloqueado salen del inventario en curso (todas las sedes) y el aéreo es lo que está ubicado en el plano. Total = picking + aéreo + calidad + bloqueado. Pasillo = dónde está en aéreo, según los pasillos del editor del plano. Toca «Ver» en un producto para moverlo, darle salida, ver su historial o dónde está.')}</span>
+        <span class="h2 fila gap8">Productos totales ${ayudaHtml('Aquí ves lo que tienes de cada producto en cada almacén. Picking, calidad y bloqueado salen del inventario en curso (todas las sedes) y el aéreo es lo que está ubicado en el plano. Total = picking + aéreo + calidad + bloqueado. Almacén y pasillo: con «Usar el pasillo cargado» encendido (Configuración → Ajustes) son los cargados para esta sede; apagado, los del plano. Toca «Ver» en un producto para moverlo, darle salida, ver su historial o dónde está.')}</span>
         <div class="fila gap8 wrap-f">
           ${puede('salida') ? '<button class="btn btn-sec" onclick="abrirSalidasRecientes()">Deshacer una salida</button>' : ''}
-          ${puede('productos') ? '<button class="btn btn-sec" onclick="abrirCargaAlmProd()">Cargar almacenes</button>' : ''}
+          ${puede('productos') ? `<button class="btn btn-sec" onclick="abrirCargaAlmProd()">Cargar almacenes</button>
+          <button class="btn btn-sec" onclick="abrirCargaMaestro()">Cargar datos de productos</button>` : ''}
           ${puede('reportes') ? `<button class="btn btn-sec" onclick="descargarInventario()">Descargar inventario</button>
           <button class="btn btn-sec" onclick="abrirSalidas()">Salidas y rotación</button>
           <button class="btn btn-sec" onclick="pedirBitacora()">Descargar bitácora</button>` : ''}
-          ${puede('productos') ? `<button class="btn btn-pri" onclick="formProducto(false)">+ Nuevo producto</button>` : ''}
+          ${puede('productos') ? `<button class="btn btn-sec" onclick="ptEdAbrir()">Editar productos</button>
+          <button class="btn btn-pri" onclick="formProducto(false)">+ Nuevo producto</button>` : ''}
           <button class="btn btn-sec" onclick="invData=null; prodAlm=null; ptMemo=null; pintarApp()">Actualizar</button>
         </div></div>
       <div class="pt-filtros">
@@ -7785,8 +8053,95 @@
           <option value="-" ${prodF.alm === '-' ? 'selected' : ''}>Sin almacén</option></select>
         <label class="fila gap8 small" style="cursor:pointer"><input type="checkbox" id="prodStock" ${prodSoloStock ? 'checked' : ''}> Solo los que tienen algo</label>
       </div>
+      <div class="pt-filtros2">${PT_FIL.map(([k, campo, t]) => {
+        const vals = [...new Set(ini.productos.map(p => p[campo]).filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b), 'es', { numeric: true }));
+        return `<select class="campo" aria-label="${t}" onchange="prodF.${k}=this.value; pagInicio('prod'); $('prodLista').innerHTML = listaProdHtml()">
+          <option value="">${t}: todas</option>${vals.map(v => `<option value="${esc(v)}" ${prodF[k] === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+          <option value="-" ${prodF[k] === '-' ? 'selected' : ''}>Sin ${t.toLowerCase()}</option></select>`;
+      }).join('')}</div>
       <div id="prodLista">${listaProdHtml()}</div>
     </div>`;
+  }
+
+  /* ----- Editar productos: una tabla con los datos de cada producto para corregirlos de una vez ----- */
+  let ptEd = null;   // { q, cambios: { cod: { campo: valor } }, ok }
+  const plural = (n, uno, varios) => `${n} ${n === 1 ? uno : varios}`;
+  const PT_ED = [['nombre', 'Nombre', 'nombre'], ['codigoNutresa', 'Cód. Nutresa', 'nut'], ['codigoBarras', 'EAN 13', 'ean'], ['ean2', 'Otro EAN 13', 'ean'], ['ean14', 'EAN 14 (caja)', 'ean'],
+    ['unidadMedida', 'Unidad', 'um'], ['undPorCaja', 'Und x caja', 'num'], ['cajasPorEstiba', 'Cajas x estiba', 'num'], ['equivKg', 'Equiv Kg', 'kg'],
+    ['umProveedor', 'UM proveedor', 'um'], ['categoria', 'Categoría', 'nut'], ['subcategoria', 'Subcategoría', 'nut'],
+    ['largo', 'Largo', 'um'], ['ancho', 'Ancho', 'um'], ['alto', 'Alto', 'um'], ['obsAbast', 'Obs. abastecimiento', 'nombre'], ['observaciones', 'Observaciones', 'nombre']];
+  function ptEdAbrir() {
+    if (sinPermiso('productos')) return;
+    ptEd = { q: prodFiltro || '', cambios: {}, ok: false };
+    pagInicio('pted'); pintarApp();
+  }
+  const ptEdN = () => Object.keys(ptEd.cambios).length;
+  function ptEdSalir(b) {
+    if (ptEdN() && b && b.dataset.ok !== '1') { b.dataset.ok = '1'; b.textContent = '¿Salir sin guardar? Toca otra vez'; return; }
+    ptEd = null; pintarApp();
+  }
+  function ptEdVista() {
+    return `<div class="col gap12">
+      <div class="fila-sb wrap-f gap8">
+        <span class="h2 fila gap8">Editar productos ${ayudaHtml('Cambia lo que necesites directamente en la tabla: nombre, código Nutresa, los EAN (el del producto, otro EAN 13 y el EAN 14 de la caja), unidad, und x caja, Equiv Kg, categoría, medidas y observaciones. Lo que cambias queda marcado en amarillo y no se guarda hasta que toques «Guardar cambios». El código Atlantic no se puede cambiar porque con él está guardado todo el historial del producto (inventario, movimientos y conteos).')}</span>
+        <div class="fila gap8 wrap-f">
+          <button class="btn btn-sec" onclick="ptEdSalir(this)">Volver</button>
+          <button id="ptEdOk" class="btn btn-pri" onclick="ptEdGuardar()" ${ptEdN() ? '' : 'disabled'}>${ptEdBtnTxt()}</button>
+        </div></div>
+      <div class="pt-filtros">
+        <div class="pt-buscar">${campoConCamara(`<input id="ptEdQ" class="campo" type="search" autocomplete="off" spellcheck="false"
+          placeholder="Buscar por código Atlantic, Nutresa, EAN o nombre" value="${esc(ptEd.q)}" aria-label="Buscar producto" oninput="ptEd.q=this.value; pagInicio('pted'); ptEdPintarLista()">`, 'ptEdQ')}</div>
+        <label class="fila gap8 small" style="cursor:pointer"><input type="checkbox" ${ptEd.solo ? 'checked' : ''} onchange="ptEd.solo=this.checked; pagInicio('pted'); ptEdPintarLista()"> Solo los cambiados</label>
+      </div>
+      <p id="fErrPt" class="error" hidden></p>
+      <div id="ptEdLista">${ptEdListaHtml()}</div>
+    </div>`;
+  }
+  const ptEdBtnTxt = () => ptEdN() ? `Guardar cambios (${ptEdN()})` : 'Guardar cambios';
+  function ptEdPintarLista() { if ($('ptEdLista')) $('ptEdLista').innerHTML = ptEdListaHtml(); }
+  function ptEdListaHtml() {
+    const pal = sinTilde(ptEd.q.trim()).split(/\s+/).filter(Boolean);
+    const lista = ini.productos.filter(p => (!ptEd.solo || ptEd.cambios[p.id])
+      && (!pal.length || pal.every(w => sinTilde(`${p.id} ${p.codigoNutresa} ${p.codigoBarras} ${p.ean2 || ''} ${p.ean14 || ''} ${p.nombre}`).includes(w))))
+      .sort((a, b) => a.id.localeCompare(b.id, 'es', { numeric: true }));
+    if (!lista.length) return `<p class="muted">${ptEd.solo ? 'No hay productos cambiados.' : 'No hay productos con esa búsqueda.'}</p>`;
+    const pg = paginar('pted', lista, ptEdPintarLista);
+    const val = (p, k) => { const c = ptEd.cambios[p.id]; return c && k in c ? c[k] : (p[k] ?? ''); };
+    return `<span class="muted small">${plural(lista.length, 'producto', 'productos')}</span>
+      <div class="tabla-wrap"><table class="tabla pted-tabla"><thead><tr><th>Código Atlantic</th>${PT_ED.map(([, t]) => `<th>${t}</th>`).join('')}</tr></thead>
+      <tbody>${pg.filas.map(p => `<tr>
+        <td class="nowrap" data-l="Código Atlantic"><b>${esc(p.id)}</b></td>
+        ${PT_ED.map(([k, t, cls]) => {
+          const v = val(p, k), cam = ptEd.cambios[p.id] && k in ptEd.cambios[p.id];
+          return `<td data-l="${t}" class="pted-${cls}"><input class="campo pted-in${cam ? ' pted-cam' : ''}" data-c="${esc(p.id)}" data-k="${k}" value="${esc(v)}" aria-label="${t} de ${esc(p.id)}"
+            ${cls === 'num' ? 'type="number" inputmode="numeric" min="1" step="1"' : cls === 'kg' ? 'inputmode="decimal" autocomplete="off"' : cls === 'ean' ? 'inputmode="numeric" autocomplete="off"' : 'autocomplete="off"'} oninput="ptEdCambio(this)"></td>`;
+        }).join('')}</tr>`).join('')}</tbody></table></div>${pg.barra}`;
+  }
+  function ptEdCambio(el) {
+    const p = prodDe(el.dataset.c), k = el.dataset.k;
+    if (!p) return;
+    const orig = String(p[k] ?? ''), v = el.value;
+    const c = ptEd.cambios[p.id] = ptEd.cambios[p.id] || {};
+    if (v.trim() === orig.trim()) delete c[k]; else c[k] = v;
+    if (!Object.keys(c).length) delete ptEd.cambios[p.id];
+    el.classList.toggle('pted-cam', k in (ptEd.cambios[p.id] || {}));
+    const b = $('ptEdOk'); if (b) { b.disabled = !ptEdN(); b.textContent = ptEdBtnTxt(); }
+    if ($('fErrPt')) $('fErrPt').hidden = true;
+  }
+  function ptEdGuardar() {
+    const b = $('ptEdOk');
+    if (!b || b.disabled || !ptEdN()) return;
+    const cambios = Object.entries(ptEd.cambios).map(([codigo, c]) => Object.assign({ codigo }, c));
+    b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdEditarProductos', { cambios, usuario: ses.nombre }).then(r => {
+      ini.productos = r.productos; prodRefrescado();
+      ptEd.cambios = {}; ptEd.solo = false;
+      pitido(); toast(`Listo: ${plural(r.cambiados, 'producto actualizado', 'productos actualizados')}`, 'ok');
+      pintarApp();
+    }).catch(e => {
+      b.disabled = false; b.textContent = ptEdBtnTxt();
+      const f = $('fErrPt'); if (f) { f.textContent = e.message; f.hidden = false; f.scrollIntoView({ block: 'nearest' }); } else toast(e.message, 'error');
+    });
   }
 
   // Una fila por producto y almacén
@@ -7809,8 +8164,7 @@
       ((pasProd[l.productoId] = pasProd[l.productoId] || {})[k] = pasProd[l.productoId][k] || new Set()).add(pa.nombre);
     });
     const pasDe = (cod, alm) => {
-      const cargado = pasCargado(cod, ses.sedeId, alm);   // el que se cargó para esta sede manda
-      if (cargado) return cargado;
+      if (usarPasCargado()) return pasCargado(cod, ses.sedeId, alm);   // encendido: solo el cargado para esta sede
       const m = pasProd[cod];
       if (!m) return '';
       const s = m[alm] || (Object.keys(m).length === 1 || !alm ? Object.values(m)[0] : null);   // si solo hay uno, va en cualquier almacén
@@ -7818,7 +8172,8 @@
     };
     const filas = [];
     ini.productos.forEach(p => {
-      const f = porCod[p.id], asig = (prodAlm && prodAlm[p.id]) || [];
+      // Almacén: encendido = el cargado (de esta sede; si no tiene, el de «Cargar almacenes»); apagado = donde está en el plano o se contó
+      const f = porCod[p.id], asig = usarPasCargado() ? almsRegDe(p.id, ses.sedeId).map(String) : [];
       const vals = {};
       if (f) Object.values(f.alm).forEach(a => {
         const k = almCorto(a.key) || '', v = vals[k] = vals[k] || { pk: 0, ae: 0, ca: 0, bl: 0 };
@@ -7838,7 +8193,10 @@
     ptMemo = { d, alm: prodAlm, sede, ub, pc: usarPasCargado(), v: filas };
     return filas;
   }
-  const valProd = k => ({ cod: x => x.p.id, ean: x => x.p.codigoBarras || '', prod: x => x.p.nombre, alm: x => x.alm, pas: x => x.pas, pk: x => x.pk, ae: x => x.ae, ca: x => x.ca, bl: x => x.bl, tot: x => x.tot }[k]);
+  const PT_FIL = [['cat', 'categoria', 'Categoría'], ['sub', 'subcategoria', 'Subcategoría'], ['um', 'unidadMedida', 'Unidad'], ['ump', 'umProveedor', 'UM proveedor']];
+  const valProd = k => ({ cod: x => x.p.id, nut: x => x.p.codigoNutresa || '', ean: x => x.p.codigoBarras || '', prod: x => x.p.nombre,
+    um: x => x.p.unidadMedida || '', kg: x => x.p.equivKg === '' ? '' : x.p.equivKg, ucj: x => x.p.undPorCaja, cat: x => x.p.categoria || '', sub: x => x.p.subcategoria || '',
+    ump: x => x.p.umProveedor || '', lar: x => x.p.largo || '', anc: x => x.p.ancho || '', alt: x => x.p.alto || '', oab: x => x.p.obsAbast || '', obs: x => x.p.observaciones || '', alm: x => x.alm, pas: x => x.pas, pk: x => x.pk, ae: x => x.ae, ca: x => x.ca, bl: x => x.bl, tot: x => x.tot }[k]);
 
   function listaProdHtml() {
     if (!invData || prodAlm === null) return '';
@@ -7847,8 +8205,9 @@
     let lista = todas.filter(x => {
       if (prodSoloStock && !conAlgo.has(x.p.id)) return false;   // si el producto tiene algo, salen todos sus almacenes
       if (prodF.alm === '-' ? x.alm : prodF.alm && x.alm !== prodF.alm) return false;
+      if (PT_FIL.some(([k, campo]) => prodF[k] && (prodF[k] === '-' ? x.p[campo] : x.p[campo] !== prodF[k]))) return false;
       if (!palabras.length) return true;
-      const t = sinTilde(x.p.id + ' ' + x.p.codigoNutresa + ' ' + x.p.codigoBarras + ' ' + x.p.nombre);
+      const t = sinTilde([x.p.id, x.p.codigoNutresa, x.p.codigoBarras, x.p.ean2, x.p.ean14, x.p.nombre, x.p.categoria, x.p.subcategoria, x.p.umProveedor, x.p.obsAbast, x.p.observaciones].join(' '));
       return palabras.every(w => t.includes(w));
     });
     if (!ordT.prod.k) lista = lista.slice().sort((a, b) => conAlgo.has(b.p.id) - conAlgo.has(a.p.id) || a.p.nombre.localeCompare(b.p.nombre) || String(a.alm).localeCompare(String(b.alm), 'es', { numeric: true }));
@@ -7858,17 +8217,23 @@
     const n = v => v ? nInv(v) : '<span class="muted">0</span>';
     return `<span class="muted small">${lista.length} fila${lista.length === 1 ? '' : 's'}</span>
       <div class="tabla-wrap"><table class="tabla pt-tabla"><thead><tr>
-        ${thO('prod', 'cod', 'Código')}${thO('prod', 'ean', 'EAN')}${thO('prod', 'prod', 'Producto')}${thO('prod', 'alm', 'Almacén')}${thO('prod', 'pas', 'Pasillo')}
+        ${thO('prod', 'cod', 'Código')}${thO('prod', 'nut', 'Cód. Nutresa')}${thO('prod', 'ean', 'EAN')}${thO('prod', 'prod', 'Producto')}${thO('prod', 'alm', 'Almacén')}${thO('prod', 'pas', 'Pasillo')}
         ${thO('prod', 'pk', 'Picking', 'num')}${thO('prod', 'ae', 'Aéreo', 'num')}${thO('prod', 'ca', 'Calidad', 'num')}${thO('prod', 'bl', 'Bloqueado', 'num')}${thO('prod', 'tot', 'Total', 'num')}
+        ${thO('prod', 'um', 'Unidad')}${thO('prod', 'kg', 'Equiv Kg', 'num')}${thO('prod', 'ucj', 'Und / cj', 'num')}${thO('prod', 'ump', 'UM proveedor')}${thO('prod', 'cat', 'Categoría')}${thO('prod', 'sub', 'Subcategoría')}
+        ${thO('prod', 'lar', 'Largo')}${thO('prod', 'anc', 'Ancho')}${thO('prod', 'alt', 'Alto')}${thO('prod', 'oab', 'Obs. abastecimiento')}${thO('prod', 'obs', 'Observaciones')}
         <th></th></tr></thead>
       <tbody>${pg.filas.map(x => `<tr>
         <td class="nowrap"><b>${esc(x.p.id)}</b></td>
-        <td class="nowrap small">${x.p.codigoBarras ? esc(x.p.codigoBarras) : '<span class="muted">—</span>'}</td>
-        <td><span class="pt-nom">${esc(x.p.nombre)}</span><span class="muted small">Nutresa ${esc(x.p.codigoNutresa || '—')} · ${esc(x.p.unidadMedida || 'UN')}</span></td>
+        <td class="nowrap">${x.p.codigoNutresa ? esc(x.p.codigoNutresa) : '<span class="muted">—</span>'}</td>
+        <td class="nowrap small">${x.p.codigoBarras || x.p.ean2 || x.p.ean14 ? [x.p.codigoBarras, x.p.ean2].filter(Boolean).map(esc).join('<br>') + (x.p.ean14 ? `${x.p.codigoBarras || x.p.ean2 ? '<br>' : ''}<span class="muted">Caja</span> ${esc(x.p.ean14)}` : '') : '<span class="muted">—</span>'}</td>
+        <td><span class="pt-nom">${esc(x.p.nombre)}</span></td>
         <td class="nowrap">${x.alm ? `<b>${esc(x.alm)}</b>${x.otro ? ' <span class="tag amar" title="Este almacén no está en la lista de almacenes del producto">Otro</span>' : ''}` : '<span class="muted">—</span>'}</td>
         <td class="nowrap">${x.pas ? esc(x.pas) : '<span class="muted">—</span>'}</td>
         <td class="num">${n(x.pk)}</td><td class="num">${n(x.ae)}</td><td class="num">${n(x.ca)}</td><td class="num">${n(x.bl)}</td>
         <td class="num"><b>${nInv(x.tot)}</b></td>
+        <td class="nowrap">${esc(x.p.unidadMedida || '—')}</td><td class="num">${x.p.equivKg === '' ? '<span class="muted">—</span>' : nInv(x.p.equivKg)}</td><td class="num">${nInv(x.p.undPorCaja)}</td>
+        ${['umProveedor', 'categoria', 'subcategoria', 'largo', 'ancho', 'alto'].map(k => `<td class="nowrap small">${x.p[k] ? esc(x.p[k]) : '<span class="muted">—</span>'}</td>`).join('')}
+        ${['obsAbast', 'observaciones'].map(k => `<td class="small pt-obs">${x.p[k] ? esc(x.p[k]) : '<span class="muted">—</span>'}</td>`).join('')}
         <td><button class="btn btn-sec btn-mini" onclick="abrirOpcionesProd('${esc(x.p.id)}')">Ver</button></td></tr>`).join('')}</tbody></table></div>${pg.barra}`;
   }
 
@@ -9432,7 +9797,7 @@
      2. Si el lector no manda Enter al final, el código se toma solo cuando termina de escribir. */
   const lectorT = { buf: '', ult: 0, rap: 0, t: null, campo: null, n: 0 };
   const editable = el => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
-  const CAMPOS_COD = ['eanTxt', 'eanMini', 'raTxt', 'ingCod', 'cfQ', 'cpQ', 'invProd', 'invLug', 'prQ', 'bpQ', 'rtCod', 'scan'];
+  const CAMPOS_COD = ['eanTxt', 'eanMini', 'raTxt', 'ingCod', 'rcProd', 'rcPendQ', 'cfQ', 'cpQ', 'invProd', 'invLug', 'prQ', 'bpQ', 'rtCod', 'ptEdQ', 'scan'];
   function codigoSinCampo(t) {
     const id = CAMPOS_COD.find(k => $(k) && $(k).offsetParent !== null);
     if (!id) return toast('Código leído: ' + t + '. Abre la pantalla donde lo vas a usar.', 'error');
@@ -9574,6 +9939,8 @@
     if (camDestino === 'prQ' && $('prQ')) { $('prQ').value = valor; return elegirPrTexto(valor); }
     if (camDestino === 'bpQ' && $('bpQ')) { $('bpQ').value = valor; return buscarProductoCod(valor); }
     if (camDestino === 'ingCod' && $('ingCod')) { $('ingCod').value = valor; return ingProducto(valor, true); }
+    if (camDestino === 'rcProd' && $('rcProd')) { $('rcProd').value = valor; return rcElegirProd(valor, true); }
+    if (camDestino === 'rcPendQ' && $('rcPendQ')) { const pr = buscarProducto(valor); rcPendQ = pr ? pr.id : valor; $('rcPendQ').value = rcPendQ; return rcPintarPend(); }
     if (camDestino === 'rcQ' && $('rcQ')) { $('rcQ').value = valor; return rcEscaneado(valor); }
     if (camDestino === 'cfQ' && $('cfQ')) { const pr = buscarProducto(valor); $('cfQ').value = pr ? pr.id : valor; $('cfQ').dispatchEvent(new Event('input')); return; }
     if (camDestino === 'cpQ' && $('cpQ')) { const pr = buscarProducto(valor); $('cpQ').value = pr ? pr.id : valor; $('cpQ').dispatchEvent(new Event('input')); return; }
@@ -9786,14 +10153,21 @@
           <button class="btn btn-sec btn-xl" onclick="formProducto(false, '${esc(ean)}')">Crear producto nuevo</button></div>`
         : '<p class="small mt16">Pídele a quien maneja los productos que lo agregue.</p>'}`);
   }
+  // Desde Inventario (Ingresar o Contar): escanearon un EAN que no está → escoger de qué producto es, guardarlo y seguir contando
+  function eanNuevoEn(ean, volverA) {
+    if (!puede('productos')) return toast(`El EAN ${ean} no está en ningún producto. Pídele a quien maneja los productos que lo agregue, o escanea el rótulo de la caja.`, 'error');
+    if (!$('modal').hidden && hojaCtx && hojaCtx.ean === ean) return;   // ya está abierto
+    hojaCtx = { ean, volverA };
+    hojaEanAsignar();
+  }
   function hojaEanAsignar() {
-    const ean = hojaCtx && hojaCtx.ean;
+    const ean = hojaCtx && hojaCtx.ean, va = hojaCtx && hojaCtx.volverA;
     if (!ean) return;
-    abrirModal(`<div class="fila-sb"><span class="h2">¿De qué producto es?</span>${btnCerrar()}</div>
-      <span class="muted small mt8">EAN <b>${esc(ean)}</b>. Busca el producto por código Atlantic, Nutresa o nombre y tócalo.</span>
+    abrirModal(`<div class="fila-sb"><span class="h2">${va ? 'EAN nuevo: ¿de qué producto es?' : '¿De qué producto es?'}</span>${btnCerrar()}</div>
+      <span class="muted small mt8">${va ? `El EAN <b>${esc(ean)}</b> todavía no está en ningún producto.` : `EAN <b>${esc(ean)}</b>.`} Busca el producto por código Atlantic, Nutresa o nombre y tócalo.</span>
       <input id="eaQ" class="campo mt12" autocomplete="off" placeholder="Código o nombre" oninput="eanListaPintar()">
       <div id="eaLista" class="lista-bp mt8" role="list"></div>
-      <button class="btn btn-sec btn-xl mt12" onclick="hojaEanNuevo('${esc(ean)}')">Volver</button>`);
+      ${va ? '<button class="btn btn-sec btn-xl mt12" onclick="cerrarModal()">Cancelar</button>' : `<button class="btn btn-sec btn-xl mt12" onclick="hojaEanNuevo('${esc(ean)}')">Volver</button>`}`);
     eanListaPintar();
     if (!('ontouchstart' in window)) $('eaQ').focus();
   }
@@ -9816,7 +10190,7 @@
         <button id="eaOk" class="btn btn-pri btn-xl" onclick="eanGuardarEn('${esc(pid)}')">Guardar</button></div>`);
   }
   function eanGuardarEn(pid) {
-    const b = $('eaOk'), ean = hojaCtx && hojaCtx.ean;
+    const b = $('eaOk'), ean = hojaCtx && hojaCtx.ean, va = hojaCtx && hojaCtx.volverA;
     if (!b || b.disabled || !ean) return;
     b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdGuardarEan', { codigo: pid, ean, usuario: ses.nombre }).then(r => {
@@ -9824,6 +10198,9 @@
       $('dlProductos').innerHTML = r.productos.map(x => `<option value="${esc(x.id + ' · ' + x.nombre)}">`).join('');
       if ($('prodLista')) $('prodLista').innerHTML = listaProdHtml();
       pitido(); toast(`EAN ${ean} guardado en ${pid}`, 'ok');
+      if (va === 'ing') { cerrarModal(); if ($('ingCod')) { $('ingCod').value = pid; ingProducto(pid, true); } return; }   // sigue contando ese producto
+      if (va === 'rc') { cerrarModal(); if ($('rcQ')) rcEscaneado(pid); return; }
+      if (va === 'rcProd') { cerrarModal(); if (rcAct) { rb = borradorNuevo(pid); guardarRb(); pintarRbForm(); } return; }
       hojaProducto(prodDe(pid));
     }).catch(e => { b.disabled = false; b.textContent = 'Guardar'; errForm(e.message); });
   }
@@ -10020,7 +10397,7 @@
   }
 
   // ¿La persona está llenando algo? Entonces no se le borra lo que escribió
-  const ID_FILTROS = ['rcQ', 'scan', 'busca', 'prodQ', 'invQ', 'rtfQ', 'cqQ', 'usQ', 'piQ', 'pBus', 'cicQ', 'cnQ', 'cdEPas', 'cdEAlm', 'cdENiv', 'cpQ', 'cfQ'];
+  const ID_FILTROS = ['rcPendQ', 'ptEdQ', 'rcQ', 'scan', 'busca', 'prodQ', 'invQ', 'rtfQ', 'cqQ', 'usQ', 'piQ', 'pBus', 'cicQ', 'cnQ', 'cdEPas', 'cdEAlm', 'cdENiv', 'cpQ', 'cfQ'];
   function ocupado() {
     if (!$('modal').hidden || colocando || flujo) return true;
     const a = document.activeElement;
@@ -10490,7 +10867,19 @@
         <span class="switch"><input type="checkbox" id="ajPas" role="switch" ${usarPasCargado() ? 'checked' : ''} onchange="guardarAjustePasillo(this)"><span></span></span></div>
       <span class="muted small"><b>Encendido:</b> el pasillo de cada producto es el que se cargó en Inventario con «Actualizar almacenes y pasillos» (si un producto no tiene, se usa el del plano).
         <b>Apagado:</b> siempre se usa el pasillo del plano. Aplica al filtro de pasillo de las reconfirmaciones, a «Pasillos» del inventario y a Productos totales.</span>
+    </div>
+    <div class="card col gap8 mt12" style="max-width:520px">
+      <div class="fila-sb gap12"><label class="h3" for="ajSon">Sonido</label>
+        <span class="switch"><input type="checkbox" id="ajSon" role="switch" ${conSonido() ? 'checked' : ''} onchange="guardarAjusteSonido(this)"><span></span></span></div>
+      <span class="muted small">El pitido de la app al escanear, al guardar y en los avisos. Aplica en todos los equipos. ${ayudaHtml('Este interruptor apaga el sonido de la app. El pitido propio del lector del equipo (el escáner de arriba) se apaga en la configuración del escáner del mismo equipo.')}</span>
     </div>`;
+  }
+  function guardarAjusteSonido(el) {
+    const v = el.checked;
+    el.disabled = true;
+    llamar('bdGuardarParametro', { clave: 'sonido', valor: v, usuario: ses.nombre })
+      .then(p => { ini.parametros = p; el.disabled = false; toast(v ? 'Listo: sonido activado' : 'Listo: sonido desactivado', 'ok'); if (v) pitido(); })
+      .catch(e => { el.checked = !v; el.disabled = false; toast(e.message, 'error'); });
   }
   function guardarAjustePasillo(el) {
     const v = el.checked;
@@ -11488,6 +11877,7 @@
     return ini.productos.find(p =>
       p.id.toUpperCase() === T ||
       (p.codigoBarras && p.codigoBarras === t) ||
+      (p.ean2 && p.ean2 === t) || (p.ean14 && p.ean14 === t) ||   // segundo EAN 13 y el de la caja
       (p.codigoNutresa && p.codigoNutresa === t) ||
       (p.id + ' · ' + p.nombre).toUpperCase() === T);
   }

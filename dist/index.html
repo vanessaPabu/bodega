@@ -870,6 +870,22 @@
   .inv-tabla td.g-ae, .inv-tabla th.g-ae { background: rgba(232,163,61,.07); }
   /* Columnas de reconfirmación (al lado de cada una) */
   .inv-tabla td.g-rc, .inv-tabla th.g-rc { background: rgba(197,90,17,.10); }
+  /* Recibidor: partes agrupadas por lote y vencimiento */
+  .rb-lote { border: 1px solid var(--borde, #ddd); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .campo.ls-u { width: auto; min-height: 34px; padding: 4px 8px; font-size: 13px; }
+  /* Editar productos (Productos totales) */
+  .pted-tabla td { padding: 4px 6px; vertical-align: middle; }
+  .pted-tabla .pted-in { min-height: 36px; padding: 6px 8px; font-size: 14px; width: 100%; }
+  .pted-tabla td.pted-nombre { min-width: 280px; } .pted-tabla td.pted-nut, .pted-tabla td.pted-ean { min-width: 140px; }
+  .pted-tabla td.pted-um { min-width: 90px; } .pted-tabla td.pted-num, .pted-tabla td.pted-kg { min-width: 100px; }
+  .pted-tabla .pted-cam { background: color-mix(in srgb, var(--amar, #F9A825) 22%, transparent); border-color: var(--amar, #F9A825); }
+  @media (max-width: 600px) {
+    .tabla.pted-tabla { min-width: 0; } .pted-tabla thead { display: none; }
+    .pted-tabla tr { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; padding: 10px 4px; border-bottom: 1px solid var(--borde, #ddd); }
+    .pted-tabla td { display: block; border: 0; padding: 0; min-width: 0 !important; width: auto !important; }
+    .pted-tabla td[data-l="Código Atlantic"], .pted-tabla td.pted-nombre { grid-column: 1 / -1; }
+    .pted-tabla td[data-l]:not([data-l="Código Atlantic"])::before { content: attr(data-l); display: block; font-size: 12px; opacity: .7; }
+  }
   /* Pasillos del inventario: «Faltan» centrado */
   .cp-av th.cp-faltan, .cp-av td.cp-faltan { text-align: center; }
   .cp-av .cp-alm-c { display: none; }
@@ -990,6 +1006,9 @@
   @media (max-width: 700px) { .pt-filtros { grid-template-columns: 1fr; } }
   .tabla.pt-tabla { min-width: 860px; }
   .pt-tabla td { vertical-align: middle; }
+  .tabla.pt-tabla { min-width: 1700px; } .pt-tabla td.pt-obs { min-width: 180px; max-width: 280px; white-space: normal; }
+  .pt-filtros2 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  @media (max-width: 700px) { .pt-filtros2 { grid-template-columns: 1fr 1fr; } }
   .pt-nom { display: block; font-weight: 600; }
   .pt-acciones { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
   .pt-salida { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--card); }
@@ -1043,7 +1062,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-B3P_AnmE.js"></script>
+  <script type="module" crossorigin src="./assets/index-CN4AMhpq.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>
