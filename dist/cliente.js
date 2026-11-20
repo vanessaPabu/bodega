@@ -3900,8 +3900,8 @@
       <div class="fila-sb wrap-f gap8">
         <div class="col gap4"><span class="h2 fila gap8 wrap-f">${esc(ia.nombre || 'Inventario')}${puede('inv_sap') ? '<button class="link small" onclick="renombrarInventario(\'actual\')">Cambiar nombre</button>' : ''}</span>
           <span class="small">${fCorta(ia.fecha)} · ${esc(nombreSede(ses.sedeId))} · <span class="tag amar">En curso</span></span>
-          <span class="muted small">${c ? `SAP cargado el ${fechaHora(c.fecha)} por ${esc(c.usuario || '—')} · ${c.filas} productos${c.archivo ? ' · ' + esc(c.archivo) : ''}`
-            : '<b class="txt-naranja">Todavía no se ha cargado el Excel de SAP de este inventario.</b>'}</span>
+          ${jefe ? `<span class="muted small inv-sap-info">${c ? `SAP cargado el ${fechaHora(c.fecha)} por ${esc(c.usuario || '—')} · ${c.filas} productos${c.archivo ? ' · ' + esc(c.archivo) : ''}`
+            : '<b class="txt-naranja">Todavía no se ha cargado el Excel de SAP de este inventario.</b>'}</span>` : ''}
           ${invData.error ? `<span class="error small">${esc(invData.error)}</span>` : ''}</div>
         <span class="fila gap8 wrap-f">
           ${puede('inv_sap') ? '<button class="btn btn-pri" onclick="abrirCargaSap()">Cargar Excel de SAP</button>' : ''}
@@ -4882,7 +4882,7 @@
   }
 
   function abrirCiclico(id, sinPintar) {
-    if (cicSel !== id) { rcc.listo = ''; rcc.sede = ''; rcc.pas = ''; rcc.rack = ''; rcc.q = ''; rcc.eanPid = ''; pagInicio('rcc'); invForm.prod = ''; pagInicio('cic'); cicF.q = ''; cicF.estado = ''; cicSub = 'ingresar'; ing.cod = ''; cf.q = ''; cp.alm = '*'; cp.pas = '*'; cpMarcados = new Set(); }
+    if (cicSel !== id) { rcc.listo = ''; rcc.sede = ''; rcc.pas = ''; rcc.racks = []; rcc.q = ''; rcc.eanPid = ''; pagInicio('rcc'); invForm.prod = ''; pagInicio('cic'); cicF.q = ''; cicF.estado = ''; cicSub = 'ingresar'; ing.cod = ''; cf.q = ''; cp.alm = '*'; cp.pas = '*'; cpMarcados = new Set(); }
     cicSel = id;
     if (!cicData || cicData.ciclico.id !== id) cicData = null;
     llamar('bdCiclico', id).then(d => {
@@ -5230,7 +5230,8 @@
      Código, producto, almacén, pasillo (donde está su picking en el plano) y, si tiene aéreo, el rack donde está.
      Se filtra por pasillo o por rack (lo que les toque contar). Cada cantidad se guarda sola al pasar al siguiente;
      «Finalizar» guarda lo que falte y dice Listo. ----- */
-  const rcc = { sede: '', pas: '', rack: '', q: '', listo: '', eanPid: '' };
+  let rcRacksCierre = false;
+  const rcc = { sede: '', pas: '', racks: [], q: '', listo: '', eanPid: '' };   // racks: los que se marcaron (varios)
   const rcGuardando = new Map();   // sede|código → lo que se está guardando
   const rcSede = () => (rcc.sede && ini.sedes.some(x => x.id === rcc.sede)) ? rcc.sede : ses.sedeId;
   // Plano de cualquier sede (lugares, pasillos del editor, filas y códigos), guardado 2 minutos
@@ -5271,22 +5272,33 @@
       const cargado = pasCargado(cod, sid);
       const pasL = cargado ? [cargado] : [...new Set(pk.concat(ae).map(l => L.pasDeRack[L.esp[l.ubicacionId].r]).filter(Boolean))].sort(num_);
       // Rack del aéreo: ALMACÉN-RAK del código de la ubicación; si no tiene código, la fila y la posición
-      const racks = [...new Set(ae.map(l => { const e = L.esp[l.ubicacionId], cd = L.codigos[l.ubicacionId];
-        return cd ? cd.split('-').slice(0, 2).join('-') : (g && g.porPos[e.r + '|' + e.p]) || `${L.rackNom[e.r] || e.r} P${e.p}`; }))].sort(num_);
+      // ubR: por cada rack, la ubicación más baja donde está (para ordenar del 1 al último dentro del rack)
+      const ubR = {};
+      ae.forEach(l => { const e = L.esp[l.ubicacionId], cd = L.codigos[l.ubicacionId];
+        const k = cd ? cd.split('-').slice(0, 2).join('-') : (g && g.porPos[e.r + '|' + e.p]) || `${L.rackNom[e.r] || e.r} P${e.p}`;
+        const u = cd || `${k} N${e.n}`;
+        if (!(k in ubR) || num_(u, ubR[k]) < 0) ubR[k] = u; });
+      const racks = Object.keys(ubR).sort(num_);
       const reg = almsRegDe(cod, sid);
       const almCod = ls.map(l => (L.codigos[l.ubicacionId] || '').split('-')[0]).find(Boolean) || '';
       const cs = S.conteos.filter(k => k.codigo === cod && k.tipo === 'PICKING' && (k.sedeId || c.sedeId) === sid);
       const cont = cs.length ? +cs.reduce((t, k) => t + k.cantidad, 0).toFixed(3) : null;
       const pkDeAe = ae[0] ? Object.keys(L.esp).find(id => { const e = L.esp[id], a2 = L.esp[ae[0].ubicacionId]; return e.n === 0 && e.r === a2.r && e.p === a2.p; }) : '';
       const lugar = (cs[0] && cs[0].ubicacion) || (pk[0] && pk[0].ubicacionId) || pkDeAe || 'PICKING-' + (reg[0] || almCod || '');
-      return { cod, p, alm: reg.join(' / ') || almCod, pasL, pas: pasL.join(', '), racks, cont, lugar };
+      return { cod, p, alm: reg.join(' / ') || almCod, pasL, pas: pasL.join(', '), racks, ubR, cont, lugar };
     }).sort((a, b) => (a.pasL.length ? 0 : 1) - (b.pasL.length ? 0 : 1) || num_(a.pas, b.pas) || num_(a.alm, b.alm) || (a.p ? a.p.nombre : a.cod).localeCompare(b.p ? b.p.nombre : b.cod));
   }
   function rcFiltradas(todas) {
     todas = todas || rcFilas() || [];
     const pal = sinTilde(rcc.q.trim()).split(/\s+/).filter(Boolean);
-    return todas.filter(f => (!rcc.pas || (rcc.pas === '-' ? !f.pasL.length : f.pasL.includes(rcc.pas))) && (!rcc.rack || f.racks.includes(rcc.rack))
+    const selR = rcc.racks || [];
+    const l = todas.filter(f => (!rcc.pas || (rcc.pas === '-' ? !f.pasL.length : f.pasL.includes(rcc.pas))) && (!selR.length || f.racks.some(r => selR.includes(r)))
       && (!pal.length || pal.every(w => sinTilde(`${f.cod} ${f.p ? f.p.codigoNutresa + ' ' + f.p.nombre : ''}`).includes(w))));
+    if (!selR.length) return l;
+    // Con racks marcados: en orden del primer rack al último y, dentro de cada rack, por ubicación
+    const num_ = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true });
+    const clave = f => { const r = f.racks.filter(x => selR.includes(x)).sort(num_)[0]; return [r, f.ubR[r] || '']; };
+    return l.map(f => ({ f, k: clave(f) })).sort((a, b) => num_(a.k[0], b.k[0]) || num_(a.k[1], b.k[1]) || num_(a.f.cod, b.f.cod)).map(x => x.f);
   }
   function rcContarHtml() {
     const S = cpScope();
@@ -5299,17 +5311,22 @@
     const pasillos = [...new Set(todas.flatMap(f => f.pasL))].sort(num_);
     const racks = [...new Set(todas.flatMap(f => f.racks))].sort(num_);
     if (rcc.pas && rcc.pas !== '-' && !pasillos.includes(rcc.pas)) rcc.pas = '';
-    if (rcc.rack && !racks.includes(rcc.rack)) rcc.rack = '';
+    rcc.racks = (rcc.racks || []).filter(r => racks.includes(r));
     return `<section class="card col gap12 rc-contar">
       <div class="col gap4"><span class="h3">Productos para reconfirmar</span>
-        <span class="muted small">Escoge la sede y el pasillo o el rack que te tocó contar. Escribe cuánto hay en <b>picking</b> de cada producto: se guarda solo al pasar al siguiente (✓). Cuando termines, toca <b>Finalizar</b>.</span></div>
+        <span class="muted small">Escoge la sede y el pasillo o los racks que te tocó contar (puedes marcar varios). Escribe cuánto hay en <b>picking</b> de cada producto: se guarda solo al pasar al siguiente (✓). Cuando termines, toca <b>Finalizar</b>.</span></div>
       <div class="rc-filtros">
         ${selSede}
         <div><label class="lbl" for="rcPas">Pasillo</label>
           <select id="rcPas" class="campo"><option value="">Todos</option>${pasillos.map(x => `<option value="${esc(x)}" ${rcc.pas === x ? 'selected' : ''}>${/^\d+$/.test(x) ? 'Pasillo ' : ''}${esc(x)}</option>`).join('')}
             ${todas.some(f => !f.pasL.length) ? `<option value="-" ${rcc.pas === '-' ? 'selected' : ''}>Sin pasillo</option>` : ''}</select></div>
-        <div><label class="lbl" for="rcRack">Rack (aéreo)</label>
-          <select id="rcRack" class="campo"><option value="">Todos</option>${racks.map(r => `<option value="${esc(r)}" ${rcc.rack === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select></div>
+        <div><span class="lbl" id="rcRackL">Rack (aéreo)</span>
+          <details id="rcRacks" class="rc-racks"><summary class="campo" aria-labelledby="rcRackL">${rcRacksTxt()}</summary>
+            <div class="rc-racks-lista">
+              ${racks.length ? racks.map(r => `<label class="rc-rack-op"><input type="checkbox" value="${esc(r)}" ${rcc.racks.includes(r) ? 'checked' : ''}> ${esc(r)}</label>`).join('')
+                : '<span class="muted small">No hay racks de aéreo en esta reconfirmación.</span>'}
+              ${racks.length ? '<button type="button" id="rcRacksTodos" class="btn btn-sec">Ver todos</button>' : ''}
+            </div></details></div>
         <div class="inv-buscar"><label class="lbl" for="rcQ">Buscar</label>
           <div class="fila gap8"><input id="rcQ" class="campo" style="flex:1;min-width:0" type="search" placeholder="Código, nombre, EAN o rótulo" value="${esc(rcc.q)}" autocomplete="off">
             ${botonCamara('rcQ', 'btn btn-sec btn-cam2')}</div></div>
@@ -5319,6 +5336,10 @@
       <div id="rcListo">${rcc.listo}</div>
       <button id="rcFin" class="btn btn-ent-solido btn-xl" onclick="rcFinalizar()">Finalizar</button>
     </section>`;
+  }
+  function rcRacksTxt() {
+    const r = rcc.racks || [];
+    return `<span class="rc-racks-txt">${!r.length ? 'Todos' : r.length === 1 ? esc(r[0]) : `${r.length} racks`}</span>`;
   }
   function rcTablaHtml(todas) {
     const l = rcFiltradas(todas);
@@ -5354,16 +5375,23 @@
     }
     if (!(cpScope().cic.codigos || []).includes(p.id)) return toast(`${p.nombre} no está en esta reconfirmación`, 'error');
     pitido();
-    rcc.q = p.id; rcc.pas = ''; rcc.rack = ''; rcc.eanPid = p.codigoBarras ? '' : p.id; pagInicio('rcc');
+    rcc.q = p.id; rcc.pas = ''; rcc.racks = []; rcc.eanPid = p.codigoBarras ? '' : p.id; pagInicio('rcc');
     pintarApp();
     setTimeout(() => { const el = document.querySelector(`.rc-in[data-cod="${CSS.escape(p.id)}"]`); if (el) el.focus(); }, 60);
   }
   function rcPintarTabla() { if ($('rcTabla')) { $('rcTabla').innerHTML = rcTablaHtml(); rcEnlazarTabla(); } }
   function rcEnlazar() {
     const f = () => { pagInicio('rcc'); rcc.listo = ''; if ($('rcListo')) $('rcListo').innerHTML = ''; rcPintarTabla(); };
-    if ($('rcSede')) $('rcSede').addEventListener('change', () => { rcc.sede = $('rcSede').value; rcc.pas = ''; rcc.rack = ''; rcc.listo = ''; pagInicio('rcc'); pintarApp(); });
+    if ($('rcSede')) $('rcSede').addEventListener('change', () => { rcc.sede = $('rcSede').value; rcc.pas = ''; rcc.racks = []; rcc.listo = ''; pagInicio('rcc'); pintarApp(); });
     if ($('rcPas')) $('rcPas').addEventListener('change', () => { rcc.pas = $('rcPas').value; f(); });
-    if ($('rcRack')) $('rcRack').addEventListener('change', () => { rcc.rack = $('rcRack').value; f(); });
+    if ($('rcRacks')) {
+      const caja = $('rcRacks'), sum = caja.querySelector('summary');
+      const leer = () => { rcc.racks = [...caja.querySelectorAll('input[type=checkbox]:checked')].map(x => x.value); sum.innerHTML = rcRacksTxt(); f(); };
+      caja.querySelectorAll('input[type=checkbox]').forEach(x => x.addEventListener('change', leer));
+      if ($('rcRacksTodos')) $('rcRacksTodos').addEventListener('click', () => { caja.querySelectorAll('input[type=checkbox]').forEach(x => { x.checked = false; }); leer(); caja.open = false; });
+      // Al tocar fuera, se cierra la lista
+      if (!rcRacksCierre) { rcRacksCierre = true; document.addEventListener('click', ev => { const c = $('rcRacks'); if (c && c.open && !c.contains(ev.target)) c.open = false; }); }
+    }
     if ($('rcQ')) {
       $('rcQ').addEventListener('input', () => { rcc.q = $('rcQ').value; rcc.eanPid = ''; f(); });
       // Enter con un código exacto (pistola o escrito): igual que escanear
@@ -5425,7 +5453,7 @@
       return toast('No se pudo guardar todo: ' + e.message, 'error');
     }
     const l = rcFiltradas(), falta = l.filter(f => f.cont === null).length;
-    rcc.listo = `<div class="rc-listo" role="status"><b>✓ Listo.</b> ${l.length - falta} de ${l.length} productos contados${rcc.pas || rcc.rack ? ' en lo que filtraste' : ''}.${falta ? ` Falta${falta === 1 ? '' : 'n'} <b>${falta}</b> por contar.` : ''}</div>`;
+    rcc.listo = `<div class="rc-listo" role="status"><b>✓ Listo.</b> ${l.length - falta} de ${l.length} productos contados${rcc.pas || rcc.racks.length ? ' en lo que filtraste' : ''}.${falta ? ` Falta${falta === 1 ? '' : 'n'} <b>${falta}</b> por contar.` : ''}</div>`;
     if ($('rcListo')) $('rcListo').innerHTML = rcc.listo;
     rcCuenta();
     pitido(); toast(falta ? `Listo. Falta${falta === 1 ? '' : 'n'} ${falta} por contar.` : 'Listo: todo contado', 'ok');

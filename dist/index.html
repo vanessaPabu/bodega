@@ -898,6 +898,17 @@
   /* Reconfirmación de inventario: lista para contar */
   .rc-filtros { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
   .rc-filtros > div { min-width: 0; } .rc-filtros .campo { width: 100%; }
+  @media (max-width: 760px) { .inv-sap-info { display: none !important; } }   /* en el celular solo se cuenta */
+  .rc-racks { position: relative; }
+  .rc-racks > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; box-sizing: border-box; }
+  .rc-racks-txt { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .rc-racks > summary::-webkit-details-marker { display: none; }
+  .rc-racks > summary::after { content: '▾'; margin-left: 8px; color: var(--muted, #667085); }
+  .rc-racks-lista { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin-top: 4px; max-height: 300px; overflow-y: auto; background: var(--card, #fff); border: 1px solid var(--borde, #d8dde3); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 6px; min-width: 200px; }
+  .rc-rack-op { display: flex; align-items: center; min-height: 44px; padding: 0 8px; border-radius: 8px; cursor: pointer; font-size: 15px; }
+  .rc-rack-op input { width: 22px; height: 22px; margin: 0 10px 0 0; flex-shrink: 0; }
+  .rc-rack-op:hover { background: rgba(0,0,0,.04); }
+  .rc-racks-lista .btn { width: 100%; margin-top: 6px; }
   .rc-tabla td { vertical-align: middle; }
   .rc-tabla .rc-prod { white-space: normal; min-width: 200px; }
   .rc-tabla .rc-in { width: 130px; font-size: 18px; font-weight: 700; text-align: center; min-height: 44px; }
@@ -1062,7 +1073,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-CN4AMhpq.js"></script>
+  <script type="module" crossorigin src="./assets/index-C06DpD36.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>
