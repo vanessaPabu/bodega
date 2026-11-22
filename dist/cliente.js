@@ -95,6 +95,12 @@
     if (pantalla === 'app' && ses) refrescar();
   });
 
+  // La base rechazó lo pendiente porque el equipo perdió su sesión: hay que activarlo otra vez
+  window.addEventListener('bodega-sesion', () => {
+    toast('La sesión de este equipo se cerró. Lo pendiente sigue guardado: recarga la página y, si la pide, activa el equipo otra vez.', 'error');
+    pintarChipSenal();
+  });
+
   function abrirSenal() {
     const e = estadoSenal();
     const hora = iso => new Date(iso).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -103,6 +109,8 @@
         <span class="muted small">${e.enLinea
           ? 'Lo que se hizo sin señal se está subiendo solo.'
           : 'Puedes consultar, ubicar, mover y dar salida. Todo queda guardado en este equipo y se sube solo cuando vuelva la señal. Rotular, recibir y descargar Excel necesitan señal.'}</span>
+        ${e.sesionCerrada ? `<p class="error">La sesión de este equipo se cerró y la base no recibe nada. Lo pendiente <b>sigue guardado</b>: recarga la página y, si la pide, activa el equipo con el correo y la contraseña de la bodega. Después toca «Subir ahora».</p>
+          <button class="btn btn-sec" onclick="location.reload()">Recargar la página</button>` : ''}
         <div><span class="h3">Por subir (${e.pendientes.length})</span>
           ${e.pendientes.length ? `<div class="lista-senal mt8">${e.pendientes.map(o => `<div><b>${esc(o.texto)}</b><span class="muted small">${hora(o.fecha)} · ${esc(o.d.usuario || '')}</span></div>`).join('')}</div>`
             : '<p class="muted small mt8">Nada pendiente.</p>'}</div>
