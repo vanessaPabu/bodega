@@ -107,12 +107,33 @@
           ${e.pendientes.length ? `<div class="lista-senal mt8">${e.pendientes.map(o => `<div><b>${esc(o.texto)}</b><span class="muted small">${hora(o.fecha)} · ${esc(o.d.usuario || '')}</span></div>`).join('')}</div>`
             : '<p class="muted small mt8">Nada pendiente.</p>'}</div>
         ${e.fallidos.length ? `<div><span class="h3 txt-rojo">No se pudieron subir (${e.fallidos.length})</span>
-          <span class="muted small">El servidor no los aceptó. Revisa en el plano y hazlo otra vez si hace falta.</span>
+          <span class="muted small">El servidor no los aceptó. Siguen guardados en este equipo: vuelve a intentarlo con señal o descarga la lista para no perderlos.</span>
+          <div class="fila gap8 mt8" style="flex-wrap: wrap;">
+            ${e.enLinea ? '<button class="btn btn-pri" onclick="reintentarSenal()">Volver a intentar todos</button>' : ''}
+            <button class="btn btn-sec" onclick="descargarFallidos()">Descargar la lista</button></div>
           <div class="lista-senal mt8">${e.fallidos.map(o => `<div class="mal"><b>${esc(o.texto)}</b>
             <span class="error small">${esc(o.error)}</span><span class="muted small">${hora(o.fecha)} · ${esc(o.d.usuario || '')}</span>
             <button class="btn btn-sec btn-mini" onclick="window.servidor.offlineDescartar('${esc(o.id)}'); abrirSenal(); pintarChipSenal()">Ya lo revisé</button></div>`).join('')}</div></div>` : ''}
         ${e.pendientes.length && e.enLinea ? `<button class="btn btn-pri btn-xl" onclick="window.servidor.offlineSubir()">Subir ahora</button>` : ''}
       </div>`);
+  }
+
+  // Los que no se pudieron subir vuelven a la cola
+  async function reintentarSenal() {
+    const n = await window.servidor.offlineReintentar();
+    toast(`Subiendo otra vez ${n} pendiente${n === 1 ? '' : 's'}…`, 'ok');
+    abrirSenal(); pintarChipSenal();
+  }
+  // Copia de lo que no se pudo subir (para no perderlo): se abre en Excel
+  function descargarFallidos() {
+    const e = estadoSenal(), q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const filas = [['Qué se hizo', 'Usuario', 'Fecha', 'Error', 'Producto', 'Ubicación', 'Cantidades']].concat(e.fallidos.map(o => [o.texto, o.d.usuario, o.fecha, o.error,
+      o.d.codigo || o.d.productoId || '', o.d.ubicacionId || '', o.d.cantidades ? JSON.stringify(o.d.cantidades) : (o.d.cantidad != null ? o.d.cantidad : '')]));
+    const blob = new Blob(['\ufeff' + filas.map(f => f.map(q).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'no-se-pudieron-subir.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
 
   let toastTimer = null;
@@ -1490,7 +1511,7 @@
 
   function cargarRecepciones() {
     llamar('bdRecepciones', {}).then(l => { rcLista = l; if (vista === 'recibidor') pintarApp(); })
-      .catch(e => { rcLista = []; toast(e.message, 'error'); });
+      .catch(e => { rcLista = []; toast(e.message, 'error'); if (vista === 'recibidor') pintarApp(); });
   }
 
   /* ----- Proveedores: al crear o editar la factura solo se escoge uno de la lista (o se crea) ----- */
@@ -9382,8 +9403,8 @@
       <div id="cmCant"></div>
       <div id="cmTotal" class="total-op" aria-live="polite"></div>
       <div class="dos">
-        <div><label class="lbl" for="cmVen">Fecha de vencimiento</label><input id="cmVen" class="campo" type="date"></div>
-        <div><label class="lbl" for="cmRec">Fecha de recibo</label><input id="cmRec" class="campo" type="date" value="${esc(leerLS('ultRecibo') || hoyISO())}"></div>
+        <div><label class="lbl" for="cmVen">Fecha de vencimiento <span class="muted small">(opcional)</span></label><input id="cmVen" class="campo" type="date"></div>
+        <div><label class="lbl" for="cmRec">Fecha de recibo <span class="muted small">(opcional)</span></label><input id="cmRec" class="campo" type="date" value="${esc(leerLS('ultRecibo') || hoyISO())}"></div>
       </div>
       <div class="dos">
         <div><label class="lbl" for="cmLote">Lote o rótulo viejo <span class="muted small">(opcional)</span></label><input id="cmLote" class="campo" autocomplete="off"></div>
@@ -9421,11 +9442,13 @@
     const p = buscarProducto($('cmProd').value);
     $('cmCant').innerHTML = cm.tipo === 'NORMAL'
       ? `<div class="dos mt8">
-          <div><label class="lbl" for="cmCajas">Número de cajas</label><input id="cmCajas" class="campo" type="number" inputmode="numeric" min="1"></div>
-          <div><label class="lbl" for="cmUnd">Unidades por caja</label><input id="cmUnd" class="campo" type="number" inputmode="numeric" min="1" value="${p ? p.undPorCaja : ''}" oninput="this.dataset.tocado='1'"></div></div>`
+          <div><label class="lbl" for="cmUnd">Unidades por caja</label><input id="cmUnd" class="campo" type="number" inputmode="numeric" min="1" value="${p ? p.undPorCaja : ''}" oninput="this.dataset.tocado='1'"></div>
+          <div><label class="lbl" for="cmCajas">Número de cajas <span class="muted small">(opcional)</span></label><input id="cmCajas" class="campo" type="number" inputmode="numeric" min="1"></div></div>
+        <div class="mt8"><span class="lbl"><label for="cmTot">Cantidad total en unidades</label> ${ayudaHtml('Si sabes cuántas cajas son, escríbelas y el total sale solo. Si no, escribe aquí la cantidad total.')}</span>
+          <input id="cmTot" class="campo" type="number" inputmode="numeric" min="1"></div>`
       : `<div class="dos mt8">
           <div><label class="lbl" for="cmKg">Kilos en total</label><input id="cmKg" class="campo" type="number" inputmode="decimal" step="any" min="0"></div>
-          <div><label class="lbl" for="cmCavas">Cajas o cavas</label><input id="cmCavas" class="campo" type="number" inputmode="numeric" min="1"></div></div>`;
+          <div><label class="lbl" for="cmCavas">Cajas o cavas <span class="muted small">(opcional)</span></label><input id="cmCavas" class="campo" type="number" inputmode="numeric" min="1"></div></div>`;
     $('cmCant').querySelectorAll('input').forEach(i => i.addEventListener('input', calcCm));
     calcCm();
   }
@@ -9434,11 +9457,17 @@
     const t = $('cmTotal');
     if (!t) return;
     if (cm.tipo === 'NORMAL') {
-      const c = num($('cmCajas').value), u = num($('cmUnd').value);
-      t.innerHTML = c > 0 && u > 0 ? `<span>Total</span><b>${c} cajas × ${u} = ${c * u} unidades</b>` : '<span class="muted small">Escribe las cajas y las unidades por caja.</span>';
+      const c = num($('cmCajas').value), u = num($('cmUnd').value), tot = $('cmTot');
+      // Con cajas, el total sale solo; sin cajas, se escribe el total
+      if (c > 0 && u > 0) { tot.value = c * u; tot.readOnly = true; tot.dataset.auto = '1'; }
+      else if (tot.dataset.auto) { tot.value = ''; tot.readOnly = false; delete tot.dataset.auto; }
+      const n = num(tot.value);
+      t.innerHTML = c > 0 && u > 0 ? `<span>Total</span><b>${c} cajas × ${u} = ${c * u} unidades</b>`
+        : n > 0 ? `<span>Total</span><b>${n} unidades</b>`
+        : '<span class="muted small">Escribe las unidades por caja y el número de cajas (o la cantidad total).</span>';
     } else {
       const k = num($('cmKg').value), n = num($('cmCavas').value);
-      t.innerHTML = k > 0 && n > 0 ? `<span>Total</span><b>${kg(k)} en ${n} caja${n === 1 ? '' : 's'}</b>` : '<span class="muted small">Escribe los kilos y cuántas cajas o cavas son.</span>';
+      t.innerHTML = k > 0 ? `<span>Total</span><b>${kg(k)}${n > 0 ? ` en ${n} caja${n === 1 ? '' : 's'}` : ''}</b>` : '<span class="muted small">Escribe los kilos.</span>';
     }
   }
 
@@ -9448,26 +9477,26 @@
     if (!p) return errForm('Elige el producto de la lista.');
     const d = { codigo: p.id, tipo: cm.tipo, vencimiento: $('cmVen').value, recibo: $('cmRec').value, responsable: ses.nombre,
       loteOrigen: $('cmLote').value.trim(), ubicacionId: esp.id, sedeId: ses.sedeId, usuario: ses.nombre };
+    // Solo son obligatorias las unidades por caja y la cantidad (cajas o total). Lo demás es opcional.
     if (cm.tipo === 'NORMAL') {
-      const c = num($('cmCajas').value), u = num($('cmUnd').value);
-      if (!(c > 0)) return errForm('Escribe el número de cajas.');
-      if (!(u > 0)) return errForm('Escribe las unidades por caja.');
-      Object.assign(d, { cajas: c, undXCaja: u });
+      const c = num($('cmCajas').value), u = num($('cmUnd').value), tot = num($('cmTot').value);
+      if (!(u > 0)) { $('cmUnd').focus(); return errForm('Escribe las unidades por caja.'); }
+      if (!(c > 0) && !(tot > 0)) { $('cmCajas').focus(); return errForm('Escribe el número de cajas o la cantidad total.'); }
+      Object.assign(d, c > 0 ? { cajas: c, undXCaja: u, total: c * u } : { undXCaja: u, total: tot });
     } else {
       const k = num($('cmKg').value), n = num($('cmCavas').value);
-      if (!(k > 0)) return errForm('Escribe los kilos.');
-      if (!(n > 0)) return errForm('Escribe cuántas cajas o cavas son.');
-      Object.assign(d, { numCavas: n, pesoCava: 0, pesoEstiba: 0, pesoBascula: k });
+      if (!(k > 0)) { $('cmKg').focus(); return errForm('Escribe los kilos.'); }
+      Object.assign(d, { numCavas: n > 0 ? n : 1, pesoCava: 0, pesoEstiba: 0, pesoBascula: k });
     }
-    if (!d.vencimiento) return errForm('Escribe la fecha de vencimiento.');
-    guardarLS('ultResp', d.responsable); guardarLS('ultRecibo', d.recibo);
+    if (d.recibo) guardarLS('ultRecibo', d.recibo);
+    guardarLS('ultResp', d.responsable);
     const b = $('cmOk'); b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdCargarManual', d).then(r => {
       setSede(r.sede);
       if (cm.tipo === 'NORMAL') p.undPorCaja = Number(r.etiqueta.embalaje) || p.undPorCaja;
       sinImp = null;
       cerrarModal(); pitido();
-      toast(`${r.etiqueta.id} cargado en ${etiqueta(esp)}. Queda pendiente imprimir su rótulo.`, 'ok');
+      if (!r._enCola) toast(`${r.etiqueta.id} cargado en ${etiqueta(esp)}. Queda pendiente imprimir su rótulo.`, 'ok');
       abrirPos(esp.rackId, esp.posicion, esp.id);
     }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = `Guardar y dejar en ${etiqueta(esp)}`; });
   }
