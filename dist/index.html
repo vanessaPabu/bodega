@@ -900,6 +900,15 @@
   .rc-filtros > div { min-width: 0; } .rc-filtros .campo { width: 100%; }
   @media (max-width: 760px) { .inv-sap-info { display: none !important; } }   /* en el celular solo se cuenta */
   .rc-racks { position: relative; }
+  .cic-sedes { display: flex; flex-wrap: wrap; margin: 4px -4px 0; }
+  .ing-faltan { font: inherit; padding: 6px 2px; min-height: 36px; }
+  .if-lista { max-height: 55vh; overflow-y: auto; margin-top: 8px; border: 1px solid var(--borde, #d8dde3); border-radius: 10px; }
+  .if-op { display: block; width: 100%; text-align: left; min-height: 48px; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--borde, #d8dde3); background: transparent; color: inherit; font: inherit; font-size: 15px; cursor: pointer; }
+  .if-op:last-child { border-bottom: 0; }
+  .if-op:hover, .if-op:focus { background: rgba(31, 95, 191, .08); }
+  .if-op[hidden] { display: none; }
+  .cic-sede-op { display: flex; align-items: center; min-height: 44px; padding: 0 10px; margin: 4px; border: 1px solid var(--borde, #d8dde3); border-radius: 10px; cursor: pointer; font-size: 15px; }
+  .cic-sede-op input { width: 20px; height: 20px; margin: 0 8px 0 0; }
   .rc-racks > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; box-sizing: border-box; }
   .rc-racks-txt { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .rc-racks > summary::-webkit-details-marker { display: none; }
@@ -1073,7 +1082,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-DW8pEU31.js"></script>
+  <script type="module" crossorigin src="./assets/index-B2UpxR90.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>

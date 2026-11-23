@@ -4972,7 +4972,7 @@
       <tbody>${pg.filas.map(c => {
         const n = c.codigos.length, h = Math.min(c.contados || 0, n), pct = n ? Math.round(h * 100 / n) : 0;
         return `<tr onclick="abrirCiclico('${c.id}')" class="${c.id === cicSel ? 'cic-sel' : ''}">
-          <td><b>${esc(tituloCic(c))}</b></td>
+          <td><b>${esc(tituloCic(c))}</b>${sedesCicTxt(c) ? `<div class="muted small">${esc(sedesCicTxt(c))}</div>` : ''}</td>
           <td class="nowrap">${fCorta(c.fecha)}</td>
           <td class="num">${n}</td>
           <td><span class="cic-avance"><span class="us-barra-p"><i style="width:${pct}%"></i></span>${h}/${n}</span></td>
@@ -5511,7 +5511,7 @@
 
   /* ----- Nuevo cíclico ----- */
   function nuevoCiclico() {
-    cicNuevo = { tipo: 'CICLICO', codigos: [], nombre: '', fecha: hoyISO() };
+    cicNuevo = { tipo: 'CICLICO', codigos: [], nombre: '', fecha: hoyISO(), sedes: [ses.sedeId] };
     pintarApp();
     if ($('cnNombre')) $('cnNombre').focus();
   }
@@ -5530,6 +5530,8 @@
           <input id="cnNombre" class="campo" placeholder="${rc ? 'Ej. Reconfirmación galletas' : 'Ej. Cíclico galletas semana 46'}" autocomplete="off" maxlength="80" value="${esc(n.nombre)}" oninput="cicNuevo.nombre=this.value">
           <span class="muted small">Con este nombre lo encuentran en la lista. Quien tenga permiso de contar lo ve y lo puede contar.</span>
           <div><label class="lbl" for="cnFecha">Fecha</label><input id="cnFecha" class="campo" type="date" value="${esc(n.fecha)}" onchange="cicNuevo.fecha=this.value"></div>
+          ${ini.sedes.length > 1 ? `<div><span class="lbl">Sedes donde se cuenta ${ayudaHtml('Marca las sedes que van a contar este ' + (rc ? 'reconfirmación' : 'cíclico') + '. Lo que se cuente en cada una y su aéreo se suman contra el mismo SAP. Lo ven en la lista de cíclicos de cada sede marcada.')}</span>
+            ${sedesCheckHtml('cnSede', n.sedes || [ses.sedeId], ses.sedeId, 'cicNuevo.sedes')}</div>` : ''}
         </div>
         ${rc ? `<div class="col gap8"><span class="lbl">2. ¿Qué productos va a reconfirmar?</span>
           <div class="dos"><button class="btn btn-sec cn-pegar" onclick="rcCargarArchivo()">📄 Cargar Excel con los productos</button>
@@ -5671,6 +5673,43 @@
     toast(n ? `${n} producto${n === 1 ? '' : 's'} agregado${n === 1 ? '' : 's'}` : 'No hay productos nuevos para agregar', n ? 'ok' : 'error');
   }
 
+  // Casillas de sedes: la propia va marcada y no se puede quitar. var: dónde se guarda la lista al marcar
+  function sedesCheckHtml(pref, marcadas, propia, varNom) {
+    return `<div class="cic-sedes">${ini.sedes.map(s => {
+      const on = s.id === propia || marcadas.indexOf(s.id) >= 0;
+      return `<label class="cic-sede-op"><input type="checkbox" value="${esc(s.id)}" ${on ? 'checked' : ''} ${s.id === propia ? 'disabled' : ''}
+        onchange="${varNom} = sedesMarcadas(this.closest('.cic-sedes'))"> ${esc(s.nombre)}${s.id === propia ? ' <span class="muted small">(donde se crea)</span>' : ''}</label>`;
+    }).join('')}</div>`;
+  }
+  function sedesMarcadas(caja) {
+    return Array.prototype.slice.call(caja.querySelectorAll('input[type=checkbox]')).filter(x => x.checked).map(x => x.value);
+  }
+  // Nombres de las sedes de un cíclico (si se cuenta en varias)
+  const sedesCicTxt = c => c && c.sedes && c.sedes.length > 1 ? c.sedes.map(nombreSede).join(' · ') : '';
+  // Cambiar las sedes de un cíclico que ya existe
+  function editarSedesCiclico() {
+    const c = cicSel_();
+    if (!c || sinPermiso('ciclico_asignar')) return;
+    abrirModal(`<div class="fila-sb"><span class="h3">Sedes donde se cuenta</span><button class="btn btn-sec btn-x" aria-label="Cerrar" onclick="cerrarModal()">✕</button></div>
+      <p class="muted small mt8">${esc(tituloCic(c))}. Marca las sedes que cuentan: lo contado en cada una y su aéreo se suman. ${esReconf(c) ? '' : 'Sus reconfirmaciones abiertas también cambian.'}</p>
+      <div class="mt8">${sedesCheckHtml('esSede', c.sedes || [c.sedeId], c.sedeId, 'window._esSedes')}</div>
+      <p id="esErr" class="error" hidden></p>
+      <div class="fila gap8 mt12" style="justify-content:flex-end"><button class="btn btn-sec" onclick="cerrarModal()">Cancelar</button>
+        <button id="esOk" class="btn btn-pri" onclick="guardarSedesCiclico()">Guardar</button></div>`);
+    window._esSedes = (c.sedes || [c.sedeId]).slice();
+  }
+  function guardarSedesCiclico() {
+    const c = cicSel_(), b = $('esOk');
+    if (!c) return;
+    b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdSedesCiclico', { id: c.id, sedes: window._esSedes || [c.sedeId] }).then(n => {
+      Object.assign(c, { sedes: n.sedes });
+      (cicLista || []).forEach(x => { if (x.origenId === c.id && x.estado === 'ABIERTO') x.sedes = n.sedes.slice(); });
+      cerrarModal(); toast(n.sedes.length > 1 ? `Se cuenta en: ${sedesCicTxt(n)}` : 'Se cuenta solo en ' + nombreSede(n.sedeId), 'ok');
+      abrirCiclico(c.id);
+    }).catch(e => { const er = $('esErr'); er.textContent = e.message; er.hidden = false; b.disabled = false; b.textContent = 'Guardar'; });
+  }
+
   function guardarCiclico() {
     const n = cicNuevo, err = m => { const e = $('cnErr'); e.textContent = m; e.hidden = false; };
     $('cnErr').hidden = true;
@@ -5679,7 +5718,7 @@
     if (!n.codigos.length) return err(n.tipo === 'RECONFIRMACION' ? 'Marca al menos un producto.' : 'Agrega al menos un producto.');
     const b = $('cnOk'); b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdCrearCiclico', { sedeId: ses.sedeId, fecha: $('cnFecha').value || hoyISO(), nota: n.nombre, asignados: [], codigos: n.codigos,
-      sap: n.sap || null, archivo: n.archivo || null, usuario: ses.nombre, usuarioId: ses.id, tipo: n.tipo || 'CICLICO', origen: n.origen || null,
+      sap: n.sap || null, archivo: n.archivo || null, usuario: ses.nombre, usuarioId: ses.id, tipo: n.tipo || 'CICLICO', origen: n.origen || null, sedes: n.sedes || [ses.sedeId],
       origenTipo: n.origenTipo || null, origenId: n.origenId || null, base: n.base || null })
       .then(c => {
         cicLista = [c].concat(cicLista || []); cicNuevo = null; cicF.ver = 'ABIERTO';
@@ -5713,6 +5752,7 @@
       base[f.cod] = { picking: f.picking, aereo: f.aereo, calidad: f.calidad, bloqueado: f.bloqueado, planta: f.planta, sapTotal: f.sapTotal };   // cómo estaba
     });
     cicNuevo = { tipo: 'RECONFIRMACION', fuente, origen, origenTipo, origenId, base, codigos: filas.map(f => f.cod), sap, archivo: null, fecha: hoyISO(),
+      sedes: fuente === 'cic' && cicData && cicData.ciclico.sedes ? cicData.ciclico.sedes.slice() : [ses.sedeId],   // la de un cíclico se cuenta en sus mismas sedes
       nombre: fuente === 'inv' ? 'Reconfirmación de inventario ' + fCorta(hoyISO()) : 'Reconfirmación de ' + origen,
       candidatos: filas.map(f => ({ cod: f.cod, sapTotal: f.sapTotal, planta: f.planta, dif: f.dif })) };
     if (fuente === 'inv') { cicSel = null; cicData = null; prodTab = 'inventario'; invSub = 'reconf'; }
@@ -5958,7 +5998,7 @@
       return `<button class="btn btn-sec cic-volver" onclick="volverCic()">← ${volver}</button>
       <section class="card col gap8 cic-cab ${cab}" aria-label="${esc(tituloCic(c))}">
         <div class="fila-sb wrap-f gap8"><span class="col gap4"><span class="h3">${esc(tituloCic(c))}</span>
-            <span class="muted small">${rc ? nombreCic(c) + ' · ' : ''}${fCorta(c.fecha)}</span></span>
+            <span class="muted small">${rc ? nombreCic(c) + ' · ' : ''}${fCorta(c.fecha)}${sedesCicTxt(c) ? ' · se cuenta en ' + esc(sedesCicTxt(c)) : ''}</span></span>
           <button class="btn btn-sec btn-mini" onclick="historialCiclico()">Historial</button></div>
         <div class="cic-progreso"><span class="us-barra-p"><i style="width:${pct}%"></i></span><b>${hechos} de ${d.length}</b> ${rc ? 'reconfirmados' : 'contados'}</div>
       </section>
@@ -5970,9 +6010,12 @@
         <div class="fila-sb wrap-f gap8">
           <div class="col gap4"><span class="h3">${esc(tituloCic(c))}</span>
             ${rc && c.origen ? `<span class="small">${nombreCic(c)} · sale de: ${c.origenId && (cicLista || []).some(x => x.id === c.origenId) ? `<button class="link" onclick="volverCic()"><b>${esc(c.origen)}</b></button>` : `<b>${esc(c.origen)}</b>`}</span>` : ''}
-            <span class="muted small">${fCorta(c.fecha)} · lo creó ${esc(c.creadoPor || '—')}${c.estado === 'CERRADO' ? ` · cerrado por ${esc(c.cerradoPor || '—')} ${c.cerrado ? fechaHora(c.cerrado) : ''}` : ''}</span></div>
+            <span class="muted small">${fCorta(c.fecha)} · lo creó ${esc(c.creadoPor || '—')}${c.estado === 'CERRADO' ? ` · cerrado por ${esc(c.cerradoPor || '—')} ${c.cerrado ? fechaHora(c.cerrado) : ''}` : ''}</span>
+            ${sedesCicTxt(c) ? `<span class="small">Se cuenta en: <b>${esc(sedesCicTxt(c))}</b></span>` : ''}</div>
           <span class="fila gap8 wrap-f">
             <button class="btn btn-sec btn-mini" onclick="historialCiclico()">Historial</button>
+            ${puede('ciclico_asignar') && c.estado === 'ABIERTO' ? '<button class="btn btn-sec btn-mini" onclick="agregarProdCicModal()">+ Producto</button>' : ''}
+            ${puede('ciclico_asignar') && ini.sedes.length > 1 && c.estado === 'ABIERTO' ? '<button class="btn btn-sec btn-mini" onclick="editarSedesCiclico()">Sedes</button>' : ''}
             ${puede('ciclico_asignar') && cicVeSap(c) && c.estado === 'ABIERTO' && !rc ? `<button class="btn btn-sec btn-mini" onclick="abrirCargaSap('ciclicoAct')" title="Si te equivocaste de Excel, sube el correcto">${c.archivo ? 'Volver a cargar el Excel' : 'Cargar Excel de SAP'}</button>` : ''}
             ${puede('reportes') && cicVeSap(c) ? '<button class="btn btn-sec btn-mini" onclick="descargarCiclico()">Descargar Excel</button>' : ''}
             ${puede('ciclico_asignar') ? (c.estado === 'ABIERTO' ? `<button class="btn btn-sec btn-mini" onclick="estadoCiclico('CERRADO')">Cerrar ${rc ? 'reconfirmación' : 'cíclico'}</button>`
@@ -6061,7 +6104,13 @@
       const f = { cod, p: prodDe(cod), sap: propio ? (propio[cod] ? Object.assign({ codigo: cod }, propio[cod]) : (sap[cod] || null)) : (sap[cod] || null), picking: 0, aereo: 0, calidad: 0, bloqueado: 0, contado: false, ult: null, lugares: new Set() };
       if (ci && ci.sap) f.sap = ci.sap[cod] ? Object.assign({ codigo: cod }, ci.sap[cod]) : null;
       if (ci && ci.aereo && ci.aereo[cod] !== undefined) f.aereo = Number(ci.aereo[cod]) || 0;
-      else sede.lineas.forEach(l => { const e = sede.espPorId[l.ubicacionId]; if (l.productoId === cod && e && e.nivel !== 0) f.aereo += Number(l.unidades) || 0; });
+      else {
+        sede.lineas.forEach(l => { const e = sede.espPorId[l.ubicacionId]; if (l.productoId === cod && e && e.nivel !== 0) f.aereo += Number(l.unidades) || 0; });
+        // Cíclico en varias sedes: más el aéreo de las otras (el de esta sede es el del plano en vivo)
+        const as = cicData.aereoSedes || {};
+        Object.keys(as).forEach(sid => { if (sid !== ses.sedeId && as[sid]) f.aereo += Number(as[sid][cod]) || 0; });
+        f.aereo = +f.aereo.toFixed(3);
+      }
       cicData.conteos.filter(c => c.codigo === cod).forEach(c => {
         f.contado = true; f.lugares.add(c.ubicacion);
         if (c.tipo === 'CALIDAD') f.calidad += c.cantidad; else if (c.tipo === 'BLOQUEADO') f.bloqueado += c.cantidad; else f.picking += c.cantidad;
@@ -6977,7 +7026,7 @@
     const p = buscarProducto($('cpAProd').value.split(' · ')[0]) || buscarProducto($('cpAProd').value), ubic = $('cpALug').value;
     if (!p) return toast('Escribe o escanea el producto', 'error');
     const S = cpScope();
-    if (S.codigos && !S.codigos.has(p.id)) return toast(`${p.nombre} no está en este cíclico`, 'error');
+    if (S.codigos && !S.codigos.has(p.id)) return preguntarAgregarCic(p, () => cpAgregar());
     if (!ubic) return toast('Elige el lugar', 'error');
     cp.extra.push({ cod: p.id, ubic, scope: S.id || 'inv' });
     cp.ver = 'pend'; cp.foco = p.id; pagInicio('cp');
@@ -7247,7 +7296,8 @@
             <span class="small muted" id="ingBloTot"></span></div></div>
         <p id="fErr" class="error" hidden></p>
         <button id="ingOk" class="btn btn-ent-solido btn-xl" onclick="ingGuardar()">Guardar</button>` : ''}
-      ${prog ? `<div class="cp-prog small">${cpBarra(prog.l, prog.t)} <span><b>${prog.l} de ${prog.t}</b> productos ${esReconf(S.cic) ? 'de la reconfirmación' : 'del cíclico'} contados · faltan <b>${prog.t - prog.l}</b></span></div>` : ''}`}
+      ${prog ? `<div class="cp-prog small">${cpBarra(prog.l, prog.t)} <span><b>${prog.l} de ${prog.t}</b> productos ${esReconf(S.cic) ? 'de la reconfirmación' : 'del cíclico'} contados · ${prog.t - prog.l
+          ? `<button type="button" class="link ing-faltan" onclick="ingVerFaltan()">faltan <b>${prog.t - prog.l}</b> · ver cuáles</button>` : '<b class="txt-verde">todos contados</b>'}</span></div>` : ''}`}
     </section>
     ${ing.alm ? ingRecientesHtml(S) : ''}</div>`;
   }
@@ -7554,6 +7604,69 @@
     if (h && !ing.avisado) { ing.avisado = true; try { pitido(); if (navigator.vibrate) navigator.vibrate([120, 80, 120]); } catch (e) {} }
     $('ingAviso').innerHTML = h;
   }
+  // Los productos del cíclico que todavía no se han contado: tocar uno lo pone para contar
+  function ingVerFaltan() {
+    const S = cpScope();
+    if (!S.cic) return;
+    const fs = new Set(S.conteos.map(c => c.codigo));
+    const l = S.cic.codigos.filter(k => !fs.has(k)).map(k => ({ k, p: prodDe(k) }))
+      .sort((a, b) => (a.p ? a.p.nombre : a.k).localeCompare(b.p ? b.p.nombre : b.k));
+    abrirModal(`<div class="fila-sb"><span class="h3">Faltan ${l.length} por contar</span><button class="btn btn-sec btn-x" aria-label="Cerrar" onclick="cerrarModal()">✕</button></div>
+      <input id="ifQ" class="campo mt8" placeholder="Buscar código o nombre" autocomplete="off" oninput="ingFaltanFiltrar(this.value)">
+      <p class="muted small mt8">Toca uno para contarlo.</p>
+      <div id="ifLista" class="if-lista">${l.map(x => `<button type="button" class="if-op" data-t="${esc(sinTilde(x.k + ' ' + (x.p ? x.p.codigoNutresa + ' ' + x.p.nombre : '')))}"
+          onclick="cerrarModal(); ingProducto('${esc(x.k)}')"><b>${esc(x.k)}</b> · ${esc(x.p ? x.p.nombre : 'Producto no está en el catálogo')}</button>`).join('')}</div>`);
+  }
+  function ingFaltanFiltrar(q) {
+    const pal = sinTilde(String(q || '').trim()).split(/\s+/).filter(Boolean);
+    Array.prototype.forEach.call(document.querySelectorAll('#ifLista .if-op'), b => {
+      const t = b.getAttribute('data-t');
+      b.hidden = !pal.every(w => t.indexOf(w) >= 0);
+    });
+  }
+  // Producto que no está en el cíclico: se pregunta si se agrega (y luego sigue con despues())
+  function preguntarAgregarCic(p, despues) {
+    const S = cpScope(), c = S.cic;
+    if (!c) return;
+    window._agrCic = despues;
+    abrirModal(`<span class="h3">${esc(p.nombre)} no está en ${esReconf(c) ? 'esta reconfirmación' : 'este cíclico'}</span>
+      <p class="mt8">Atlantic ${esc(p.id)}${p.codigoNutresa ? ' · Nutresa ' + esc(p.codigoNutresa) : ''}. ¿Lo agregas para contarlo?</p>
+      <p id="acErr" class="error" hidden></p>
+      <div class="col gap8 mt12">
+        <button id="acOk" class="btn btn-pri btn-xl" onclick="agregarProdCic('${esc(p.id)}')">Agregar y contar</button>
+        <button class="btn btn-sec" onclick="cerrarModal()">Cancelar</button></div>`);
+  }
+  function agregarProdCic(cod) {
+    const S = cpScope(), c = S.cic, b = $('acOk');
+    if (!c) return;
+    b.disabled = true; b.textContent = 'Agregando…';
+    llamar('bdAgregarProductoCiclico', { id: c.id, codigo: cod, usuario: ses.nombre }).then(n => {
+      [cicData && cicData.ciclico, cicSel_()].forEach(x => { if (x && x.id === n.id) x.codigos = n.codigos.slice(); });
+      cerrarModal(); pitido();
+      toast(`${(prodDe(cod) || {}).nombre || cod} quedó agregado`, 'ok');
+      const f = window._agrCic; window._agrCic = null;
+      if (f) f(); else pintarApp();
+    }).catch(e => { const er = $('acErr'); er.textContent = e.message; er.hidden = false; b.disabled = false; b.textContent = 'Agregar y contar'; });
+  }
+  // El encargado agrega un producto desde el cíclico (sin contarlo)
+  function agregarProdCicModal() {
+    if (sinPermiso('ciclico_asignar')) return;
+    abrirModal(`<div class="fila-sb"><span class="h3">Agregar producto</span><button class="btn btn-sec btn-x" aria-label="Cerrar" onclick="cerrarModal()">✕</button></div>
+      <label class="lbl mt8" for="apcProd">Código del producto</label>
+      <div class="fila gap8">${campoConCamara('<input id="apcProd" class="campo" list="dlProductos" autocomplete="off" spellcheck="false" placeholder="Escanea o escribe el código">', 'apcProd')}</div>
+      <p id="acErr" class="error" hidden></p>
+      <div class="fila gap8 mt12" style="justify-content:flex-end"><button class="btn btn-sec" onclick="cerrarModal()">Cancelar</button>
+        <button id="acOk" class="btn btn-pri" onclick="agregarProdCicDesdeModal()">Agregar</button></div>`);
+    setTimeout(() => $('apcProd') && $('apcProd').focus(), 50);
+  }
+  function agregarProdCicDesdeModal() {
+    const v = $('apcProd').value, p = buscarProducto(v.split(' · ')[0]) || buscarProducto(v), er = $('acErr');
+    if (!p) { er.textContent = 'No hay un producto con ese código.'; er.hidden = false; return; }
+    const S = cpScope();
+    if (S.cic && S.cic.codigos.includes(p.id)) { er.textContent = 'Ese producto ya está en el cíclico.'; er.hidden = false; return; }
+    window._agrCic = null;
+    agregarProdCic(p.id);
+  }
   function ingTotal() {
     const el = $('ingCant');
     if (!el || el.value.trim() === '') return null;
@@ -7569,7 +7682,7 @@
       if (enter && t) toast('No hay un producto con ese código', 'error');
       return;
     }
-    if (S.cic && !S.cic.codigos.includes(p.id)) { toast(`${p.nombre} no está en este cíclico. Solo se cuentan los productos que mandaron a contar.`, 'error'); $('ingCod').value = ''; return; }
+    if (S.cic && !S.cic.codigos.includes(p.id)) { $('ingCod').value = ''; return preguntarAgregarCic(p, () => ingProducto(p.id)); }
     ing.cod = p.id;
     if (!S.cic) { const o = ingAlmsProd(p.id); ing.alm = o.registrado && o.lista.length === 1 ? o.lista[0].key : ''; }   // 2 o más: que escojan
     const ya = ing.alm ? ingYaContado(S, p.id) : null;
