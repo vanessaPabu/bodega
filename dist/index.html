@@ -292,36 +292,42 @@
     .rt2-venc { font-size: 6.8em; font-weight: 900; line-height: 1; white-space: nowrap; }
     .rt2-rec { font-size: 2.9em; font-weight: 800; line-height: 1.1; white-space: nowrap; }
     .rt2-peq { font-size: 1.55em; font-weight: 800; }
-    /* Rótulos de conteo: carta horizontal, en negro */
+    /* Rótulos de conteo: carta horizontal, en negro. Arriba queda libre para la cinta del estante */
     #print.modo-conteo { display: block !important; }
     .rcx-hoja { width: 262mm; height: 198mm; box-sizing: border-box; color: #000; font-family: Arial, Helvetica, sans-serif; break-after: page; page-break-after: always; overflow: hidden; display: flex; flex-direction: column; }
     .rcx-hoja:last-child { break-after: auto; page-break-after: auto; }
-    .rcx-cb { display: block; width: 100%; }
+    .rcx-cinta { flex: 0 0 22mm; }
+    .rcx-cb { display: block; }   /* cada uno con su recuadro fijo: todos iguales */
     .rcx-atl { font-weight: 700; letter-spacing: .04em; text-align: center; }
-    .rcx-atl small { font-size: .5em; letter-spacing: .08em; margin-right: .35em; }
     .rcx-cuadro { display: flex; flex-direction: column; }
     .rcx-blanco { flex: 1 1 auto; border: 1mm solid #000; border-radius: 2mm; }
     .rcx-pie { text-align: center; font-weight: 700; letter-spacing: .12em; padding-top: 1.5mm; }
     .rcx-nombre { font-weight: 700; text-transform: uppercase; text-align: center; line-height: 1.05; overflow-wrap: anywhere; }
-    .rcx-ind { padding: 6mm 8mm; }
-    .rcx-ind .rcx-nombre { border-bottom: .8mm solid #000; padding-bottom: 5mm; margin-bottom: 7mm; }
-    .rcx-abajo { flex: 1 1 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; min-height: 0; }
+    /* Individual: el cuadro un poco más grande que el código de barras */
+    .rcx-ind { padding: 0 8mm 6mm; }
+    .rcx-ind .rcx-nombre { border-bottom: .8mm solid #000; padding-bottom: 4mm; margin-bottom: 6mm; }
+    .rcx-abajo { flex: 1 1 auto; display: grid; grid-template-columns: 112mm 128mm; justify-content: space-between; align-items: center; min-height: 0; }
     .rcx-ind .rcx-cbcaja { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-    .rcx-ind .rcx-cb { height: 85mm; }
+    .rcx-ind .rcx-cb { width: 104mm; height: 70mm; }
     .rcx-ind .rcx-atl { font-size: 34pt; margin-top: 3mm; }
-    .rcx-ind .rcx-pie { font-size: 22pt; }
-    .rcx-lista { padding: 4mm 6mm; justify-content: space-between; }
-    .rcx-ubic { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 6mm; border-bottom: .8mm solid #000; padding-bottom: 3mm; }
+    .rcx-ind .rcx-cuadro { height: 104mm; }
+    .rcx-ind .rcx-pie { font-size: 20pt; }
+    /* Lista: 6 filas; el cuadro un poco más grande que el código de barras */
+    .rcx-lista { padding: 0 6mm 3mm; }
+    .rcx-ubic { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 6mm; border-bottom: .8mm solid #000; padding-bottom: 2mm; margin-bottom: 1mm; }
     .rcx-ubic-t { font-size: 11pt; font-weight: 700; letter-spacing: .1em; }
-    .rcx-ubic b { font-size: 26pt; letter-spacing: .03em; }
-    .rcx-ubic .rcx-cb { height: 14mm; max-width: 110mm; justify-self: end; }
-    .rcx-fila { display: grid; grid-template-columns: 70mm 1fr 72mm; gap: 7mm; align-items: center; height: 29mm; }
-    .rcx-lista.con-ubic .rcx-fila { height: 26mm; }
-    .rcx-fila .rcx-cb { height: 17mm; }
-    .rcx-fila .rcx-atl { font-size: 15pt; }
-    .rcx-fila .rcx-cuadro { height: 100%; }
+    .rcx-ubic b { font-size: 24pt; letter-spacing: .03em; }
+    .rcx-ubic .rcx-cb { width: 90mm; height: 11mm; justify-self: end; }
+    .rcx-filas { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: space-around; }
+    .rcx-fila { display: grid; grid-template-columns: 66mm 1fr 76mm; gap: 7mm; align-items: center; }
+    .rcx-fila .rcx-cbcaja { display: flex; flex-direction: column; align-items: center; }
+    .rcx-fila .rcx-cb { width: 60mm; height: 15mm; }
+    .rcx-fila .rcx-atl { font-size: 13pt; }
+    .rcx-fila .rcx-cuadro { height: 23mm; }
+    .rcx-lista.con-ubic .rcx-fila .rcx-cb { width: 60mm; height: 13mm; }
+    .rcx-lista.con-ubic .rcx-fila .rcx-cuadro { height: 20mm; }
     .rcx-fila .rcx-blanco { border-width: .7mm; }
-    .rcx-fila .rcx-pie { font-size: 9pt; padding-top: .8mm; }
+    .rcx-fila .rcx-pie { font-size: 8pt; padding-top: .6mm; }
   }
 
   /* ---------- Cámara ---------- */
@@ -390,12 +396,19 @@
   .elige-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
   .elige-grid.elige-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 320px; }   /* doble fondo: C-D arriba, A-B abajo */
   .ing-ultimo, .ing-ayuda { display: block; margin-top: 6px; }
+  .seg.seg-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 420px; }
+  .rcn-guardar { border-top: 1px solid var(--borde, #d8dde3); padding-top: 12px; margin-top: 4px; }
   .rcn-arriba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
   @media (max-width: 760px) { .rcn-arriba { grid-template-columns: minmax(0, 1fr); } }
   .rcn-lista { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
   .rcn-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--borde, #d8dde3); }
   .rcn-item:last-child { border-bottom: 0; }
   .rcn-n { min-width: 28px; text-align: right; color: var(--muted, #667085); font-variant-numeric: tabular-nums; }
+  .ing-teclado { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+  .ing-tecla { height: 52px; border: 1px solid var(--borde, #d8dde3); border-radius: 10px; background: var(--card, #fff); color: inherit; font: inherit; font-size: 24px; font-weight: 600; touch-action: manipulation; }
+  .ing-tecla:active { background: var(--seg, #eef1f5); }
+  .ing-tecla.op { background: var(--seg, #eef1f5); color: var(--pri); font-weight: 700; }
+  .ing-tecla.ok { background: var(--ent, #1B7A3A); border-color: transparent; color: #fff; }
   .ing-op { min-width: 52px; font-size: 22px; font-weight: 700; padding: 0 12px; }
   .txt-azul { color: var(--pri); }
   #ingCalc { display: block; min-height: 1em; margin-top: 4px; font-weight: 600; }
@@ -1124,7 +1137,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-BP8gIZZK.js"></script>
+  <script type="module" crossorigin src="./assets/index-tAyVPD0K.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>

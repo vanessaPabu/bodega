@@ -7317,10 +7317,9 @@
           ${ya && ya.tienePk ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Lo que guardes se suma; si te equivocas, corrígelo en Consultar.</span>` : ''}
           <div id="ingAviso">${ingAvisoHtml(S)}</div></div>
         <div><label class="lbl" for="ingCant">3. ${kg ? 'Peso total (kg)' : 'Cantidad total (unidades)'}</label>
-          <div class="fila gap8"><input id="ingCant" class="campo ing-in ing-total" type="text" inputmode="decimal" autocomplete="off" placeholder="0  (ej. 12x24+6)" style="flex:1;min-width:0">
-            <button type="button" class="btn btn-sec ing-op" onmousedown="event.preventDefault()" onclick="ingOp('+')" aria-label="Sumar">+</button>
-            <button type="button" class="btn btn-sec ing-op" onmousedown="event.preventDefault()" onclick="ingOp('x')" aria-label="Multiplicar">×</button></div>
+          <input id="ingCant" class="campo ing-in ing-total" type="text" inputmode="${tactil ? 'none' : 'decimal'}" autocomplete="off" placeholder="0  (ej. 12x24)">
           <span id="ingCalc" class="small txt-azul" aria-live="polite"></span>
+          ${tactil ? ingTecladoHtml() : ''}
           ${ingUltimoHtml()}</div>
         <div class="ing-cal">
           <span class="fila gap8 wrap-f">
@@ -7575,10 +7574,9 @@
         ${ya && ya.tienePk ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Lo que guardes se suma; si te equivocas, corrígelo en Consultar.</span>` : ''}
         <div id="ingAviso">${ingAvisoHtml(S)}</div>
         <div><label class="lbl" for="ingCant">3. ${kg ? 'Peso total (kg)' : 'Cantidad total (unidades)'}</label>
-          <div class="fila gap8"><input id="ingCant" class="campo ing-in ing-total" type="text" inputmode="decimal" autocomplete="off" placeholder="0  (ej. 12x24+6)" style="flex:1;min-width:0">
-            <button type="button" class="btn btn-sec ing-op" onmousedown="event.preventDefault()" onclick="ingOp('+')" aria-label="Sumar">+</button>
-            <button type="button" class="btn btn-sec ing-op" onmousedown="event.preventDefault()" onclick="ingOp('x')" aria-label="Multiplicar">×</button></div>
+          <input id="ingCant" class="campo ing-in ing-total" type="text" inputmode="${tactil ? 'none' : 'decimal'}" autocomplete="off" placeholder="0  (ej. 12x24)">
           <span id="ingCalc" class="small txt-azul" aria-live="polite"></span>
+          ${tactil ? ingTecladoHtml() : ''}
           ${ingUltimoHtml()}</div>
         <div class="ing-cal">
           <span class="fila gap8 wrap-f">
@@ -7743,11 +7741,14 @@
   }
   // Cantidad con operaciones: 12x24+6 → 294 (solo suma y multiplicación). null si está vacía; NaN si no se entiende
   function calcCant(txt) {
-    const t = String(txt == null ? '' : txt).replace(/\s+/g, '').replace(/[×*X]/g, 'x');
+    const t = String(txt == null ? '' : txt).replace(/\s+/g, '').replace(/[×*X]/g, 'x').replace(/[−–]/g, '-');
     if (!t) return null;
-    if (!/^[\d.,x+]+$/.test(t)) return NaN;
+    if (!/^[\d.,x+\-]+$/.test(t)) return NaN;
     let total = 0;
-    for (const termino of t.split('+')) {
+    // Términos separados por + o −; dentro de cada uno se multiplica primero
+    const partes = t.split(/(?=[+\-])/);
+    for (const parte of partes) {
+      const signo = parte[0] === '-' ? -1 : 1, termino = parte.replace(/^[+\-]/, '');
       if (!termino) return NaN;
       let prod = 1;
       for (const f of termino.split('x')) {
@@ -7756,18 +7757,39 @@
         if (!/\d/.test(f) || isNaN(n)) return NaN;
         prod *= n;
       }
-      total += prod;
+      total += signo * prod;
     }
+    if (partes[0][0] === '-' || partes[0][0] === '+' || total < 0) return NaN;   // no empieza con signo ni da negativo
     return +total.toFixed(3);
   }
-  const ingEsOperacion = v => /[x×*X+]/.test(String(v || ''));
+  const ingEsOperacion = v => /[x×*X+\-−]/.test(String(v || ''));
   function ingCalc() {
     const el = $('ingCant'), out = $('ingCalc');
     if (!el || !out) return;
     const v = el.value, r = calcCant(v);
     out.textContent = !ingEsOperacion(v) ? '' : isNaN(r) || r === null ? 'Revisa la operación' : '= ' + nInv(r);
   }
-  // Botones + y × junto a la cantidad (en el teclado numérico no siempre están)
+  // Teclado propio en celulares y radiofrecuencias: números con ×, − y + (el del celular no los trae)
+  function ingTecladoHtml() {
+    const t = (k, txt, cls, lbl) => `<button type="button" class="ing-tecla ${cls || ''}" data-k="${k}" ${lbl ? `aria-label="${lbl}"` : ''}>${txt}</button>`;
+    return `<div class="ing-teclado" role="group" aria-label="Teclado de la cantidad">
+      ${t('7', '7')}${t('8', '8')}${t('9', '9')}${t('x', '×', 'op', 'Multiplicar')}
+      ${t('4', '4')}${t('5', '5')}${t('6', '6')}${t('-', '−', 'op', 'Restar')}
+      ${t('1', '1')}${t('2', '2')}${t('3', '3')}${t('+', '+', 'op', 'Sumar')}
+      ${t(',', ',', '', 'Coma decimal')}${t('0', '0')}${t('borrar', '⌫', '', 'Borrar')}${t('enter', '✓', 'ok', 'Guardar esta cantidad')}</div>`;
+  }
+  function ingTecla(k) {
+    const el = $('ingCant');
+    if (!el) return;
+    if (k === 'enter') return ingEnterCant();
+    let v = el.value;
+    if (k === 'borrar') v = v.slice(0, -1);
+    else if (/^[x+\-]$/.test(k)) { if (!v || /[x+\-]$/.test(v)) return; v += k; }   // no empezar ni repetir operación
+    else v += k;
+    el.value = v; el.focus();
+    try { el.setSelectionRange(v.length, v.length); } catch (e) {}
+    ingCalc();
+  }
   function ingOp(op) {
     const el = $('ingCant');
     if (!el) return;
@@ -7841,6 +7863,10 @@
     c.addEventListener('change', () => ingProducto(c.value));
     c.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); ingProducto(c.value, true); } });
     ['ingCal', 'ingBlo'].forEach(id => { if ($(id)) $(id).addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); ingGuardar(); } }); });
+    document.querySelectorAll('.ing-teclado .ing-tecla').forEach(b => {
+      b.addEventListener('mousedown', ev => ev.preventDefault());   // el foco se queda en la cantidad
+      b.addEventListener('click', () => ingTecla(b.getAttribute('data-k')));
+    });
     const ins = [...document.querySelectorAll('.ing-in')];
     ins.forEach((el, i) => {
       el.addEventListener('input', ingCalc);
@@ -7879,7 +7905,7 @@
     const t = ingTotal();
     // Solo calidad / bloqueado: no hace falta la cantidad de arriba (el picking queda como estaba)
     if (t === null && (xc !== null || xb !== null)) return ingEnviar(p, null, 'extra', seguir);
-    if (t !== null && isNaN(t)) { if ($('ingCant')) $('ingCant').focus(); return errForm('No se entiende la operación. Usa solo números, + y × (ej. 12x24+6).'); }
+    if (t !== null && isNaN(t)) { if ($('ingCant')) $('ingCant').focus(); return errForm('No se entiende la operación (o da menos de 0). Usa números con ×, − y + (ej. 12x24+6).'); }
     if (t === null || !(t >= 0)) { if ($('ingCant')) $('ingCant').focus(); return errForm(ingEsKg(p) ? 'Escribe el peso total (o solo calidad / bloqueado).' : 'Escribe la cantidad total (o solo calidad / bloqueado).'); }
     // Si ya estaba contado aquí, se suma directo (si se equivocan, lo corrigen en Consultar)
     const ya = ingYaContado(S, p.id);
@@ -7917,7 +7943,7 @@
         ing.guardando = false; ing.extra = null; ing.partes = [];
         if (seguir) {   // Enter: sigue en el mismo producto, listo para la siguiente cantidad
           const ya2 = ingYaContado(cpScope(), p.id);
-          const opTxt = $('ingCant') && ingEsOperacion($('ingCant').value) ? $('ingCant').value.replace(/\s+/g, '').replace(/x/gi, '×') : '';
+          const opTxt = $('ingCant') && ingEsOperacion($('ingCant').value) ? $('ingCant').value.replace(/\s+/g, '').replace(/x/gi, '×').replace(/-/g, '−') : '';
           ing.ultimo = { cod: p.id, cant: modo === 'extra' ? null : t, op: opTxt, total: cantidades.PICKING != null ? cantidades.PICKING : (ya2 ? ya2.cant : 0), u: ingEsKg(p) ? 'kg' : 'und' };
           pintarApp();
           setTimeout(() => $('ingCant') && $('ingCant').focus(), 30);
@@ -8667,8 +8693,22 @@
    * Hojas para pegar donde está el producto (cava, empaques al vacío sin código visible): el código Atlantic
    * en barras y un cuadro para anotar la cantidad con marcador borrable. Individual: una hoja por producto.
    * Lista: 6 por hoja, con la ubicación arriba si la escriben. Solo imprime: no guarda nada en la base. */
-  let rtVista = 'estiba';
-  const rcn = (() => { try { const x = JSON.parse(localStorage.getItem('rotConteo') || 'null'); if (x && Array.isArray(x.prods)) return x; } catch (e) {} return { modo: 'ind', prods: [], ubic: '' }; })();
+  let rtVista = 'estiba', rcnListasSede = '';
+  // Cada tipo tiene su propia lista: lo de Individual no pasa a Lista ni al revés
+  const rcn = (() => {
+    const r = { modo: 'ind', ind: [], lista: [], ubic: '' };
+    try {
+      const x = JSON.parse(localStorage.getItem('rotConteo') || 'null');
+      if (x) {
+        r.modo = x.modo === 'lista' ? 'lista' : 'ind'; r.ubic = x.ubic || '';
+        if (Array.isArray(x.ind)) r.ind = x.ind;
+        if (Array.isArray(x.lista)) r.lista = x.lista;
+        if (Array.isArray(x.prods) && !x.ind && !x.lista) r[r.modo] = x.prods;   // de la versión anterior
+      }
+    } catch (e) {}
+    return r;
+  })();
+  const rcnL = () => (rcn.modo === 'lista' ? rcn.lista : rcn.ind);
   const rcnGuardar = () => { try { localStorage.setItem('rotConteo', JSON.stringify(rcn)); } catch (e) {} };
   function rotTabsHtml() {
     return `<div class="tabs" role="tablist" aria-label="Rotular">
@@ -8676,7 +8716,7 @@
       <button class="tab ${rtVista === 'conteo' ? 'on' : ''}" onclick="rtVista='conteo'; pintarApp()">Rótulos de conteo</button></div>`;
   }
   function vistaConteoRot() {
-    const n = rcn.prods.length, hojas = rcn.modo === 'ind' ? n : Math.ceil(n / 6);
+    const n = rcnL().length, hojas = rcn.modo === 'ind' ? n : Math.ceil(n / 6);
     return `<div class="col gap12">${rotTabsHtml()}
       <div class="col gap4"><span class="h2">Rótulos de conteo ${ayudaHtml('Para el inventario, como plan de contingencia: se pegan donde está el producto (por ejemplo en la cava, donde el empaque al vacío no deja ver el código). Se anota la cantidad con marcador borrable y la radiofrecuencia escanea el código de barras para registrarla cuando haya señal.')}</span>
         <span class="muted small">Escanea o escribe los códigos, revisa la lista y toca Imprimir.</span></div>
@@ -8694,18 +8734,28 @@
           <button class="btn btn-pri btn-xl" onclick="rcnImprimir()" ${n ? '' : 'disabled'}>${n ? `Imprimir ${hojas} hoja${hojas === 1 ? '' : 's'}` : 'Agrega productos para imprimir'}</button>
         </section>
         <section class="card col gap8" aria-labelledby="rcnTit">
-          <div class="fila-sb"><span class="h3" id="rcnTit">Para imprimir (${n})</span>${n ? '<button class="btn btn-sec btn-mini" onclick="rcnVaciar()">Quitar todos</button>' : ''}</div>
-          ${n ? `<div class="rcn-lista">${rcn.prods.map((k, i) => { const p = prodDe(k);
+          <div class="fila-sb"><span class="h3" id="rcnTit">${rcn.modo === 'lista' ? 'Lista' : 'Individual'}: para imprimir (${n})</span>${n ? '<button class="btn btn-sec btn-mini" onclick="rcnVaciar()">Quitar todos</button>' : ''}</div>
+          ${n ? `<div class="rcn-lista">${rcnL().map((k, i) => { const p = prodDe(k);
             return `<div class="rcn-item"><span class="rcn-n">${i + 1}</span><span class="col" style="min-width:0;flex:1"><b>${esc(k)}</b><span class="small">${esc(p ? p.nombre : 'No está en Productos')}</span></span>
               <button class="btn btn-sec btn-mini" onclick="rcnQuitar(${i})" aria-label="Quitar ${esc(k)}">✕</button></div>`; }).join('')}</div>`
             : '<p class="muted">Todavía no hay productos. Escanea el primero.</p>'}
+          ${n ? `<div class="rcn-guardar col gap8">
+            <label class="lbl" for="rcnNom">¿La imprimen en otro equipo? Guárdala con un nombre ${ayudaHtml('La lista queda guardada para esta sede: en la oficina (o en cualquier equipo) la ven en «Listas guardadas» y la imprimen.')}</label>
+            <div class="fila gap8"><input id="rcnNom" class="campo" style="flex:1;min-width:0" maxlength="80" autocomplete="off" placeholder="Ej. Cava −17 pasillo 2">
+              <button id="rcnGuardar" class="btn btn-sec" onclick="rcnGuardarLista()">Guardar lista</button></div>
+            <p id="rcnErr" class="error" hidden></p></div>` : ''}
         </section>
-      </div></div>`;
+      </div>
+      <section class="card col gap8" aria-labelledby="rcnLT">
+        <div class="fila-sb wrap-f gap8"><span class="h3" id="rcnLT">Listas guardadas · ${esc(nombreSede(ses.sedeId))}</span>
+          <button class="btn btn-sec btn-mini" onclick="rcnListas = rcnListas || []; rcnCargarListas()">Actualizar</button></div>
+        <div id="rcnListas">${rcnListasHtml()}</div>
+      </section></div>`;
   }
   function rcnModo(m) { rcn.modo = m; rcnGuardar(); pintarApp(); }
   function rcnUbicar(v) { rcn.ubic = String(v || '').trim().toUpperCase(); rcnGuardar(); }
-  function rcnQuitar(i) { rcn.prods.splice(i, 1); rcnGuardar(); pintarApp(); setTimeout(() => $('rcnCod') && $('rcnCod').focus(), 30); }
-  function rcnVaciar() { rcn.prods = []; rcnGuardar(); pintarApp(); }
+  function rcnQuitar(i) { rcnL().splice(i, 1); rcnGuardar(); pintarApp(); setTimeout(() => $('rcnCod') && $('rcnCod').focus(), 30); }
+  function rcnVaciar() { rcn[rcn.modo] = []; rcnGuardar(); pintarApp(); }
   function rcnAgregar(txt) {
     let partes = String(txt || '').split(/[\n,;\t]+/).map(x => x.trim()).filter(Boolean);
     if (partes.length === 1 && !buscarProducto(partes[0].split(' · ')[0])) {
@@ -8717,8 +8767,8 @@
     partes.forEach(t => {
       const p = buscarProducto(t.split(' · ')[0]) || buscarProducto(t);
       if (!p) return malos.push(t);
-      if (rcn.prods.includes(p.id)) return ya.push(p.id);
-      rcn.prods.push(p.id); n++;
+      if (rcnL().includes(p.id)) return ya.push(p.id);
+      rcnL().push(p.id); n++;
     });
     rcnGuardar();
     if (n) { pitido(); pintarApp(); setTimeout(() => $('rcnCod') && $('rcnCod').focus(), 30); }
@@ -8727,6 +8777,7 @@
     else if (ya.length && !n) toast(`${ya.join(', ')} ya está en la lista`, 'error');
   }
   function enlazarConteoRot() {
+    if (rcnListasSede !== ses.sedeId) { rcnListasSede = ses.sedeId; rcnListas = null; rcnCargarListas(); }   // al entrar o al cambiar de sede
     const c = $('rcnCod');
     if (c) {
       c.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); rcnAgregar(c.value); } });
@@ -8748,40 +8799,97 @@
     return n <= 22 ? 22 : n <= 36 ? 19 : 16;
   };
   function rcnImprimir() {
-    if (!rcn.prods.length) return;
+    if (!rcnL().length) return;
     if ($('rcnUbic')) rcnUbicar($('rcnUbic').value);
+    return rcnImprimirCon(rcnL(), rcn.modo, rcn.modo === 'lista' ? rcn.ubic : '');
+  }
+  // codigos: lista de códigos · modo: 'ind' | 'lista' · ubic: ubicación (solo lista). Devuelve true si mandó a imprimir
+  function rcnImprimirCon(codigos, modo, ubic) {
+    if (!window.JsBarcode) { toast('No se pudo cargar el dibujo del código de barras. Revisa la conexión y vuelve a intentarlo.', 'error'); return false; }
     const pr = $('print');
     pr.className = 'modo-conteo';
-    const ps = rcn.prods.map(k => ({ k, nom: (prodDe(k) || {}).nombre || k }));
-    if (rcn.modo === 'ind') {
-      pr.innerHTML = ps.map(x => `<div class="rcx-hoja rcx-ind">
+    const ps = codigos.map(k => ({ k, nom: (prodDe(k) || {}).nombre || k }));
+    if (modo === 'ind') {
+      pr.innerHTML = ps.map(x => `<div class="rcx-hoja rcx-ind"><div class="rcx-cinta"></div>
         <div class="rcx-nombre" style="font-size:${rcnTamNombre(x.nom, 'ind')}pt">${esc(x.nom)}</div>
         <div class="rcx-abajo">
-          <div class="rcx-cbcaja"><svg class="rcx-cb" data-rcx="${esc(x.k)}" data-g="1"></svg><div class="rcx-atl"><small>ATL</small>${esc(x.k)}</div></div>
+          <div class="rcx-cbcaja"><svg class="rcx-cb" data-rcx="${esc(x.k)}" data-g="1"></svg><div class="rcx-atl">${esc(x.k)}</div></div>
           <div class="rcx-cuadro"><div class="rcx-blanco"></div><div class="rcx-pie">CANTIDAD</div></div>
         </div></div>`).join('');
     } else {
       const hojas = [];
       for (let i = 0; i < ps.length; i += 6) hojas.push(ps.slice(i, i + 6));
-      pr.innerHTML = hojas.map(h => `<div class="rcx-hoja rcx-lista ${rcn.ubic ? 'con-ubic' : ''}">
-        ${rcn.ubic ? `<div class="rcx-ubic"><span class="rcx-ubic-t">UBICACIÓN</span><b>${esc(rcn.ubic)}</b><svg class="rcx-cb" data-rcx="${esc(rcn.ubic)}"></svg></div>` : ''}
-        ${h.map(x => `<div class="rcx-fila">
-          <div class="rcx-cbcaja"><svg class="rcx-cb" data-rcx="${esc(x.k)}"></svg><div class="rcx-atl"><small>ATL</small>${esc(x.k)}</div></div>
+      pr.innerHTML = hojas.map(h => `<div class="rcx-hoja rcx-lista ${ubic ? 'con-ubic' : ''}"><div class="rcx-cinta"></div>
+        ${ubic ? `<div class="rcx-ubic"><span class="rcx-ubic-t">UBICACIÓN</span><b>${esc(ubic)}</b><svg class="rcx-cb" data-rcx="${esc(ubic)}"></svg></div>` : ''}
+        <div class="rcx-filas">${h.map(x => `<div class="rcx-fila">
+          <div class="rcx-cbcaja"><svg class="rcx-cb" data-rcx="${esc(x.k)}"></svg><div class="rcx-atl">${esc(x.k)}</div></div>
           <div class="rcx-nombre" style="font-size:${rcnTamNombre(x.nom, 'lista')}pt">${esc(x.nom)}</div>
-          <div class="rcx-cuadro"><div class="rcx-blanco"></div><div class="rcx-pie">CANTIDAD</div></div></div>`).join('')}
+          <div class="rcx-cuadro"><div class="rcx-blanco"></div><div class="rcx-pie">CANTIDAD</div></div></div>`).join('')}</div>
       </div>`).join('');
     }
     let st = $('pagina');
     if (!st) { st = document.createElement('style'); st.id = 'pagina'; document.head.appendChild(st); }
     st.textContent = '@page { size: letter landscape; margin: 8mm; }';
-    if (window.JsBarcode) {
-      pr.querySelectorAll('svg[data-rcx]').forEach(el => {
-        const g = el.dataset.g;
-        try { JsBarcode(el, el.dataset.rcx, { format: 'CODE128', width: g ? 6 : 3, height: g ? 200 : 60, margin: 4, displayValue: false, background: '#FFFFFF', lineColor: '#000000' }); } catch (x) {}
-        el.removeAttribute('width'); el.removeAttribute('height');
-      });
-    } else return toast('No se pudo cargar el dibujo del código de barras. Revisa la conexión y vuelve a intentarlo.', 'error');
+    // Todos los códigos de barras del mismo tamaño (el recuadro lo fija la hoja, no el largo del código)
+    pr.querySelectorAll('svg[data-rcx]').forEach(el => {
+      try { JsBarcode(el, el.dataset.rcx, { format: 'CODE128', width: 4, height: 100, margin: 0, displayValue: false, background: '#FFFFFF', lineColor: '#000000' }); } catch (x) {}
+      el.removeAttribute('width'); el.removeAttribute('height'); el.removeAttribute('style');
+      el.setAttribute('preserveAspectRatio', 'none');
+    });
     setTimeout(() => window.print(), 150);
+    return true;
+  }
+
+  // Listas guardadas de la sede (se arman en planta y se imprimen en la oficina)
+  let rcnListas = null, rcnFalta40 = false, rcnFil = 'pend', rcnBorrar = '';
+  function rcnCargarListas() {
+    llamar('bdListasConteo', ses.sedeId).then(r => { rcnListas = r.listas; rcnFalta40 = r.falta; if (vista === 'rotulo' && rtVista === 'conteo') rcnPintarListas(); })
+      .catch(e => { rcnListas = rcnListas || []; if ($('rcnListas')) $('rcnListas').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
+  }
+  function rcnPintarListas() { if ($('rcnListas')) $('rcnListas').innerHTML = rcnListasHtml(); }
+  function rcnListasHtml() {
+    if (rcnListas === null) return '<div class="cargando">Cargando listas…</div>';
+    if (rcnFalta40) return '<p class="muted">Para guardar listas y verlas desde otro equipo falta correr el script 40 en Supabase.</p>';
+    const l = rcnListas.filter(x => rcnFil === 'todas' || (rcnFil === 'pend' ? !x.impreso : !!x.impreso));
+    const { filas, barra } = paginar('rcnListas', l, rcnPintarListas);
+    const seg = `<div class="seg seg-3" role="group" aria-label="Qué listas ver">${[['pend', 'Por imprimir'], ['imp', 'Impresas'], ['todas', 'Todas']]
+      .map(([k, t]) => `<button class="${rcnFil === k ? 'on' : ''}" onclick="rcnFil='${k}'; pagInicio('rcnListas'); rcnPintarListas()">${t}</button>`).join('')}</div>`;
+    if (!l.length) return seg + `<p class="muted mt8">${rcnFil === 'imp' ? 'Todavía no hay listas impresas.' : rcnFil === 'pend' ? 'No hay listas por imprimir.' : 'Todavía no hay listas guardadas.'}</p>`;
+    return seg + `<div class="tabla-wrap mt8"><table class="tabla"><thead><tr><th>Nombre</th><th>Tipo</th><th class="num">Productos</th><th>La hizo</th><th>Estado</th><th></th></tr></thead><tbody>
+      ${filas.map(x => `<tr>
+        <td><b>${esc(x.nombre)}</b>${x.ubicacion ? `<div class="muted small">Ubicación ${esc(x.ubicacion)}</div>` : ''}</td>
+        <td>${x.tipo === 'LISTA' ? 'Lista' : 'Individual'}</td>
+        <td class="num">${x.codigos.length}</td>
+        <td>${esc(x.creadoPor || '—')}<div class="muted small">${fechaHora(x.creado)}</div></td>
+        <td>${x.impreso ? `<span class="tag ok">Impresa</span><div class="muted small">${esc(x.impresoPor || '')} ${fechaHora(x.impreso)}</div>` : '<span class="tag">Por imprimir</span>'}</td>
+        <td class="nowrap">${rcnBorrar === x.id
+          ? `<span class="small">¿Borrar?</span> <button class="btn btn-sal-solido btn-mini" onclick="rcnBorrarLista('${esc(x.id)}')">Sí, borrar</button> <button class="btn btn-sec btn-mini" onclick="rcnBorrar=''; rcnPintarListas()">No</button>`
+          : `<button class="btn btn-pri btn-mini" onclick="rcnImprimirLista('${esc(x.id)}')">Imprimir</button> <button class="btn btn-sec btn-mini" onclick="rcnBorrar='${esc(x.id)}'; rcnPintarListas()" aria-label="Borrar la lista ${esc(x.nombre)}">Borrar</button>`}</td>
+      </tr>`).join('')}</tbody></table></div>${barra}`;
+  }
+  function rcnGuardarLista() {
+    const nom = ($('rcnNom') && $('rcnNom').value.trim()) || '', er = $('rcnErr'), b = $('rcnGuardar');
+    if ($('rcnUbic')) rcnUbicar($('rcnUbic').value);
+    if (!nom) { er.textContent = 'Escribe un nombre para la lista (por ejemplo «Cava −17 pasillo 2»).'; er.hidden = false; $('rcnNom').focus(); return; }
+    b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdGuardarListaConteo', { sedeId: ses.sedeId, nombre: nom, tipo: rcn.modo === 'lista' ? 'LISTA' : 'IND', ubicacion: rcn.modo === 'lista' ? rcn.ubic : '', codigos: rcnL(), usuario: ses.nombre })
+      .then(x => {
+        rcn[rcn.modo] = []; if (rcn.modo === 'lista') rcn.ubic = ''; rcnGuardar();
+        (rcnListas = rcnListas || []).unshift(x); rcnFil = 'pend'; pagInicio('rcnListas');
+        pitido(); toast(`Lista «${x.nombre}» guardada. Ya la pueden imprimir desde otro equipo de esta sede.`, 'ok');
+        pintarApp();
+      })
+      .catch(e => { er.textContent = e.message; er.hidden = false; b.disabled = false; b.textContent = 'Guardar lista'; });
+  }
+  function rcnImprimirLista(id) {
+    const x = (rcnListas || []).find(y => y.id === id);
+    if (!x) return;
+    if (!rcnImprimirCon(x.codigos, x.tipo === 'LISTA' ? 'lista' : 'ind', x.tipo === 'LISTA' ? x.ubicacion : '')) return;
+    llamar('bdImpresaListaConteo', { id, usuario: ses.nombre }).then(n => { Object.assign(x, n); rcnPintarListas(); }).catch(() => {});
+  }
+  function rcnBorrarLista(id) {
+    llamar('bdBorrarListaConteo', id).then(() => { rcnListas = (rcnListas || []).filter(y => y.id !== id); rcnBorrar = ''; rcnPintarListas(); toast('Lista borrada', 'ok'); })
+      .catch(e => toast(e.message, 'error'));
   }
 
   function vistaRotulo() {
