@@ -292,6 +292,36 @@
     .rt2-venc { font-size: 6.8em; font-weight: 900; line-height: 1; white-space: nowrap; }
     .rt2-rec { font-size: 2.9em; font-weight: 800; line-height: 1.1; white-space: nowrap; }
     .rt2-peq { font-size: 1.55em; font-weight: 800; }
+    /* Rótulos de conteo: carta horizontal, en negro */
+    #print.modo-conteo { display: block !important; }
+    .rcx-hoja { width: 262mm; height: 198mm; box-sizing: border-box; color: #000; font-family: Arial, Helvetica, sans-serif; break-after: page; page-break-after: always; overflow: hidden; display: flex; flex-direction: column; }
+    .rcx-hoja:last-child { break-after: auto; page-break-after: auto; }
+    .rcx-cb { display: block; width: 100%; }
+    .rcx-atl { font-weight: 700; letter-spacing: .04em; text-align: center; }
+    .rcx-atl small { font-size: .5em; letter-spacing: .08em; margin-right: .35em; }
+    .rcx-cuadro { display: flex; flex-direction: column; }
+    .rcx-blanco { flex: 1 1 auto; border: 1mm solid #000; border-radius: 2mm; }
+    .rcx-pie { text-align: center; font-weight: 700; letter-spacing: .12em; padding-top: 1.5mm; }
+    .rcx-nombre { font-weight: 700; text-transform: uppercase; text-align: center; line-height: 1.05; overflow-wrap: anywhere; }
+    .rcx-ind { padding: 6mm 8mm; }
+    .rcx-ind .rcx-nombre { border-bottom: .8mm solid #000; padding-bottom: 5mm; margin-bottom: 7mm; }
+    .rcx-abajo { flex: 1 1 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10mm; min-height: 0; }
+    .rcx-ind .rcx-cbcaja { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .rcx-ind .rcx-cb { height: 85mm; }
+    .rcx-ind .rcx-atl { font-size: 34pt; margin-top: 3mm; }
+    .rcx-ind .rcx-pie { font-size: 22pt; }
+    .rcx-lista { padding: 4mm 6mm; justify-content: space-between; }
+    .rcx-ubic { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 6mm; border-bottom: .8mm solid #000; padding-bottom: 3mm; }
+    .rcx-ubic-t { font-size: 11pt; font-weight: 700; letter-spacing: .1em; }
+    .rcx-ubic b { font-size: 26pt; letter-spacing: .03em; }
+    .rcx-ubic .rcx-cb { height: 14mm; max-width: 110mm; justify-self: end; }
+    .rcx-fila { display: grid; grid-template-columns: 70mm 1fr 72mm; gap: 7mm; align-items: center; height: 29mm; }
+    .rcx-lista.con-ubic .rcx-fila { height: 26mm; }
+    .rcx-fila .rcx-cb { height: 17mm; }
+    .rcx-fila .rcx-atl { font-size: 15pt; }
+    .rcx-fila .rcx-cuadro { height: 100%; }
+    .rcx-fila .rcx-blanco { border-width: .7mm; }
+    .rcx-fila .rcx-pie { font-size: 9pt; padding-top: .8mm; }
   }
 
   /* ---------- Cámara ---------- */
@@ -358,6 +388,17 @@
   .bp-item { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px; border: 1px solid var(--borde); border-radius: 10px; background: var(--card); color: var(--txt); font: inherit; cursor: pointer; }
   .bp-item:hover, .bp-item:focus-visible { border-color: var(--pri); background: var(--pri-suave); }
   .elige-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .elige-grid.elige-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 320px; }   /* doble fondo: C-D arriba, A-B abajo */
+  .ing-ultimo, .ing-ayuda { display: block; margin-top: 6px; }
+  .rcn-arriba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+  @media (max-width: 760px) { .rcn-arriba { grid-template-columns: minmax(0, 1fr); } }
+  .rcn-lista { display: flex; flex-direction: column; max-height: 60vh; overflow-y: auto; }
+  .rcn-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--borde, #d8dde3); }
+  .rcn-item:last-child { border-bottom: 0; }
+  .rcn-n { min-width: 28px; text-align: right; color: var(--muted, #667085); font-variant-numeric: tabular-nums; }
+  .ing-op { min-width: 52px; font-size: 22px; font-weight: 700; padding: 0 12px; }
+  .txt-azul { color: var(--pri); }
+  #ingCalc { display: block; min-height: 1em; margin-top: 4px; font-weight: 600; }
   .elige { min-width: 52px; height: 48px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--borde2); background: var(--card); color: var(--txt); font: inherit; font-weight: 700; font-size: 16px; cursor: pointer; }
   .elige small { font-weight: 500; font-size: 11px; color: var(--muted); }
   .elige.on { background: var(--pri); border-color: var(--pri); color: var(--pri-tx); }
@@ -902,6 +943,7 @@
   .rc-racks { position: relative; }
   .cic-sedes { display: flex; flex-wrap: wrap; margin: 4px -4px 0; }
   .ing-faltan { font: inherit; padding: 6px 2px; min-height: 36px; }
+  .btn-enter { box-shadow: 0 0 0 4px rgba(31, 95, 191, .45) !important; }   /* Enter llegó al botón de guardar */
   .if-lista { max-height: 55vh; overflow-y: auto; margin-top: 8px; border: 1px solid var(--borde, #d8dde3); border-radius: 10px; }
   .if-op { display: block; width: 100%; text-align: left; min-height: 48px; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--borde, #d8dde3); background: transparent; color: inherit; font: inherit; font-size: 15px; cursor: pointer; }
   .if-op:last-child { border-bottom: 0; }
@@ -1082,7 +1124,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-B2UpxR90.js"></script>
+  <script type="module" crossorigin src="./assets/index-BP8gIZZK.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>

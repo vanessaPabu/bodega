@@ -144,6 +144,30 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
 
+  /* ---------- Enter: pasar al siguiente campo ----------
+   * En cualquier formulario, Enter salta al siguiente campo. En el último, se va al botón de guardar
+   * (otro Enter guarda). Los campos que ya hacen algo con Enter (escanear, buscar…) siguen igual. */
+  const ENTER_CAMPOS = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]):not([type=button]):not([disabled]):not([readonly]), select:not([disabled])';
+  const ENTER_GUARDAR = '[id$="Ok"], .btn-ent-solido, .btn-pri';
+  const visible_ = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length) && !el.closest('[hidden]');
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'Enter' || ev.defaultPrevented || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.isComposing) return;
+    const t = ev.target;
+    if (!t || !t.matches || !t.matches(ENTER_CAMPOS) || t.id === 'lectorPda' || t.hasAttribute('onkeydown') || t.closest('.pin, #lgPin')) return;
+    setTimeout(() => {   // primero lo que haga el campo con su Enter
+      if (!document.body.contains(t) || document.activeElement !== t) return;   // ya cambió la pantalla o el foco
+      const caja = t.closest('#caja, .modal, section, .card, form, main') || document.body;
+      const campos = Array.prototype.filter.call(caja.querySelectorAll(ENTER_CAMPOS), visible_);
+      const sig = campos[campos.indexOf(t) + 1];
+      if (sig) { sig.focus(); if (sig.select && sig.tagName === 'INPUT') try { sig.select(); } catch (e) {} return; }
+      const btn = Array.prototype.filter.call(caja.querySelectorAll(ENTER_GUARDAR), b => b.tagName === 'BUTTON' && !b.disabled && visible_(b))[0];
+      if (btn) {   // queda marcado mientras tenga el foco (el lector del PDA no se lo quita)
+        btn.classList.add('btn-enter'); btn.focus();
+        btn.addEventListener('blur', () => btn.classList.remove('btn-enter'), { once: true });
+      }
+    }, 0);
+  });
+
   let toastTimer = null;
   function toast(texto, tipo) {
     const t = $('toast');
@@ -658,6 +682,7 @@
     $('app').innerHTML = encabezado + cuerpo.replace('<main class="wrap', '<main data-x class="wrap').replace(/(<main data-x[^>]*>)/, '$1' + (vista === 'mapa' ? avisoMoviendo() + avisoUbicando() + avisoSeguir() : ''));
     enlazarEventos();
     enlazarRotulo();
+    if (vista === 'rotulo' && rtVista === 'conteo') enlazarConteoRot();
     enlazarRecibidor();
     enlazarCalidad();
     enlazarUsuarios();
@@ -783,6 +808,9 @@
     const esps = r && lugar.pos ? espaciosDe(r.id, lugar.pos) : [];
     const niveles = [...new Set(esps.map(e => e.nivel))].sort((a, b) => b - a);
     const lados = lugar.nivel !== null ? esps.filter(e => e.nivel === lugar.nivel).map(e => e.lado).sort() : [];
+    const conFondo = lados.some(l => l === 'C' || l === 'D');
+    // Doble fondo: se muestra como en la estantería, el fondo (C - D) arriba y el frente (A - B) abajo
+    const ladosVer = conFondo ? lados.filter(l => l === 'C' || l === 'D').concat(lados.filter(l => l !== 'C' && l !== 'D')) : lados;
     const boton = (on, txt, accion, extra) => `<button class="elige ${on ? 'on' : ''}" onclick="${accion}" ${extra || ''}>${txt}</button>`;
     const cod = codigoLugar();
     const codVer = !cod ? '' : lugar.nivel !== null && lugar.lado ? cu(cod) : posCodigo(lugar.rack, lugar.pos);   // el código nuevo si ya lo tiene
@@ -815,7 +843,7 @@
         : '<p class="muted small mt12">Esta posición todavía no tiene niveles.</p>') : ''}
 
       ${lados.length ? `<span class="lbl mt12">Lado</span>
-      <div class="elige-grid">${lados.map(l => {
+      <div class="elige-grid ${conFondo ? 'elige-2' : ''}">${ladosVer.map(l => {
         const idL = `${lugar.rack}-P${pad3(lugar.pos)}-${lugar.nivel === 0 ? 'PK' : lugar.nivel}${l}`;
         const lleno = ctx && !ctx.permitirLlenos && sinCupo(idL);
         const cupo = ctx && !lleno && cupoTxt(idL);
@@ -4810,10 +4838,15 @@
     const g = sapTmp.guia;
     const crear = sapModo !== 'ciclico' && nuevos.length && sapTmp.crear !== false;
     const nCrear = crear ? nuevos.length : 0, nOk = new Set(ok.map(r => r.codigo)).size;
+    // Un producto puede venir en varias filas (un almacén por fila): se muestra ya sumado, como se guarda
+    const sumM = {};
+    ok.forEach(r => { const x = sumM[r.codigo] || (sumM[r.codigo] = { codigo: r.codigo, inventario: 0, calidad: 0, bloqueado: 0, filas: 0 });
+      x.inventario = +(x.inventario + r.inventario).toFixed(3); x.calidad = +(x.calidad + r.calidad).toFixed(3); x.bloqueado = +(x.bloqueado + r.bloqueado).toFixed(3); x.filas++; });
+    const sumados = Object.values(sumM).sort((a, b) => b.filas - a.filas), rep = sumados.filter(x => x.filas > 1).length;
     const listo = g.cod >= 0 && g.inv >= 0 && (ok.length || nCrear);
     const selG = (id, k, i) => `<select id="${id}" class="campo" onchange="sapTmp.guia.${k}=+this.value; prevSap()"><option value="-1">— No viene —</option>${sapTmp.filas[sapTmp.cab].map((t, j) => `<option value="${j}" ${j === i ? 'selected' : ''}>${esc(String(t).trim() || 'Columna ' + (j + 1))}</option>`).join('')}</select>`;
     $('sapPrev').innerHTML = `<div class="inv-res">
-        <div><span class="muted small">Productos encontrados</span><b class="txt-verde">${ok.length}</b></div>
+        <div><span class="muted small">Productos encontrados</span><b class="txt-verde">${nOk}</b></div>
         <div><span class="muted small">Códigos que no están</span><b class="${malos.length ? 'txt-naranja' : ''}">${new Set(malos).size}</b></div></div>
       ${malos.length ? `<span class="muted small mt8">No están en el catálogo: ${esc([...new Set(malos)].slice(0, 15).join(', '))}${new Set(malos).size > 15 ? '…' : ''}</span>` : ''}
       ${sapModo !== 'ciclico' && nuevos.length ? `<div class="card col gap8 mt8">
@@ -4825,9 +4858,10 @@
         </div>
         <span class="muted small">Así quedan: ${nuevos.slice(0, 3).map(x => `<b>${esc(x.codigo)}</b> · ${esc(x.nombre || 'Producto ' + x.codigo)}`).join(' — ')}${nuevos.length > 3 ? '…' : ''}</span>` : '<span class="muted small">Si no los creas, esos códigos no se cargan.</span>'}
       </div>` : ''}
+      ${rep ? `<span class="small txt-azul mt8">${rep} producto${rep === 1 ? '' : 's'} venía${rep === 1 ? '' : 'n'} en varias filas (varios almacenes): se suma${rep === 1 ? '' : 'n'} todo y queda un solo total por producto.</span>` : ''}
       ${ok.length ? `<div class="tabla-wrap mt8"><table class="tabla"><thead><tr><th>Atlantic</th><th>Producto</th><th class="num">Inventario</th><th class="num">Calidad</th><th class="num">Bloqueado</th></tr></thead>
-        <tbody>${ok.slice(0, 5).map(r => `<tr><td>${esc(r.codigo)}</td><td>${esc((prodDe(r.codigo) || {}).nombre || '')}</td><td class="num">${nInv(r.inventario)}</td><td class="num">${nInv(r.calidad)}</td><td class="num">${nInv(r.bloqueado)}</td></tr>`).join('')}</tbody></table></div>
-        <span class="muted small">Así se ven los primeros 5. Si los números no cuadran, cambia las columnas de arriba.</span>` : ''}
+        <tbody>${sumados.slice(0, 5).map(r => `<tr><td>${esc(r.codigo)}</td><td>${esc((prodDe(r.codigo) || {}).nombre || '')}</td><td class="num">${nInv(r.inventario)}</td><td class="num">${nInv(r.calidad)}</td><td class="num">${nInv(r.bloqueado)}</td></tr>`).join('')}</tbody></table></div>
+        <span class="muted small">Así quedan los primeros 5 (ya sumados). Si los números no cuadran, cambia las columnas de arriba.</span>` : ''}
       <button id="sapOk" class="btn btn-pri btn-xl mt12" onclick="guardarSap()" ${listo ? '' : 'disabled'}>${listo ? (sapModo === 'ciclico' ? `Usar estos ${new Set(ok.map(r => r.codigo)).size} productos` : `Cargar ${nOk + nCrear} productos`) : g.cod < 0 ? 'Elige la columna del código' : g.inv < 0 ? 'Elige la columna de inventario' : 'No hay productos para cargar'}</button>`;
   }
 
@@ -7251,7 +7285,7 @@
      Inventario y cíclico son procesos aparte: cada uno guarda sus propios conteos.
      Siempre se escoge primero el almacén. En el cíclico solo se aceptan los productos que mandaron a contar.
      Lo que se ingresa es el picking; calidad y bloqueado se toman del Excel que cargó el encargado. */
-  const ing = { alm: leerLS('ingAlm') || '', cod: '' };
+  const ing = { alm: leerLS('ingAlm') || '', cod: '', partes: [] };   // partes: cantidades que ya sumó antes de guardar
   const ingAlmacenes = () => Object.values(codGen().almacenes).filter(a => a.alm);
   const ingEsKg = p => !!p && (p.unidadMedida || '').toUpperCase() === 'KG';
 
@@ -7280,10 +7314,14 @@
       ${p ? `<div class="info"><span class="fuerte">${esc(p.nombre)}</span>
           <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · Atlantic ${esc(p.id)} · ${kg ? 'peso variable (kg)' : `${p.undPorCaja || 1} und por caja`}</span>
           ${ingCbHtml(S, p, kg)}
-          ${ya && ya.tienePk ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Si lo guardas, te pregunta si sumar o reemplazar.</span>` : ''}
+          ${ya && ya.tienePk ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Lo que guardes se suma; si te equivocas, corrígelo en Consultar.</span>` : ''}
           <div id="ingAviso">${ingAvisoHtml(S)}</div></div>
         <div><label class="lbl" for="ingCant">3. ${kg ? 'Peso total (kg)' : 'Cantidad total (unidades)'}</label>
-          <input id="ingCant" class="campo ing-in ing-total" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>
+          <div class="fila gap8"><input id="ingCant" class="campo ing-in ing-total" type="text" inputmode="decimal" autocomplete="off" placeholder="0  (ej. 12x24+6)" style="flex:1;min-width:0">
+            <button type="button" class="btn btn-sec ing-op" onmousedown="event.preventDefault()" onclick="ingOp('+')" aria-label="Sumar">+</button>
+            <button type="button" class="btn btn-sec ing-op" onmousedown="event.preventDefault()" onclick="ingOp('x')" aria-label="Multiplicar">×</button></div>
+          <span id="ingCalc" class="small txt-azul" aria-live="polite"></span>
+          ${ingUltimoHtml()}</div>
         <div class="ing-cal">
           <span class="fila gap8 wrap-f">
             <button type="button" id="ingCalBtn" class="btn btn-sec btn-mini" onclick="ingVerExtra('CALIDAD')">+ Agregar calidad</button>
@@ -7534,10 +7572,14 @@
           <span class="muted small">${ops.registrado ? (ops.lista.length > 1 ? `Este producto está registrado en ${ops.lista.length} almacenes: escoge en cuál lo estás contando.` : 'Es el almacén registrado del producto.')
             : '<span class="txt-naranja">Este producto no tiene almacén registrado: escoge dónde lo estás contando.</span>'}</span></div>
         ${!ing.alm ? '' : `
-        ${ya && ya.tienePk ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Si lo guardas, te pregunta si sumar o reemplazar.</span>` : ''}
+        ${ya && ya.tienePk ? `<span class="small txt-naranja">Ya se contó en este almacén: <b>${nInv(ya.cant)}</b> ${kg ? 'kg' : 'und'} (${esc(ya.usuario || '—')}). Lo que guardes se suma; si te equivocas, corrígelo en Consultar.</span>` : ''}
         <div id="ingAviso">${ingAvisoHtml(S)}</div>
         <div><label class="lbl" for="ingCant">3. ${kg ? 'Peso total (kg)' : 'Cantidad total (unidades)'}</label>
-          <input id="ingCant" class="campo ing-in ing-total" type="number" inputmode="decimal" min="0" step="any" placeholder="0"></div>
+          <div class="fila gap8"><input id="ingCant" class="campo ing-in ing-total" type="text" inputmode="decimal" autocomplete="off" placeholder="0  (ej. 12x24+6)" style="flex:1;min-width:0">
+            <button type="button" class="btn btn-sec ing-op" onmousedown="event.preventDefault()" onclick="ingOp('+')" aria-label="Sumar">+</button>
+            <button type="button" class="btn btn-sec ing-op" onmousedown="event.preventDefault()" onclick="ingOp('x')" aria-label="Multiplicar">×</button></div>
+          <span id="ingCalc" class="small txt-azul" aria-live="polite"></span>
+          ${ingUltimoHtml()}</div>
         <div class="ing-cal">
           <span class="fila gap8 wrap-f">
             <button type="button" id="ingCalBtn" class="btn btn-sec btn-mini" onclick="ingVerExtra('CALIDAD')">+ Agregar calidad</button>
@@ -7668,11 +7710,73 @@
     agregarProdCic(p.id);
   }
   function ingTotal() {
-    const el = $('ingCant');
-    if (!el || el.value.trim() === '') return null;
-    return num(el.value);
+    const el = $('ingCant'), f = el ? calcCant(el.value) : null;
+    if (f !== null && isNaN(f)) return NaN;
+    if (!ing.partes.length) return f;
+    return +(ing.partes.reduce((a, b) => a + b, 0) + (f > 0 ? f : 0)).toFixed(3);
   }
-  function ingCalc() {}
+  // Debajo de la cantidad: lo que se acaba de guardar con Enter
+  function ingUltimoHtml() {
+    const u = ing.ultimo;
+    if (!u || u.cod !== ing.cod) return '<span class="small muted ing-ayuda">Enter guarda y se suma. Otra cantidad: escríbela y Enter. Para terminar: Enter con el campo vacío.</span>';
+    return `<span class="small txt-verde ing-ultimo" aria-live="polite">✓ Lo acabo de contar${u.cant != null ? `: <b>${nInv(u.cant)} ${u.u}</b>${u.op ? ` (${esc(u.op)})` : ''}` : ''} · total <b>${nInv(u.total)} ${u.u}</b>.
+      Escribe otra cantidad y Enter, o Enter vacío para terminar.</span>`;
+  }
+  // Varias cantidades (cuando van contando por partes): cada una se suma antes de guardar
+  function ingPartesHtml(kg) {
+    if (!ing.partes.length) return '';
+    const t = +ing.partes.reduce((a, b) => a + b, 0).toFixed(3);
+    return `Llevas <b>${ing.partes.map(nInv).join(' + ')}${ing.partes.length > 1 ? ' = ' + nInv(t) : ''}</b> ${kg ? 'kg' : 'und'}
+      <button type="button" class="link" onclick="ingQuitarParte()">Quitar la última</button>`;
+  }
+  function ingSumarParte() {
+    const el = $('ingCant'), v = el ? num(el.value) : 0;
+    if (!(v > 0)) { if (el) el.focus(); return toast('Escribe la cantidad que vas a sumar', 'error'); }
+    ing.partes.push(v); el.value = '';
+    $('ingPartes').innerHTML = ingPartesHtml(ingEsKg(prodDe(ing.cod)));
+    el.focus();
+  }
+  function ingQuitarParte() {
+    ing.partes.pop();
+    $('ingPartes').innerHTML = ingPartesHtml(ingEsKg(prodDe(ing.cod)));
+    if ($('ingCant')) $('ingCant').focus();
+  }
+  // Cantidad con operaciones: 12x24+6 → 294 (solo suma y multiplicación). null si está vacía; NaN si no se entiende
+  function calcCant(txt) {
+    const t = String(txt == null ? '' : txt).replace(/\s+/g, '').replace(/[×*X]/g, 'x');
+    if (!t) return null;
+    if (!/^[\d.,x+]+$/.test(t)) return NaN;
+    let total = 0;
+    for (const termino of t.split('+')) {
+      if (!termino) return NaN;
+      let prod = 1;
+      for (const f of termino.split('x')) {
+        if (!f) return NaN;
+        const n = numSap(f);   // entiende 1,5 y 1.5
+        if (!/\d/.test(f) || isNaN(n)) return NaN;
+        prod *= n;
+      }
+      total += prod;
+    }
+    return +total.toFixed(3);
+  }
+  const ingEsOperacion = v => /[x×*X+]/.test(String(v || ''));
+  function ingCalc() {
+    const el = $('ingCant'), out = $('ingCalc');
+    if (!el || !out) return;
+    const v = el.value, r = calcCant(v);
+    out.textContent = !ingEsOperacion(v) ? '' : isNaN(r) || r === null ? 'Revisa la operación' : '= ' + nInv(r);
+  }
+  // Botones + y × junto a la cantidad (en el teclado numérico no siempre están)
+  function ingOp(op) {
+    const el = $('ingCant');
+    if (!el) return;
+    const v = el.value.replace(/\s+$/, '');
+    if (!v || /[x+]$/.test(v)) { el.focus(); return; }
+    el.value = v + op; el.focus();
+    try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {}
+    ingCalc();
+  }
   function ingProducto(txt, enter) {
     const p = buscarProducto(String(txt || '').split(' · ')[0]) || buscarProducto(txt);
     const S = cpScope();
@@ -7683,6 +7787,7 @@
       return;
     }
     if (S.cic && !S.cic.codigos.includes(p.id)) { $('ingCod').value = ''; return preguntarAgregarCic(p, () => ingProducto(p.id)); }
+    if (ing.cod !== p.id) { ing.partes = []; ing.ultimo = null; }
     ing.cod = p.id;
     if (!S.cic) { const o = ingAlmsProd(p.id); ing.alm = o.registrado && o.lista.length === 1 ? o.lista[0].key : ''; }   // 2 o más: que escojan
     const ya = ing.alm ? ingYaContado(S, p.id) : null;
@@ -7725,6 +7830,7 @@
   }
   // Borra el código de una vez (para no borrar letra por letra) y deja listo para escanear otro
   function ingLimpiar() {
+    ing.partes = []; ing.ultimo = null;
     if (ing.cod) { ing.cod = ''; ing.base = null; ing.avisado = false; pintarApp(); }
     const c = $('ingCod');
     if (c) { c.value = ''; c.focus(); }
@@ -7739,11 +7845,30 @@
     ins.forEach((el, i) => {
       el.addEventListener('input', ingCalc);
       el.addEventListener('focus', () => el.select());
-      el.addEventListener('keydown', ev => { if (ev.key !== 'Enter') return; ev.preventDefault(); if (ins[i + 1]) ins[i + 1].focus(); else ingGuardar(); });
+      el.addEventListener('keydown', ev => {
+        if (ev.key !== 'Enter') return;
+        ev.preventDefault();
+        if (el.id === 'ingCant') return ingEnterCant();   // cantidad: guarda y sigue en el mismo producto
+        if (ins[i + 1]) ins[i + 1].focus(); else ingGuardar();
+      });
     });
     if (!ing.cod) c.focus({ preventScroll: true });
   }
-  function ingGuardar() {
+  // Enter en la cantidad: con número, guarda (se suma) y vuelve a la cantidad para el siguiente;
+  // vacío, termina ese producto y vuelve al código
+  function ingEnterCant() {
+    if (ing.guardando) return;
+    const el = $('ingCant'), vacio = !el || el.value.trim() === '';
+    const abiertos = ['ingCal', 'ingBlo'].some(id => $(id) && $(id).offsetParent && $(id).value.trim() !== '');
+    if (vacio && !abiertos && ing.ultimo && ing.ultimo.cod === ing.cod) {
+      ing.cod = ''; ing.ultimo = null; ing.extra = null;
+      pintarApp();
+      setTimeout(() => $('ingCod') && $('ingCod').focus(), 30);
+      return;
+    }
+    ingGuardar(true);
+  }
+  function ingGuardar(seguir) {
     const S = cpScope(), p = prodDe(ing.cod);
     if (!p) return errForm('Escanea o escribe el código del producto.');
     if (!ing.alm) return errForm('Escoge el almacén.');
@@ -7753,28 +7878,14 @@
     ing.extra = { CALIDAD: xc, BLOQUEADO: xb };
     const t = ingTotal();
     // Solo calidad / bloqueado: no hace falta la cantidad de arriba (el picking queda como estaba)
-    if (t === null && (xc !== null || xb !== null)) return ingEnviar(p, null, 'extra');
+    if (t === null && (xc !== null || xb !== null)) return ingEnviar(p, null, 'extra', seguir);
+    if (t !== null && isNaN(t)) { if ($('ingCant')) $('ingCant').focus(); return errForm('No se entiende la operación. Usa solo números, + y × (ej. 12x24+6).'); }
     if (t === null || !(t >= 0)) { if ($('ingCant')) $('ingCant').focus(); return errForm(ingEsKg(p) ? 'Escribe el peso total (o solo calidad / bloqueado).' : 'Escribe la cantidad total (o solo calidad / bloqueado).'); }
+    // Si ya estaba contado aquí, se suma directo (si se equivocan, lo corrigen en Consultar)
     const ya = ingYaContado(S, p.id);
-    if (!ya || !ya.tienePk) return ingEnviar(p, t, null);   // si solo tenía calidad, no hay picking que sumar
-    const u = ingEsKg(p) ? 'kg' : 'und';
-    const otro = ingOtro(S);
-    if (otro) return abrirModal(`<div class="fila-sb"><span class="h2">⚠ ${esc(otro.usuario)} también llenó este producto</span>${btnCerrar()}</div>
-      <span class="mt12">Mientras lo llenabas, <b>${esc(otro.usuario)}</b> guardó <b>${nInv(otro.cant)} ${u}</b> de ${esc(p.nombre)} en este almacén (${fechaHora(otro.fecha)}).
-        Tú llevas <b>${nInv(t)} ${u}</b>. No se suma solo: escoge qué queda.</span>
-      <div class="col gap8 mt16">
-        <button class="btn btn-sec btn-xl" onclick="cerrarModal(); ing.cod=''; pintarApp(); toast('Quedó lo que ya estaba guardado', 'ok')">Dejar lo de ${esc(otro.usuario)}: ${nInv(otro.cant)} ${u}</button>
-        <button class="btn btn-ent-solido btn-xl" onclick="cerrarModal(); ingEnviar(prodDe('${esc(p.id)}'), ${t}, 'reemplazar')">Dejar lo mío: ${nInv(t)} ${u}</button>
-        <button class="btn btn-sec btn-xl" onclick="cerrarModal(); ingEnviar(prodDe('${esc(p.id)}'), ${t}, 'sumar')">Son partes distintas, sumar: ${nInv(otro.cant + t)} ${u}</button>
-        <button class="btn btn-sec" onclick="cerrarModal()">Cancelar</button></div>`);
-    abrirModal(`<div class="fila-sb"><span class="h2">${esc(p.nombre)} ya se contó aquí</span>${btnCerrar()}</div>
-      <span class="mt12">Ya hay <b>${nInv(ya.cant)} ${u}</b> (${esc(ya.usuario || '—')}). ¿Lo que acabas de contar es otra parte, o corrige lo de antes?</span>
-      <div class="col gap8 mt16">
-        <button class="btn btn-ent-solido btn-xl" onclick="cerrarModal(); ingEnviar(prodDe('${esc(p.id)}'), ${t}, 'sumar')">Sumar: queda ${nInv(ya.cant + t)} ${u}</button>
-        <button class="btn btn-sec btn-xl" onclick="cerrarModal(); ingEnviar(prodDe('${esc(p.id)}'), ${t}, 'reemplazar')">Reemplazar: queda ${nInv(t)} ${u}</button>
-        <button class="btn btn-sec" onclick="cerrarModal()">Cancelar</button></div>`);
+    return ingEnviar(p, t, ya && ya.tienePk ? 'sumar' : null, seguir);
   }
-  function ingEnviar(p, t, modo) {
+  function ingEnviar(p, t, modo, seguir) {
     const S = cpScope(), ya = ingYaContado(S, p.id);
     const lugar = ya ? ya.lugar : ingLugar(p.id);
     // Calidad y bloqueado: los del Excel la primera vez que se cuenta el producto; después se dejan como estaban
@@ -7794,6 +7905,7 @@
       BLOQUEADO: conExtra('BLOQUEADO')
     };
     const b = $('ingOk'); if (b) { b.disabled = true; b.textContent = 'Guardando…'; }
+    ing.guardando = true;
     llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: lugar, codigo: p.id, cantidades, usuario: ses.nombre, ciclicoId: S.id })
       .then(lista => {
         const rem = (arr, c) => arr.filter(x => !(x.codigo === c.codigo && x.ubicacion === c.ubicacion && x.tipo === c.tipo)).concat([c]);
@@ -7802,11 +7914,20 @@
         pitido();
         const xs = [ex.CALIDAD != null ? `calidad ${nInv(cantidades.CALIDAD)}` : '', ex.BLOQUEADO != null ? `bloqueado ${nInv(cantidades.BLOQUEADO)}` : ''].filter(Boolean).join(' · ');
         toast(modo === 'extra' ? `✓ ${p.nombre}: ${xs}` : `✓ ${p.nombre}: ${nInv(cantidades.PICKING)} ${ingEsKg(p) ? 'kg' : 'und'}${modo === 'sumar' ? ' (sumado)' : ''}${xs ? ' · ' + xs : ''}`, 'ok');
-        ing.cod = ''; ing.extra = null;
+        ing.guardando = false; ing.extra = null; ing.partes = [];
+        if (seguir) {   // Enter: sigue en el mismo producto, listo para la siguiente cantidad
+          const ya2 = ingYaContado(cpScope(), p.id);
+          const opTxt = $('ingCant') && ingEsOperacion($('ingCant').value) ? $('ingCant').value.replace(/\s+/g, '').replace(/x/gi, '×') : '';
+          ing.ultimo = { cod: p.id, cant: modo === 'extra' ? null : t, op: opTxt, total: cantidades.PICKING != null ? cantidades.PICKING : (ya2 ? ya2.cant : 0), u: ingEsKg(p) ? 'kg' : 'und' };
+          pintarApp();
+          setTimeout(() => $('ingCant') && $('ingCant').focus(), 30);
+          return;
+        }
+        ing.cod = ''; ing.ultimo = null;
         pintarApp();
         setTimeout(() => $('ingCod') && $('ingCod').focus(), 30);
       })
-      .catch(e => { errForm(e.message); if (b) { b.disabled = false; b.textContent = 'Guardar'; } });
+      .catch(e => { ing.guardando = false; errForm(e.message); if (b) { b.disabled = false; b.textContent = 'Guardar'; } });
   }
   // Lo último que llenó la persona en este almacén
   function ingRecientesHtml(S) {
@@ -8542,10 +8663,132 @@
   const kg = n => `${+Number(n).toFixed(2)} kg`;
   const guardarTanda = () => guardarLS('tandaRotulos', tanda);
 
+  /* ---------- Rótulos de conteo (contingencia de inventario) ----------
+   * Hojas para pegar donde está el producto (cava, empaques al vacío sin código visible): el código Atlantic
+   * en barras y un cuadro para anotar la cantidad con marcador borrable. Individual: una hoja por producto.
+   * Lista: 6 por hoja, con la ubicación arriba si la escriben. Solo imprime: no guarda nada en la base. */
+  let rtVista = 'estiba';
+  const rcn = (() => { try { const x = JSON.parse(localStorage.getItem('rotConteo') || 'null'); if (x && Array.isArray(x.prods)) return x; } catch (e) {} return { modo: 'ind', prods: [], ubic: '' }; })();
+  const rcnGuardar = () => { try { localStorage.setItem('rotConteo', JSON.stringify(rcn)); } catch (e) {} };
+  function rotTabsHtml() {
+    return `<div class="tabs" role="tablist" aria-label="Rotular">
+      <button class="tab ${rtVista === 'estiba' ? 'on' : ''}" onclick="rtVista='estiba'; pintarApp()">Rótulos de estiba</button>
+      <button class="tab ${rtVista === 'conteo' ? 'on' : ''}" onclick="rtVista='conteo'; pintarApp()">Rótulos de conteo</button></div>`;
+  }
+  function vistaConteoRot() {
+    const n = rcn.prods.length, hojas = rcn.modo === 'ind' ? n : Math.ceil(n / 6);
+    return `<div class="col gap12">${rotTabsHtml()}
+      <div class="col gap4"><span class="h2">Rótulos de conteo ${ayudaHtml('Para el inventario, como plan de contingencia: se pegan donde está el producto (por ejemplo en la cava, donde el empaque al vacío no deja ver el código). Se anota la cantidad con marcador borrable y la radiofrecuencia escanea el código de barras para registrarla cuando haya señal.')}</span>
+        <span class="muted small">Escanea o escribe los códigos, revisa la lista y toca Imprimir.</span></div>
+      <div class="rcn-arriba">
+        <section class="card col gap12">
+          <div><span class="lbl">Tipo</span>
+            <div class="seg" role="group" aria-label="Tipo de rótulo">
+              <button class="${rcn.modo === 'ind' ? 'on' : ''}" onclick="rcnModo('ind')">Individual</button>
+              <button class="${rcn.modo === 'lista' ? 'on' : ''}" onclick="rcnModo('lista')">Lista (6 por hoja)</button></div></div>
+          ${rcn.modo === 'lista' ? `<div><label class="lbl" for="rcnUbic">Ubicación (opcional) ${ayudaHtml('Si la escribes o la escaneas, sale arriba de cada hoja con su código de barras: así queda claro qué productos van en ese lugar.')}</label>
+            ${campoConCamara(`<input id="rcnUbic" class="campo" autocomplete="off" spellcheck="false" autocapitalize="characters" placeholder="Ej. 2000-07-02-01" value="${esc(rcn.ubic)}" onchange="rcnUbicar(this.value)">`, 'rcnUbic')}</div>` : ''}
+          <div><label class="lbl" for="rcnCod">Producto</label>
+            ${campoConCamara('<input id="rcnCod" class="campo" list="dlProductos" autocomplete="off" spellcheck="false" placeholder="Escanea o escribe el código y Enter">', 'rcnCod')}
+            <span class="muted small">Puedes pegar varios códigos a la vez (uno por línea o separados por comas).</span></div>
+          <button class="btn btn-pri btn-xl" onclick="rcnImprimir()" ${n ? '' : 'disabled'}>${n ? `Imprimir ${hojas} hoja${hojas === 1 ? '' : 's'}` : 'Agrega productos para imprimir'}</button>
+        </section>
+        <section class="card col gap8" aria-labelledby="rcnTit">
+          <div class="fila-sb"><span class="h3" id="rcnTit">Para imprimir (${n})</span>${n ? '<button class="btn btn-sec btn-mini" onclick="rcnVaciar()">Quitar todos</button>' : ''}</div>
+          ${n ? `<div class="rcn-lista">${rcn.prods.map((k, i) => { const p = prodDe(k);
+            return `<div class="rcn-item"><span class="rcn-n">${i + 1}</span><span class="col" style="min-width:0;flex:1"><b>${esc(k)}</b><span class="small">${esc(p ? p.nombre : 'No está en Productos')}</span></span>
+              <button class="btn btn-sec btn-mini" onclick="rcnQuitar(${i})" aria-label="Quitar ${esc(k)}">✕</button></div>`; }).join('')}</div>`
+            : '<p class="muted">Todavía no hay productos. Escanea el primero.</p>'}
+        </section>
+      </div></div>`;
+  }
+  function rcnModo(m) { rcn.modo = m; rcnGuardar(); pintarApp(); }
+  function rcnUbicar(v) { rcn.ubic = String(v || '').trim().toUpperCase(); rcnGuardar(); }
+  function rcnQuitar(i) { rcn.prods.splice(i, 1); rcnGuardar(); pintarApp(); setTimeout(() => $('rcnCod') && $('rcnCod').focus(), 30); }
+  function rcnVaciar() { rcn.prods = []; rcnGuardar(); pintarApp(); }
+  function rcnAgregar(txt) {
+    let partes = String(txt || '').split(/[\n,;\t]+/).map(x => x.trim()).filter(Boolean);
+    if (partes.length === 1 && !buscarProducto(partes[0].split(' · ')[0])) {
+      const ws = partes[0].split(/\s+/);
+      if (ws.length > 1 && ws.every(w => buscarProducto(w))) partes = ws;
+    }
+    const malos = [], ya = [];
+    let n = 0;
+    partes.forEach(t => {
+      const p = buscarProducto(t.split(' · ')[0]) || buscarProducto(t);
+      if (!p) return malos.push(t);
+      if (rcn.prods.includes(p.id)) return ya.push(p.id);
+      rcn.prods.push(p.id); n++;
+    });
+    rcnGuardar();
+    if (n) { pitido(); pintarApp(); setTimeout(() => $('rcnCod') && $('rcnCod').focus(), 30); }
+    else if ($('rcnCod')) { $('rcnCod').value = ''; $('rcnCod').focus(); }
+    if (malos.length) toast(`No hay producto con ${malos.length === 1 ? 'el código' : 'los códigos'} ${malos.slice(0, 5).join(', ')}`, 'error');
+    else if (ya.length && !n) toast(`${ya.join(', ')} ya está en la lista`, 'error');
+  }
+  function enlazarConteoRot() {
+    const c = $('rcnCod');
+    if (c) {
+      c.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); rcnAgregar(c.value); } });
+      c.addEventListener('change', () => { if (buscarProducto(c.value.split(' · ')[0])) rcnAgregar(c.value); });
+      // Pegar una columna de Excel: el campo borraría los saltos de línea, por eso se toma lo pegado directo
+      c.addEventListener('paste', ev => {
+        const t = ev.clipboardData && ev.clipboardData.getData('text');
+        if (t && /[\n\r,;\t]/.test(t.trim())) { ev.preventDefault(); rcnAgregar(t); }
+      });
+      c.focus({ preventScroll: true });
+    }
+    const u = $('rcnUbic');
+    if (u) u.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); rcnUbicar(u.value); u.value = rcn.ubic; if (c) c.focus(); } });
+  }
+  // Tamaño del nombre según qué tan largo es (que se lea de lejos sin exagerar)
+  const rcnTamNombre = (t, modo) => {
+    const n = String(t || '').length;
+    if (modo === 'ind') return n <= 18 ? 60 : n <= 30 ? 50 : n <= 45 ? 42 : 34;
+    return n <= 22 ? 22 : n <= 36 ? 19 : 16;
+  };
+  function rcnImprimir() {
+    if (!rcn.prods.length) return;
+    if ($('rcnUbic')) rcnUbicar($('rcnUbic').value);
+    const pr = $('print');
+    pr.className = 'modo-conteo';
+    const ps = rcn.prods.map(k => ({ k, nom: (prodDe(k) || {}).nombre || k }));
+    if (rcn.modo === 'ind') {
+      pr.innerHTML = ps.map(x => `<div class="rcx-hoja rcx-ind">
+        <div class="rcx-nombre" style="font-size:${rcnTamNombre(x.nom, 'ind')}pt">${esc(x.nom)}</div>
+        <div class="rcx-abajo">
+          <div class="rcx-cbcaja"><svg class="rcx-cb" data-rcx="${esc(x.k)}" data-g="1"></svg><div class="rcx-atl"><small>ATL</small>${esc(x.k)}</div></div>
+          <div class="rcx-cuadro"><div class="rcx-blanco"></div><div class="rcx-pie">CANTIDAD</div></div>
+        </div></div>`).join('');
+    } else {
+      const hojas = [];
+      for (let i = 0; i < ps.length; i += 6) hojas.push(ps.slice(i, i + 6));
+      pr.innerHTML = hojas.map(h => `<div class="rcx-hoja rcx-lista ${rcn.ubic ? 'con-ubic' : ''}">
+        ${rcn.ubic ? `<div class="rcx-ubic"><span class="rcx-ubic-t">UBICACIÓN</span><b>${esc(rcn.ubic)}</b><svg class="rcx-cb" data-rcx="${esc(rcn.ubic)}"></svg></div>` : ''}
+        ${h.map(x => `<div class="rcx-fila">
+          <div class="rcx-cbcaja"><svg class="rcx-cb" data-rcx="${esc(x.k)}"></svg><div class="rcx-atl"><small>ATL</small>${esc(x.k)}</div></div>
+          <div class="rcx-nombre" style="font-size:${rcnTamNombre(x.nom, 'lista')}pt">${esc(x.nom)}</div>
+          <div class="rcx-cuadro"><div class="rcx-blanco"></div><div class="rcx-pie">CANTIDAD</div></div></div>`).join('')}
+      </div>`).join('');
+    }
+    let st = $('pagina');
+    if (!st) { st = document.createElement('style'); st.id = 'pagina'; document.head.appendChild(st); }
+    st.textContent = '@page { size: letter landscape; margin: 8mm; }';
+    if (window.JsBarcode) {
+      pr.querySelectorAll('svg[data-rcx]').forEach(el => {
+        const g = el.dataset.g;
+        try { JsBarcode(el, el.dataset.rcx, { format: 'CODE128', width: g ? 6 : 3, height: g ? 200 : 60, margin: 4, displayValue: false, background: '#FFFFFF', lineColor: '#000000' }); } catch (x) {}
+        el.removeAttribute('width'); el.removeAttribute('height');
+      });
+    } else return toast('No se pudo cargar el dibujo del código de barras. Revisa la conexión y vuelve a intentarlo.', 'error');
+    setTimeout(() => window.print(), 150);
+  }
+
   function vistaRotulo() {
+    if (rtVista === 'conteo') return vistaConteoRot();
     const responsables = ini.operarios.map(o => o.nombre);
     const ultResp = leerLS('ultResp');
-    return `<div class="col gap12">${avisoCola()}
+    return `<div class="col gap12">${avisoCola()}${rotTabsHtml()}
       <div class="col gap4"><span class="h2">Rotular</span>
         <span class="muted small">Llena un rótulo, dale <b>Guardar rótulo</b> y sigue con el siguiente. Cuando termines, eliges cuáles imprimir.</span></div>
       <div class="rt-arriba">
@@ -9975,7 +10218,7 @@
      2. Si el lector no manda Enter al final, el código se toma solo cuando termina de escribir. */
   const lectorT = { buf: '', ult: 0, rap: 0, t: null, campo: null, n: 0 };
   const editable = el => el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
-  const CAMPOS_COD = ['eanTxt', 'eanMini', 'raTxt', 'ingCod', 'rcProd', 'rcPendQ', 'cfQ', 'cpQ', 'invProd', 'invLug', 'prQ', 'bpQ', 'rtCod', 'ptEdQ', 'scan'];
+  const CAMPOS_COD = ['eanTxt', 'eanMini', 'raTxt', 'ingCod', 'rcProd', 'rcPendQ', 'cfQ', 'cpQ', 'invProd', 'invLug', 'prQ', 'bpQ', 'rtCod', 'ptEdQ', 'rcnCod', 'scan'];
   function codigoSinCampo(t) {
     const id = CAMPOS_COD.find(k => $(k) && $(k).offsetParent !== null);
     if (!id) return toast('Código leído: ' + t + '. Abre la pantalla donde lo vas a usar.', 'error');
@@ -10064,6 +10307,7 @@
     }
     const el = document.activeElement;
     if (el === lectorIn || (editable(el) && el !== document.body)) return;   // la persona está en un campo: el lector escribe ahí
+    if (el && el.classList && el.classList.contains('btn-enter')) return;   // Enter la llevó al botón de guardar: otro Enter guarda
     lectorIn.focus({ preventScroll: true });
   }
   if (tactil) {
@@ -10624,6 +10868,7 @@
   function repintarVivo() {
     if (!ses || pantalla !== 'app') return;
     if (vista === 'rotulo') {                                         // el formulario de arriba no se toca
+      if (rtVista === 'conteo') { vivoPend = false; return; }
       pintarPorImprimir();
       if ($('rtLista') && rotulos) $('rtLista').innerHTML = listaRotulos();
       vivoPend = false; return;
@@ -10697,7 +10942,7 @@
           <div class="fr-fila">
             <span class="fr-n">${n === 0 ? 'Nivel 1 · Picking' : 'Nivel ' + n}</span>
             <div class="fr-nivel">
-              ${(doble ? [['Frente', ['A', 'B']], ['Fondo', ['C', 'D']]] : [['', ['A', 'B']]]).map(([txt, letras]) => `
+              ${(doble ? [['Fondo', ['C', 'D']], ['Frente', ['A', 'B']]] : [['', ['A', 'B']]]).map(([txt, letras]) => `
                 <div class="fr-sub">${doble ? `<span>${txt}</span>` : ''}
                   <div class="fr-lados" style="flex:1">${letras.map(l => {
                     const e = esps.find(x => x.nivel === n && x.lado === l);
