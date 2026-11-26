@@ -985,7 +985,23 @@
   /* Logo de la empresa: tal como es, sin fondo ni recuadro */
   .logo-top { display: inline-flex; align-items: center; height: 40px; max-width: 160px; flex: none; }
   .logo-top .logo-img { max-height: 40px; max-width: 160px; width: auto; height: auto; display: block; }
-  .logo-entrada { display: flex; align-items: center; height: 56px; max-width: 220px; }
+  /* Escoger la regional en la entrada */
+  .reg-sel, .reg-op { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--borde2); background: var(--card); color: var(--txt); font: inherit; cursor: pointer; }
+  .reg-sel { min-height: 64px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .reg-sel:hover, .reg-op:hover { border-color: var(--pri); }
+  .reg-ico { width: 40px; height: 40px; border-radius: 50%; background: var(--pri-suave); color: var(--pri); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .reg-txt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .reg-txt b { font-size: 17px; }
+  .reg-txt small { font-size: 13px; color: var(--muted); }
+  .reg-cambiar { font-size: 13px; font-weight: 600; color: var(--pri); white-space: nowrap; }
+  .reg-lista { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  @media (max-width: 480px) { .reg-lista { grid-template-columns: 1fr; } }
+  .reg-op.on { border-color: var(--pri); background: var(--pri-suave); }
+  .reg-ok { color: var(--pri); flex: none; display: inline-flex; }
+  /* En la entrada el logo va centrado; el botón de modo claro/oscuro queda a la derecha */
+  .login-logo-fila { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+  .login-logo-fila > .icono { justify-self: end; }
+  .logo-entrada { display: flex; align-items: center; justify-content: center; height: 56px; max-width: 220px; }
   .logo-entrada .logo-img { max-height: 56px; max-width: 220px; width: auto; height: auto; display: block; }
   :root[data-tema="oscuro"] .logo-solo-claro, :root:not([data-tema="oscuro"]) .logo-solo-oscuro { display: none !important; }
   .logo-modos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -1315,7 +1331,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-D9P1dwkn.js"></script>
+  <script type="module" crossorigin src="./assets/index-CvZ6d1nB.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>

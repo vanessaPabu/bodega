@@ -541,19 +541,41 @@
     .catch(e => { $('app').innerHTML = `<div class="wrap"><p class="error">No se pudo cargar: ${esc(e.message)}</p></div>`; });
 
   /* ================= Pantalla de ingreso ================= */
+  // Regional: un botón con la ciudad y su código; al tocarlo sale la lista para escoger
+  const ICONO_PIN = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>';
+  function regSelHtml() {
+    const r = (ini.regionales || []).find(x => x.id === regionalAct());
+    return `<span class="reg-ico">${ICONO_PIN}</span>
+      <span class="reg-txt"><b>${r ? esc(r.nombre) : 'Escoge tu regional'}</b><small>${r ? (r.codigo ? 'Regional ' + esc(r.codigo) : 'Regional') : 'Toca para escoger la ciudad'}</small></span>
+      <span class="reg-cambiar">${r ? 'Cambiar' : ''} ▾</span>`;
+  }
+  function elegirRegionalLogin() {
+    const act = regionalAct();
+    abrirModal(`<div class="fila-sb"><span class="h2">Escoge tu regional</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Adentro solo verás las sedes, la gente y los productos de la regional que escojas.</span>
+      <div class="reg-lista mt12" role="listbox" aria-label="Regionales">${(ini.regionales || []).map(r => `
+        <button type="button" role="option" aria-selected="${r.id === act}" class="reg-op ${r.id === act ? 'on' : ''}" onclick="escogerRegionalLogin('${esc(r.id)}')">
+          <span class="reg-ico">${ICONO_PIN}</span>
+          <span class="reg-txt"><b>${esc(r.nombre)}</b><small>${r.codigo ? 'Regional ' + esc(r.codigo) : '&nbsp;'}</small></span>
+          ${r.id === act ? `<span class="reg-ok">${ICONOS.check}</span>` : ''}</button>`).join('')}</div>`);
+  }
+  function escogerRegionalLogin(id) {
+    cambiarRegional(id);
+    cerrarModal();
+    if ($('lgReg')) { $('lgReg').innerHTML = regSelHtml(); }
+    const c = $('lgCed'); if (c && !c.value && !('ontouchstart' in window)) c.focus();
+  }
   function pintarLogin() {
     aplicarRegional();
     const reg = regionalAct();
     $('app').innerHTML = `
     <div class="login"><div class="login-caja login-simple">
-      <div class="fila-sb">${hayLogo() ? `<div class="logo-entrada">${logoHtml('logo-img')}</div>` : `<div class="logo">${ICONOS.casa}</div>`}${btnTema(true)}</div>
+      ${hayLogo() ? `<div class="login-logo-fila"><span></span><div class="logo-entrada">${logoHtml('logo-img')}</div>${btnTema(true)}</div>`
+        : `<div class="fila-sb"><div class="logo">${ICONOS.casa}</div>${btnTema(true)}</div>`}
       <div class="col gap4"><h1 class="h1">Bodega</h1><span class="muted">${hayRegionales() ? 'Escoge la regional y entra con tu cédula y tu PIN' : 'Entra con tu cédula y tu PIN'}</span></div>
       ${hayRegionales() ? `<div>
-        <label class="lbl" for="lgReg">Regional ${ayudaHtml('Es la ciudad a la que te conectas. Adentro, arriba, solo verás las sedes de esta regional. Este equipo recuerda la última que escogiste.')}</label>
-        <select id="lgReg" class="campo campo-grande" onchange="cambiarRegional(this.value)">
-          ${reg ? '' : '<option value="" selected>Escoge la regional</option>'}
-          ${ini.regionales.map(r => `<option value="${esc(r.id)}" ${r.id === reg ? 'selected' : ''}>${esc(r.nombre)}</option>`).join('')}
-        </select></div>` : ''}
+        <span class="lbl">Regional ${ayudaHtml('Es la ciudad a la que te conectas. Adentro, arriba, solo verás las sedes de esta regional. Este equipo recuerda la última que escogiste.')}</span>
+        <button type="button" id="lgReg" class="reg-sel" onclick="elegirRegionalLogin()" aria-haspopup="dialog">${regSelHtml()}</button></div>` : ''}
 
       <div class="ced-caja">
         <label class="lbl" for="lgCed">Cédula</label>
