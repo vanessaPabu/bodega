@@ -232,7 +232,7 @@
   const etiqueta = e => e.nivel === 0 ? 'Picking ' + e.lado : e.codigo;
 
   function leyenda() {
-    return `<div class="leyenda">${[['vacio','Vacío'],['ocupado','Más de 30 días'],['pronto','16 a 30 días'],['vencido','15 días o menos / vencido'],['ocupado multi','Varios productos en el espacio']]
+    return `<div class="leyenda">${[['vacio','Vacío'],['ocupado','Más de 30 días'],['pronto','16 a 30 días'],['vencido','Menos de 15 días / vencido'],['ocupado multi','Varios productos en el espacio']]
       .map(([c, t]) => `<span><i class="e-${c}"></i>${t}</span>`).join('')}</div>`;
   }
   function btnTema(claro) {
@@ -265,28 +265,40 @@
       ['ubicar', 'Ubicar rótulos', 'Poner en un lugar lo que llega con rótulo'],
       ['mover', 'Mover producto', 'Cambiar producto de un lugar a otro'],
       ['salida', 'Dar salida', 'Sacar producto de la bodega'],
-      ['estructura', 'Niveles y posiciones', 'Agregar o quitar niveles y posiciones del plano'],
+      ['estructura', 'Estructura de la posición', 'Ver y cambiar la estructura: agregar o quitar niveles y posiciones, y bloquear espacios'],
       ['carga_manual', 'Cargar sin código de barras', 'Registrar a mano lo que ya está en la bodega con su rótulo viejo'],
-      ['cm_sin_datos', 'Cargar sin vencimiento, recibo ni lote', 'En «Cargar sin código de barras» puede dejar vacíos la fecha de vencimiento, la fecha de recibo y el lote (por ejemplo, para registrar el aéreo durante el inventario)']] },
+      ['cm_obligatorio', 'Pedir vencimiento, recibo y lote', 'En «Cargar sin código de barras»: marcado, la fecha de vencimiento, la fecha de recibo y el lote son obligatorios. Sin marcar, se pueden dejar vacíos'],
+      ['cargar_aereo', 'Cargar aéreo con Excel', 'Subir un Excel con lo que hay en el aéreo (en el Plano y en el Inventario)'],
+      ['ean_plano', 'Agregar o cambiar EAN (Plano)', 'Ponerle el EAN a un producto al escanear, ubicar un rótulo o cargar sin código']] },
     { k: 'inventario', t: 'Inventario', d: 'Conteos de planta contra SAP', p: [
       ['inventario', 'Ver inventario contra SAP', 'La tabla de SAP contra lo que hay en planta'],
       ['inv_contar', 'Registrar conteos', 'Llenar picking, calidad y bloqueado'],
-      ['inv_sap', 'Cargar Excel de SAP', 'Subir el reporte de SAP (reemplaza el anterior)'],
+      ['inv_sap', 'Cargar Excel de SAP', 'Subir el reporte de SAP (reemplaza el anterior), crear y cerrar inventarios'],
+      ['inv_nombre', 'Cambiar el nombre de un inventario', 'El lápiz al lado de cada inventario'],
       ['ciclico', 'Hacer cíclicos', 'Contar los productos de los cíclicos que le asignen'],
       ['ciclico_asignar', 'Asignar cíclicos', 'Crear cíclicos (a quién y qué productos), cerrarlos y borrarlos'],
-      ['ciclico_sap', 'Ver SAP y diferencia de los cíclicos', 'Ver lo de SAP y la diferencia en los cíclicos que creó otra persona']] },
+      ['ciclico_sap', 'Ver SAP y diferencia de los cíclicos', 'Ver lo de SAP y la diferencia en los cíclicos que creó otra persona'],
+      ['ean_inventario', 'Agregar o cambiar EAN (Inventario)', 'Ponerle el EAN a un producto al contar (Ingresar y reconteos)']] },
     { k: 'productos', t: 'Productos', d: 'Catálogo y reportes del inventario', p: [
-      ['productos', 'Crear productos', 'Agregar productos nuevos al catálogo'],
-      ['reportes', 'Descargar reportes', 'Inventario, bitácora, salidas e historial en Excel']] },
+      ['productos', 'Nuevo producto', 'Agregar productos nuevos al catálogo, uno por uno'],
+      ['prod_editar', 'Editar productos', 'Cambiar los datos de los productos en la tabla de «Editar productos»'],
+      ['prod_cargar', 'Cargar productos: actualizar', 'Subir el Excel de productos: agrega los nuevos y completa o actualiza los datos'],
+      ['prod_reemplazar', 'Cargar productos: reemplazar todo', 'Subir el Excel de productos y dejar solo esos (los que no vienen se desactivan)'],
+      ['prod_almacenes', 'Actualizar almacenes', 'Cargar el almacén de cada producto (y los pasillos por sede en el Inventario)'],
+      ['deshacer_salida', 'Deshacer una salida', 'Devolver al plano una salida hecha por error'],
+      ['bitacora', 'Descargar bitácora', 'Bajar en Excel todo lo que ha pasado con los productos'],
+      ['reportes', 'Descargar reportes', 'Inventario, salidas, rotación e historial en Excel']] },
     { k: 'rotular', t: 'Rotular', d: 'Rótulos de las estibas', p: [
-      ['rotular', 'Crear e imprimir rótulos', 'Llenar rótulos nuevos e imprimirlos']] },
+      ['rotular', 'Crear e imprimir rótulos', 'Llenar rótulos nuevos e imprimirlos'],
+      ['ean_rotular', 'Agregar o cambiar EAN (Rotular)', 'Ponerle el EAN a un producto al llenar el rótulo']] },
     { k: 'recibidor', t: 'Recibir mercancía', d: 'Facturas y lo que llega', p: [
       ['rc_facturas', 'Crear facturas', 'Abrir una factura nueva para recibir'],
       ['rc_lista', 'Cargar lo que debe llegar', 'Copiar la lista de la factura, cambiarla o borrarla'],
       ['recibir', 'Recibir producto', 'Anotar lo que llegó por partes y crear sus rótulos'],
       ['rc_corregir', 'Corregir lo recibido', 'Cambiar lote o novedad, o borrar una línea'],
       ['rc_fotos', 'Fotos de evidencia', 'Tomar y borrar fotos de cada producto'],
-      ['rc_cerrar', 'Cerrar facturas', 'Cerrar y volver a abrir una factura']] },
+      ['rc_cerrar', 'Cerrar facturas', 'Cerrar y volver a abrir una factura'],
+      ['ean_recibidor', 'Agregar o cambiar EAN (Recibidor)', 'Ponerle el EAN a un producto al recibir']] },
     { k: 'calidad', t: 'Calidad', d: 'Tabla de lo recibido para Calidad', p: [
       ['calidad', 'Ver Calidad', 'Ver la tabla con todo lo recibido'],
       ['cal_editar', 'Fotos y links', 'Agregar fotos y links desde Calidad'],
@@ -302,6 +314,81 @@
   const PERMISOS = MODULOS.flatMap(m => m.p);
   const PERM_RC = ['rc_facturas', 'rc_lista', 'recibir', 'rc_corregir', 'rc_fotos', 'rc_cerrar'];
   const puedeAlguno = ks => ks.some(puede);
+  /* ----- Logo de la empresa: uno para el modo claro y otro para el modo oscuro (si solo hay uno, sale en los dos).
+     Sale arriba a la izquierda, en la entrada y en la pestaña del navegador, tal como es (sin fondo).
+     Se guarda en el equipo para que salga de una vez (y sin señal). Solo el superadministrador lo cambia. ----- */
+  let logoApp = (() => { const x = leerLS('logoApp2'); return x && typeof x === 'object' ? { claro: x.claro || '', oscuro: x.oscuro || '' } : { claro: leerLS('logoApp') || '', oscuro: '' }; })();
+  const hayLogo = () => !!(logoApp.claro || logoApp.oscuro);
+  function ponerFavicon() {
+    const u = logoApp.claro || logoApp.oscuro;
+    if (!u) return;
+    let l = document.querySelector('link[rel="icon"]');
+    if (!l) { l = document.createElement('link'); l.rel = 'icon'; document.head.appendChild(l); }
+    l.href = u;
+  }
+  function cargarLogo() {
+    ponerFavicon();
+    llamar('bdLogo').then(l => {
+      const n = typeof l === 'object' && l ? { claro: l.claro || '', oscuro: l.oscuro || '' } : { claro: l || '', oscuro: '' };
+      if (n.claro === logoApp.claro && n.oscuro === logoApp.oscuro) return;
+      logoApp = n; guardarLS('logoApp2', n); ponerFavicon();
+      if (pantalla === 'app' && ses) pintarApp(); else if (typeof pintar === 'function') pintar();
+    }).catch(() => {});
+  }
+  // Con los dos logos se ponen los dos y el modo (claro u oscuro) decide cuál se ve, sin volver a pintar
+  function logoHtml(clase) {
+    const c = clase || 'logo-img', L = logoApp;
+    if (L.claro && L.oscuro) return `<img class="${c} logo-solo-claro" src="${esc(L.claro)}" alt="Logo de la empresa"><img class="${c} logo-solo-oscuro" src="${esc(L.oscuro)}" alt="Logo de la empresa">`;
+    const u = L.claro || L.oscuro;
+    return u ? `<img class="${c}" src="${esc(u)}" alt="Logo de la empresa">` : '';
+  }
+
+  /* Entregar un archivo hecho en la app (Excel): descargarlo o enviarlo (correo, WhatsApp…) con la ventana de compartir del equipo.
+     El correo automático (que la app lo mande sola) queda para cuando la app esté en el servidor nuevo. */
+  function entregarArchivo(blob, nombre, titulo) {
+    nombre = String(nombre || 'archivo.xlsx').replace(/[\\/:*?"<>|]/g, '-');
+    let file = null;
+    try { file = new File([blob], nombre, { type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }); } catch (e) { file = null; }
+    let compartir = false;
+    try { compartir = !!(file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })); } catch (e) { compartir = false; }
+    entregarArchivo.x = { blob, nombre, file };
+    abrirModal(`<div class="fila-sb"><span class="h2">${esc(titulo || 'Tu Excel está listo')}</span>${btnCerrar()}</div>
+      <span class="small mt8 mono-c" style="overflow-wrap:anywhere">${esc(nombre)}</span>
+      <div class="col gap8 mt16">
+        <button class="btn btn-pri btn-xl" onclick="bajarArchivo()">Descargar</button>
+        ${compartir ? '<button class="btn btn-sec btn-xl" onclick="compartirArchivo()">Enviar por correo, WhatsApp…</button>'
+          : '<span class="muted small">En este equipo no se puede enviar directo: descárgalo y adjúntalo al correo.</span>'}
+      </div>`);
+  }
+  function bajarArchivo() {
+    const x = entregarArchivo.x; if (!x) return;
+    const url = URL.createObjectURL(x.blob), a = document.createElement('a');
+    a.href = url; a.download = x.nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    cerrarModal(); toast('Descarga lista', 'ok');
+  }
+  function compartirArchivo() {
+    const x = entregarArchivo.x; if (!x || !x.file) return;
+    navigator.share({ files: [x.file], title: x.nombre, text: x.nombre }).then(() => cerrarModal())
+      .catch(e => { if (!e || e.name !== 'AbortError') toast('No se pudo enviar: ' + ((e && e.message) || 'intenta descargarlo'), 'error'); });
+  }
+  /* Barra de botones por grupos: cada grupo con su color (Cargar, Capturar, Descargar…) y botones pequeños.
+     grupos: [{ t: 'Cargar', tono: 'azul' | 'violeta' | 'verde' | 'gris' | 'rojo', b: ['<button…>', …], nota: 'texto pequeño' }] */
+  function accionesHtml(grupos) {
+    const gs = grupos.map(g => Object.assign({}, g, { b: (g.b || []).filter(Boolean) })).filter(g => g.b.length);
+    if (!gs.length) return '';
+    const barra = `<div class="acc-barra">${gs.map(g => `<div class="acc-grupo acc-${g.tono || 'gris'}" role="group" aria-label="${esc(g.t)}">
+      <span class="acc-t">${esc(g.t)}</span><div class="acc-b">${g.b.join('')}</div>${g.nota ? `<span class="acc-nota">${g.nota}</span>` : ''}</div>`).join('')}</div>`;
+    // En celular y pistola van plegadas para no ocupar la pantalla: se abren al tocar «Acciones»
+    if (typeof pantallaTactil === 'function' && pantallaTactil() && gs.length > 1)
+      return `<details class="acc-det" ${accionesHtml.abierto ? 'open' : ''} ontoggle="accionesHtml.abierto = this.open"><summary><span>Acciones</span><span class="muted small">${gs.map(g => esc(g.t)).join(' · ')}</span></summary>${barra}</details>`;
+    return barra;
+  }
+  // Un botón de la barra: texto, acción y si es el principal del grupo
+  const accBtn = (txt, onclick, pri, extra) => `<button type="button" class="btn-acc${pri ? ' acc-pri' : ''}" onclick="${onclick}" ${extra || ''}>${txt}</button>`;
+  // Agregar o cambiar el EAN de un producto: un permiso en cada módulo donde se puede hacer
+  const puedeEan = mod => puede('ean_' + (mod || 'plano'));
   const PERM_OPERARIO = ['ubicar', 'mover', 'salida', 'rotular', 'recibir', 'rc_fotos', 'inventario', 'inv_contar', 'ciclico'];
   function sinPermiso(k) {
     if (puede(k)) return false;
@@ -429,9 +516,7 @@
   function pintar() {
     if (pantalla === 'login') pintarLogin();
     else pintarApp();
-  }
-
-  /* ================= Inicio ================= */
+  }/* ================= Inicio ================= */
   $('fotoCodigo').addEventListener('change', ev => {
     const f = ev.target.files[0];
     ev.target.value = ''; // permite tomar otra foto igual después
@@ -445,6 +530,7 @@
       if (hayRegionales() && !ini.regionales.some(r => r.id === regionalAct()) && window.ponerRegional) window.ponerRegional(ini.regionales.length === 1 ? ini.regionales[0].id : '');
       aplicarRegional();
       $('dlProductos').innerHTML = d.productos.map(p => `<option value="${esc(p.id + ' · ' + p.nombre)}">`).join('');
+      cargarLogo();
       const tok = leerLS('token');
       if (!tok) return pintar();
       $('app').innerHTML = '<div class="cargando" style="padding:40px">Entrando…</div>';
@@ -460,7 +546,7 @@
     const reg = regionalAct();
     $('app').innerHTML = `
     <div class="login"><div class="login-caja login-simple">
-      <div class="fila-sb"><div class="logo">${ICONOS.casa}</div>${btnTema(true)}</div>
+      <div class="fila-sb">${hayLogo() ? `<div class="logo-entrada">${logoHtml('logo-img')}</div>` : `<div class="logo">${ICONOS.casa}</div>`}${btnTema(true)}</div>
       <div class="col gap4"><h1 class="h1">Bodega</h1><span class="muted">${hayRegionales() ? 'Escoge la regional y entra con tu cédula y tu PIN' : 'Entra con tu cédula y tu PIN'}</span></div>
       ${hayRegionales() ? `<div>
         <label class="lbl" for="lgReg">Regional ${ayudaHtml('Es la ciudad a la que te conectas. Adentro, arriba, solo verás las sedes de esta regional. Este equipo recuerda la última que escogiste.')}</label>
@@ -646,7 +732,8 @@
     pintar();
   }
 
-  // Cada vez que se vuelve a la app (o cada 10 min) se revisa que la sesión siga activa y con los mismos permisos
+  // Se revisa que la sesión siga activa y con los mismos permisos: al cambiar un usuario o perfil (en vivo),
+  // al volver a la app y, por si no hay conexión en vivo, cada minuto
   function revisarSesion() {
     if (pantalla !== 'app' || !ses || !ses.token) return;
     llamar('bdSesion', ses.token).then(r => {
@@ -657,16 +744,14 @@
     }).catch(() => {});
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) revisarSesion(); });
-  setInterval(revisarSesion, 10 * 60 * 1000);
+  setInterval(() => { if (!document.hidden) revisarSesion(); }, 60 * 1000);
 
   function elegirSede() {
     abrirModal(`<div class="fila-sb"><span class="h2">Cambiar de sede</span>${btnCerrar()}</div>
       <div class="col gap10 mt12">${ini.sedes.map(s => `<button class="sede-btn ${s.id === ses.sedeId ? 'on' : ''}"
         onclick="cerrarModal(); lg.sedeId='${esc(s.id)}'; guardarLS('sesion', { perfil: lg.perfil, nombre: lg.nombre, sedeId: lg.sedeId }); verSede('${esc(s.id)}')">
         <span>${esc(s.nombre)}</span>${s.id === ses.sedeId ? `<span style="color:var(--pri)">${ICONOS.check}</span>` : ''}</button>`).join('')}</div>`);
-  }
-
-  /* ================= Pantalla principal ================= */
+  }/* ================= Pantalla principal ================= */
   let anchoPrevio = esAncho();
 
   let vistaPintada = null;
@@ -679,6 +764,7 @@
     const internos = misma ? ['.col-panel', '.plano-wrap', '#invTabla .tabla-wrap'].map(sel => { const el = document.querySelector(sel); return el ? [sel, el.scrollTop, el.scrollLeft] : null; }).filter(Boolean) : [];
     const encabezado = `
     <header class="top">
+      ${hayLogo() ? `<span class="logo-top">${logoHtml('logo-img')}</span>` : ''}
       <div class="col flex1">${ini.sedes.length > 1
           ? `<button class="t1 sede-top" onclick="elegirSede()" aria-label="Cambiar de sede">${esc(nombreSede(ses.sedeId))} <span aria-hidden="true">▾</span></button>`
           : `<span class="t1">${ses.sedeId ? esc(nombreSede(ses.sedeId)) : 'Sin sedes'}</span>`}
@@ -734,19 +820,25 @@
   }
 
   // Dos accesos: PRODUCTO (escanear o buscar en la lista) y LUGAR (escanear o elegir zona, fila, posición, nivel y lado)
+  // En celular y pistola siempre sale. En el computador sale solo si se prende el switch «Producto y Lugar» del Plano
+  // (se recuerda en el equipo), para que el plano tenga más espacio.
+  const verEscanearPC = () => pantallaTactil() || leerLS('verEscanearPC') === true;
+  function ponerEscanearPC(v) { guardarLS('verEscanearPC', !!v); pintarApp(); }
   function barraEscaneo() {
+    if (!verEscanearPC()) return '';
+    const cam = true;
     return `<div class="barra-dos">
       <div class="acceso">
         <span class="acceso-t">Producto</span>
         <div class="acceso-b">
-          ${botonCamara('scanProd', 'btn btn-pri btn-acceso', 'Escanear')}
+          ${cam ? botonCamara('scanProd', 'btn btn-pri btn-acceso', 'Escanear') : ''}
           <button class="btn btn-sec btn-acceso" onclick="abrirBuscarProducto()">${ICONOS.lupa}<span>Buscar</span></button>
         </div>
       </div>
       <div class="acceso">
         <span class="acceso-t">Lugar</span>
         <div class="acceso-b">
-          ${botonCamara('scanLugar', 'btn btn-pri btn-acceso', 'Escanear')}
+          ${cam ? botonCamara('scanLugar', 'btn btn-pri btn-acceso', 'Escanear') : ''}
           <button class="btn btn-sec btn-acceso" onclick="abrirLugar()">${ICONOS.lugar}<span>Elegir</span></button>
         </div>
       </div>
@@ -977,9 +1069,7 @@
     if (pareceEan(v)) return hojaEanNuevo(v);
     abrirBuscarProducto(v);
     toast('No hay un producto con ese código exacto. Revisa la lista.', 'error');
-  }
-
-  /* ================= Ficha del producto: INGRESO · MOVER · SALIDA (todo en una ventana) ================= */
+  }/* ================= Ficha del producto: INGRESO · MOVER · SALIDA (todo en una ventana) ================= */
   let flujo = null;      // { pid, accion, paso, linea, destino, cantidad, unidad, lote, venc }
   let lugarCtx = null;   // cuando el selector de lugar se usa dentro de la ficha
 
@@ -998,7 +1088,7 @@
   const MOTIVOS = ['Pedido pide ese lote', 'El que vence antes no está accesible', 'El que vence antes está dañado', 'Otro'];
   function textoRotacion(antes) {
     const a = antes[0];
-    return `Fuera de rotación: había lote ${a.lote || '—'} (vence ${a.vencimiento}) en ${cu(a.ubicacionId)}`;
+    return `Fuera de rotación: había rótulo ${a.lote || '—'} (vence ${a.vencimiento}) en ${cu(a.ubicacionId)}`;
   }
 
   function abrirFicha(pid) {
@@ -1523,6 +1613,7 @@
   }
 
   function pedirBitacora() {
+    if (sinPermiso('bitacora')) return;
     const hace30 = new Date(Date.now() - 30 * 864e5);
     const desde = `${hace30.getFullYear()}-${String(hace30.getMonth() + 1).padStart(2, '0')}-${String(hace30.getDate()).padStart(2, '0')}`;
     abrirModal(`<div class="fila-sb"><span class="h2">Descargar bitácora</span>${btnCerrar()}</div>
@@ -1542,11 +1633,9 @@
     const finDia = new Date(hasta + 'T00:00:00'); finDia.setDate(finDia.getDate() + 1);
     llamar('bdBitacora', { desde: new Date(desde + 'T00:00:00').toISOString(), hasta: finDia.toISOString() }).then(movs => {
       cerrarModal();
-      descargarExcel(`Bitácora ${desde} a ${hasta}.xlsx`, { 'Bitácora': filasMov(movs) });
+      descargarExcel(`Bitácora ${desde} a ${hasta}.xlsx`, { 'Bitácora': filasMov(movs) }, 'bitacora');
     }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Descargar (Excel)'; });
-  }
-
-  /* ================= RECIBIDOR: recibo con factura en mano ================= */
+  }   /* ================= RECIBIDOR: recibo con factura en mano ================= */
   let rcTab = 'recibir';      // recibir | calidad
   let rcLista = null;         // facturas recientes
   let rcAct = null;           // factura abierta (con sus productos)
@@ -2794,7 +2883,7 @@
     else { ajustarPlano(); if ($('edLienzo')) edAjustar(); }
   });
 
-  /* ================= USUARIOS Y PERMISOS (administrador) ================= */
+/* ================= USUARIOS Y PERMISOS (administrador) ================= */
   let usLista = null;            // usuarios cargados
   let usRegs = {};               // regionales de cada usuario: { id: ['BAQ', …] }
   let pfLista = null;            // perfiles (paquetes de permisos)
@@ -2802,7 +2891,7 @@
   let usCargando = false;
   let usEdit = null;             // usuario abierto en el editor
   let pfEdit = null;             // perfil abierto en el editor
-  let usTab = 'usuarios';        // 'usuarios' | 'perfiles'
+  let usTab = 'usuarios';        // 'usuarios' | 'perfiles' | 'regionales'
   let usFiltro = { q: '', estado: 'activos', perfil: '', cargo: '' };
   let usSel = new Set();         // usuarios marcados para ponerles perfil
   let usAbiertos = new Set();    // módulos abiertos en el acordeón
@@ -2834,10 +2923,10 @@
     return `<div class="col gap16">
       <div class="fila-sb wrap-f gap12">
         <div class="col gap4"><span class="h2">Usuarios y permisos</span>
-          <span class="muted small">${usTab === 'perfiles' ? 'Un perfil es un paquete de permisos: lo armas una vez y se lo pones a muchas personas.'
+          <span class="muted small">${usTab === 'regionales' ? 'Las ciudades donde trabaja la empresa. Solo tú (superadministrador) ves esta pestaña.' : usTab === 'perfiles' ? 'Un perfil es un paquete de permisos: lo armas una vez y se lo pones a muchas personas.'
             : hayRegionales() ? `Solo las personas de ${esc(nombreRegional() || 'esta regional')}. Cada una entra con su cédula y su PIN y lo que puede hacer lo da su perfil.`
             : 'Cada persona entra con su cédula y su PIN. Lo que puede hacer lo da su perfil.'}</span></div>
-        <span class="fila gap8 wrap-f">${usTab === 'perfiles'
+        <span class="fila gap8 wrap-f">${usTab === 'regionales' ? '' : usTab === 'perfiles'
           ? (pfFalta ? '' : '<button class="btn btn-pri" onclick="editarPerfil()">+ Nuevo perfil</button>')
           : `<button class="btn btn-sec" onclick="abrirCargaUsuarios()">Cargar lista</button>
             <button class="btn btn-pri" onclick="editarUsuario()">+ Nuevo usuario</button>`}</span>
@@ -2845,8 +2934,9 @@
       <div class="tabs" role="tablist">
         <button class="tab ${usTab === 'usuarios' ? 'on' : ''}" role="tab" aria-selected="${usTab === 'usuarios'}" onclick="usTab='usuarios'; pintarApp()">Usuarios (${activos})</button>
         <button class="tab ${usTab === 'perfiles' ? 'on' : ''}" role="tab" aria-selected="${usTab === 'perfiles'}" onclick="usTab='perfiles'; pintarApp()">Perfiles${pfFalta ? '' : ` (${pfLista.length})`}</button>
+        ${puede('superadmin') && hayRegionales() ? `<button class="tab ${usTab === 'regionales' ? 'on' : ''}" role="tab" aria-selected="${usTab === 'regionales'}" onclick="usTab='regionales'; pintarApp()">Regionales y logo</button>` : ''}
       </div>
-      ${usTab === 'perfiles' ? tablaPerfiles() : tablaUsuarios()}
+      ${usTab === 'regionales' && puede('superadmin') && hayRegionales() ? logoCardHtml() + vistaRegionales() : usTab === 'perfiles' ? tablaPerfiles() : tablaUsuarios()}
     </div>`;
   }
 
@@ -2923,6 +3013,7 @@
     if (!pf) return toast('Escoge el perfil que les vas a poner', 'error');
     const b = $('usBulkOk'); b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdAsignarPerfil', { token: ses.token, ids, perfilId: pf }).then(r => {
+      revisarSesion();   // si cambió los permisos de quien está usando la app, se aplican ya
       usLista = r.usuarios; pfLista = r.perfiles; usSel.clear();
       toast(`Perfil ${perfilDe(pf).nombre} puesto a ${r.actualizados} persona${r.actualizados === 1 ? '' : 's'}`, 'ok');
       if (ids.includes(ses.id)) revisarSesion();
@@ -3009,6 +3100,14 @@
     </div>`;
   }
 
+  // Si la base de datos no aceptó algún permiso (falta correr el script que lo agrega), se avisa cuáles
+  function avisarPermisosNoGuardados(pedidos, guardados) {
+    const g = new Set(guardados || []);
+    const faltan = (pedidos || []).filter(k => k !== 'superadmin' && !g.has(k));
+    if (!faltan.length) return;
+    const nom = faltan.map(k => (PERMISOS.find(x => x[0] === k) || [k, k])[1]);
+    toast(`No se guardaron estos permisos: ${nom.join(', ')}. Falta correr en Supabase el script que los agrega (46_permisos_plano.sql o 47_permisos_productos.sql).`, 'error');
+  }
   function guardarPerfil() {
     const p = pfEdit;
     const err = m => { const e = $('usErr'); e.textContent = m; e.hidden = false; e.scrollIntoView({ behavior: 'smooth', block: 'center' }); };
@@ -3017,7 +3116,12 @@
     if (!nPermisos(p)) return err('Prende al menos un permiso.');
     const b = $('pfOk'); b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdGuardarPerfil', { token: ses.token, id: p.id, nombre: p.nombre, descripcion: p.descripcion, rol: p.rol, permisos: p.permisos }).then(r => {
+      revisarSesion();   // si cambió los permisos de quien está usando la app, se aplican ya
       usLista = r.usuarios; pfLista = r.perfiles; pfEdit = null; usTab = 'perfiles';
+      const g = (r.perfiles || []).find(x => p.id ? x.id === p.id : x.nombre === p.nombre);
+      if (g && (p.permisos || []).some(k => k !== 'superadmin' && !(g.permisos || []).includes(k))) {
+        pintarApp(); window.scrollTo(0, 0); return avisarPermisosNoGuardados(p.permisos, g.permisos);
+      }
       toast(p.id ? `Perfil guardado${r.actualizados ? ` · ${r.actualizados} persona${r.actualizados === 1 ? '' : 's'} actualizada${r.actualizados === 1 ? '' : 's'}` : ''}`
         : 'Perfil creado. Ahora pónselo a las personas en la pestaña Usuarios.', 'ok');
       if (p.id && p.id === miPerfilId()) revisarSesion();
@@ -3343,6 +3447,7 @@
     });
     const b = $('ucOk'); b.disabled = true; b.textContent = 'Cargando…';
     llamar('bdCargarUsuarios', { token: ses.token, filas }).then(r => {
+      revisarSesion();   // si cambió los permisos de quien está usando la app, se aplican ya
       usLista = r.usuarios;
       if (!pfFalta) llamar('bdPerfiles', ses.token).then(p => { pfLista = p; }).catch(() => {});
       llamar('bdInicio').then(d => { ini.operarios = d.operarios; }).catch(() => {});
@@ -3371,8 +3476,11 @@
     const b = $('usOk'); b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdGuardarUsuario', { token: ses.token, id: u.id, nombre: u.nombre.trim(), cedula: u.cedula, cargo: (u.cargo || '').trim(), rol: u.rol, activo: u.activo, permisos: u.permisos, perfilId: u.perfilId || null, pin })
       .then(l => {
+        revisarSesion();   // si cambió los permisos de quien está usando la app, se aplican ya
         // La persona queda en la regional con la que entraste (eso lo hace el servidor). Solo el superadministrador le cambia las regionales.
         const nuevo = u.id || (l.find(x => String(x.cedula) === String(u.cedula)) || {}).id;
+        const gu = l.find(x => x.id === nuevo);
+        if (gu) setTimeout(() => avisarPermisosNoGuardados(u.permisos, gu.permisos), 1500);
         if (!nuevo || !puede('superadmin') || !hayRegionales()) return l;
         return llamar('bdGuardarRegionalesUsuario', { token: ses.token, id: nuevo, regionales: u.regionales })
           .then(() => llamar('bdUsuarios', ses.token))   // si le quitaste esta regional, sale de la lista
@@ -3431,9 +3539,7 @@
     if (ev.key.length !== 1) return;
     if (ahora - pistola.t > 80) pistola.txt = '';
     pistola.txt += ev.key; pistola.t = ahora;
-  });
-
-  /* ================= Plano en 3D (solo PC) =================
+  });/* ================= Plano en 3D (solo PC) =================
      Se dibuja en un lienzo, sin librerías: cada posición es una columna de cajas (una por nivel y lado),
      del color de su estado (vacío, más de 30 días, por vencer, vencido). Arrastrar = girar, rueda = acercar,
      clic derecho o Shift + arrastrar = mover, clic en una caja = abrir esa posición. */
@@ -3678,6 +3784,7 @@
           <button onclick="cambiarZoom(1.25)" aria-label="Acercar">+</button>
         </div>`}
         ${puedeCargarAereo() ? '<button class="btn btn-sec" onclick="abrirCargaAereo()">Cargar aéreo (Excel)</button>' : ''}
+        ${!pantallaTactil() ? `<label class="sw3d"><input type="checkbox" role="switch" ${verEscanearPC() ? 'checked' : ''} onchange="ponerEscanearPC(this.checked)"><span class="sw3d-i" aria-hidden="true"></span>Producto y Lugar</label>` : ''}
         ${pc3d() && !colocando ? `<label class="sw3d"><input type="checkbox" role="switch" ${ver3d ? 'checked' : ''} onchange="ponerVer3d(this.checked)"><span class="sw3d-i" aria-hidden="true"></span>Ver en 3D</label>` : ''}
       </div></div>
       ${zonasBarHtml()}
@@ -3850,13 +3957,15 @@
     </span></button>`;
   }
 
+  // Cuánto se agranda una zona sola: en el computador, poco y igual para todas; en celular, hasta 3 veces
+  const maxZona = () => (pantallaTactil() ? 3 : 1.4);
   // Escala el plano para que quepa en la pantalla (o usa el zoom elegido)
   function ajustarPlano() {
     if ($('plano3d')) return iniciar3d();
     const wrap = $('planoWrap'), pl = $('plano'), sizer = $('planoSizer');
     if (!wrap || !pl) return;
     const w = Number(pl.dataset.w), h = Number(pl.dataset.h);
-    const s = zoom || Math.min(pl.classList.contains('plano-zona') ? 3 : 1, (wrap.clientWidth - 2) / w);
+    const s = zoom || Math.min(pl.classList.contains('plano-zona') ? maxZona() : 1, (wrap.clientWidth - 2) / w);
     pl.style.transform = `scale(${s})`;
     sizer.style.width = w * s + 'px';
     sizer.style.height = h * s + 'px';
@@ -3865,7 +3974,7 @@
   function cambiarZoom(f) {
     const pl = $('plano'), wrap = $('planoWrap');
     if (!pl) return;
-    const actual = zoom || Math.min(pl.classList.contains('plano-zona') ? 3 : 1, (wrap.clientWidth - 2) / Number(pl.dataset.w));
+    const actual = zoom || Math.min(pl.classList.contains('plano-zona') ? maxZona() : 1, (wrap.clientWidth - 2) / Number(pl.dataset.w));
     zoom = f === 0 ? null : Math.min(4, Math.max(0.3, actual * f));
     ajustarPlano();
   }
@@ -3879,7 +3988,7 @@
     });
     return `<div class="kpis">
       <div class="kpi"><span class="muted small">Espacios ocupados</span><span class="kpi-v">${ocup} de ${sede.espacios.length}</span></div>
-      <div class="kpi"><span class="muted small">Vencen en ${DIAS_ALERTA} días</span><span class="kpi-v txt-naranja">${pv}</span></div>
+      <div class="kpi"><span class="muted small">Vencen en menos de ${DIAS_ALERTA} días</span><span class="kpi-v txt-naranja">${pv}</span></div>
       <div class="kpi"><span class="muted small">Vencidos</span><span class="kpi-v txt-rojo">${ven}</span></div>
     </div>`;
   }
@@ -3961,12 +4070,10 @@
     }
     cerrarModal();
     imprimirEtiquetas(lista);
-  }
-
-  /* ================= Buscar productos ================= */
+  }/* ================= Buscar productos ================= */
   let prodSel = '';
 
-  let prodFiltro = '', prodSoloStock = true;
+  let prodFiltro = '', prodSoloStock = false;   // «Solo los que tienen algo» viene sin marcar
 
   /* ================= PRODUCTOS: Inventario · Inventario por productos · Productos totales ================= */
   let prodTab = 'inventario';
@@ -4024,21 +4131,13 @@
     if (invF.pas && !pasOp.includes(invF.pas)) invF.pas = '';
     return `<div class="col gap12">
       <div class="fila-sb wrap-f gap8">
-        <div class="col gap4"><span class="h2 fila gap8 wrap-f">${esc(ia.nombre || 'Inventario')}${puede('inv_sap') ? '<button class="link small" onclick="renombrarInventario(\'actual\')">Cambiar nombre</button>' : ''}</span>
-          <span class="small">${fCorta(ia.fecha)} · ${esc(nombreSede(ses.sedeId))} · <span class="tag amar">En curso</span></span>
+        <div class="col gap4"><span class="h2 fila gap8 wrap-f">${esc(ia.nombre || 'Inventario')}${puede('inv_nombre') ? `<button class="ec-btn" onclick="renombrarInventario('actual')" title="Cambiar el nombre" aria-label="Cambiar el nombre del inventario">✎</button>` : ''}</span>
+          <span class="small">${fCorta(ia.fecha)} · ${esc(nombreRegional() || nombreSede(ses.sedeId))} · <span class="tag amar">En curso</span></span>
           ${jefe ? `<span class="muted small inv-sap-info">${c ? `SAP cargado el ${fechaHora(c.fecha)} por ${esc(c.usuario || '—')} · ${c.filas} productos${c.archivo ? ' · ' + esc(c.archivo) : ''}`
             : '<b class="txt-naranja">Todavía no se ha cargado el Excel de SAP de este inventario.</b>'}</span>` : ''}
           ${invData.error ? `<span class="error small">${esc(invData.error)}</span>` : ''}</div>
-        <span class="fila gap8 wrap-f">
-          ${puede('inv_sap') ? '<button class="btn btn-pri" onclick="abrirCargaSap()">Cargar Excel de SAP</button>' : ''}
-          ${puede('inv_sap') || puede('productos') ? '<button class="btn btn-sec" onclick="abrirCargaUbicSede()">Actualizar almacenes y pasillos</button>' : ''}
-          ${puedeCargarAereo() ? '<button class="btn btn-sec" onclick="abrirCargaAereo()">Cargar aéreo (Excel)</button>' : ''}
-          ${puede('reportes') && jefe ? '<button class="btn btn-sec" onclick="descargarInventarioSap()">Descargar Excel</button>' : ''}
-          <button class="btn btn-sec" onclick="invData=null; invRcs=null; pintarApp()">Actualizar</button>
-          ${puede('inv_sap') ? '<button class="btn btn-sal-solido" onclick="cerrarInventario(this)">Cerrar inventario</button>' : ''}
-          <button class="btn btn-ent-solido" onclick="invDentro=false; invSub=''; invLista=null; pintarApp(); window.scrollTo(0, 0)">Volver</button></span>
       </div>
-      ${puede('inv_sap') ? capturasHtml() : ''}
+      ${barraInventarioHtml(jefe)}
       ${tabs.length > 1 ? subTabsHtml(invSub, tabs, 'invSub') : ''}
       ${invSub === 'reconf' ? vistaRcInv() : invSub === 'ingresar' ? cpIngresarHtml() : invSub === 'confirmar' ? cpConfirmarHtml() : `
       ${jefe ? `<div id="cpAvance">${cpAvanceHtml()}</div>` : ''}
@@ -4071,6 +4170,29 @@
   /* ----- Capturar el aéreo o el picking del inventario en curso (de toda la regional) -----
      Si el inventario se termina otro día y mientras tanto mueven o sacan del aéreo, o llega producto nuevo,
      lo capturado no cambia. Al picking capturado se le suma lo que se cuente después. */
+  // Botones de arriba del inventario, por grupos
+  function barraInventarioHtml(jefe) {
+    const cap = (invData && invData.capturas) || {};
+    const capTxt = (t, nom) => cap[t] ? `${nom}: ${fechaHora(cap[t].fecha)} · ${esc(cap[t].por || '—')}` : '';
+    const notas = [capTxt('AEREO', 'Aéreo'), capTxt('PICKING', 'Picking')].filter(Boolean);
+    return accionesHtml([
+      { t: 'Cargar', tono: 'azul', b: [
+        puede('inv_sap') && accBtn('Excel de SAP', 'abrirCargaSap()', true),
+        puede('prod_almacenes') && accBtn('Almacenes y pasillos', 'abrirCargaUbicSede()'),
+        puedeCargarAereo() && accBtn('Aéreo (Excel)', 'abrirCargaAereo()')] },
+      { t: 'Capturar', tono: 'violeta', b: puede('inv_sap') ? [
+        accBtn(cap.AEREO ? 'Recapturar aéreo' : 'Capturar aéreo', "capturarInv('AEREO')"),
+        accBtn(cap.PICKING ? 'Recapturar picking' : 'Capturar picking', "capturarInv('PICKING')"),
+        cap.AEREO && accBtn('Aéreo de ahora', "quitarCaptura('AEREO')", false, 'title="Dejar de usar la captura del aéreo"'),
+        cap.PICKING && accBtn('Picking de ahora', "quitarCaptura('PICKING')", false, 'title="Dejar de usar la captura del picking"')] : [],
+        nota: (notas.length ? notas.join(' · ') + ' ' : 'En vivo. ') + ayudaHtml('Capturar guarda cómo está ahora el aéreo (o el picking contado) de todas las sedes de la regional. Si el inventario sigue otro día y mueven o sacan del aéreo, o llega producto nuevo, lo capturado no cambia. Lo que se cuente de picking después de capturar se suma a lo capturado. «… de ahora» vuelve a usar lo que hay en vivo.') },
+      { t: 'Descargar', tono: 'verde', b: [puede('reportes') && jefe && accBtn('Excel', 'descargarInventarioSap()', true)] },
+      { t: 'Inventario', tono: 'gris', b: [
+        accBtn('Actualizar', 'invData=null; invRcs=null; pintarApp()'),
+        accBtn('← Volver a la lista', "invDentro=false; invSub=''; invLista=null; pintarApp(); window.scrollTo(0, 0)")] },
+      { t: 'Cerrar', tono: 'rojo', b: [puede('inv_sap') && accBtn('Cerrar inventario', 'cerrarInventario(this)')] }
+    ]);
+  }
   function capturasHtml() {
     const cap = (invData && invData.capturas) || {};
     const linea = (t, nom) => {
@@ -4791,8 +4913,8 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       // ---- Hoja RESUMEN ----
       const res = [[T('RESUMEN DEL CONTEO FÍSICO', 9)], [T([nombreRegional(), nombreSede(ses.sedeId)].filter(Boolean).join(' · ') + ' · ' + fCorta(hoyISO()), 5)], []];
       const linea = (a, b, s) => res.push([T(a, 10), T(b, s || 6)]);
-      res.push([T('AVANCE', 4)]); linea(A.sinSap ? 'Universo a inventariar (catálogo)' : 'Universo a inventariar (SAP)', A.alcance); linea('Referencias verificadas', A.contados); linea('Por verificar', A.pendientes); linea('Cobertura del inventario', A.alcance ? A.contados / A.alcance : 0, 14);
-      res.push([]); res.push([T('RESULTADO', 4)]); linea('Cuadradas con SAP', A.sinDif); linea('Con novedad por ajustar', A.conDif); linea('Cambio de estado de stock', A.reclas); linea('Halladas fuera del universo', A.sinLinea);
+      res.push([T('AVANCE', 4)]); linea(A.sinSap ? 'Referencias a inventariar (catálogo)' : 'Referencias a inventariar (SAP)', A.alcance); linea('Referencias verificadas', A.contados); linea('Por verificar', A.pendientes); linea('Cobertura del inventario', A.alcance ? A.contados / A.alcance : 0, 14);
+      res.push([]); res.push([T('RESULTADO', 4)]); linea('Cuadradas con SAP', A.sinDif); linea('Con novedad por ajustar', A.conDif); linea('Cambio de estado de stock', A.reclas); linea('Contadas fuera de la base', A.sinLinea);
       res.push([]); res.push([T('GESTIÓN', 4)]); linea('Índice de exactitud (IRA)', A.nContados ? A.sinDif / A.nContados : 0, 14); linea('Reconteo prioritario', A.alta); linea('Posibles cruces entre referencias', A.cruces.length); linea('Referencias en altura', A.conAereo);
       if (A.hayValores) { res.push([]); res.push([T('IMPACTO ECONÓMICO (solo verificadas)', 4)]); linea('Valor en libros (SAP)', Math.round(A.valSap), 11); linea('Valor físico verificado', Math.round(A.valFis), 11); linea('Excedentes', Math.round(A.sobrantes), 13); linea('Faltantes', Math.round(A.faltantes), 12); linea('Impacto neto', Math.round(A.neta), A.neta < 0 ? 12 : 13); linea('Valor en calidad y bloqueado', Math.round(A.valCalBlq), 11); }
       res.push([]); res.push([T('AVANCE POR ALMACÉN', 4)]);
@@ -4802,10 +4924,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         { nombre: 'CONTROL INTERNO', celdas: hoja, anchos: anchosCI, fijar: 8, filtro: `A8:${finCI}`, unir: ['A1:D3'], altos: { 7: 34 } },
         { nombre: 'AJUSTES SAP', celdas: aj, anchos: [9, 9, 40, 6, 11, 12, 10, 11, 12, 10, 11, 12, 10, 13, 10, 11, 11, 36], fijar: 1, filtro: `A1:R${aj.length}`, altos: { 0: 30 } },
         { nombre: 'RESUMEN', celdas: res, anchos: [36, 14, 12, 12, 12, 14, 14] }]);
-      const url = URL.createObjectURL(blob), a = document.createElement('a');
-      a.href = url; a.download = `Control interno ${nombreSede(ses.sedeId)} ${hoyISO()}.xlsx`;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      entregarArchivo(blob, `Control interno ${nombreRegional() || nombreSede(ses.sedeId)} ${hoyISO()}.xlsx`, 'Excel de Control Interno');
     } catch (e) { toast('No se pudo armar el Excel: ' + e.message, 'error'); }
   }
 
@@ -4947,13 +5066,9 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       const anchos = titMb.map((h, i) => i === cNom ? 46 : i === cCod ? 10 : Math.max(9, String(h).length + 2)).concat(C.map(([h]) => h.includes('RECONTEO') ? 17 : 12));
       aviso('Armando el Excel…');
       const blob = await xlsxConEstilo('INVENTARIO', hoja, anchos);
-      const url = URL.createObjectURL(blob), a = document.createElement('a');
-      a.href = url; a.download = `MB52 ${nombreSede(ses.sedeId)} ${hoyISO()}.xlsx`;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      cerrarModal();
+      entregarArchivo(blob, `MB52 ${nombreSede(ses.sedeId)} ${hoyISO()}.xlsx`, 'Excel en formato MB52');
       const varios = salida.filter(r => r.tipo === 'total').length;
-      toast(varios ? `Listo. ${varios} producto(s) están en varios almacenes: reparte a mano la fila amarilla.` : 'Listo: Excel en formato MB52 descargado', 'ok');
+      toast(varios ? `Listo. ${varios} producto(s) están en varios almacenes: reparte a mano la fila amarilla.` : 'Excel en formato MB52 listo', 'ok');
     } catch (e) { est.hidden = true; errForm('No se pudo armar el Excel: ' + e.message); }
   }
 
@@ -5203,9 +5318,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       .then(() => { b.textContent = 'Cargando…'; return llamar('bdCargarSap', { sedeId: ses.sedeId, filas: filasSap().ok, usuario: ses.nombre, archivo: sapTmp.archivo }); })
       .then(r => { invData = r.inv; invSede = ses.sedeId; cerrarModal(); toast(`SAP cargado: ${r.filas} productos${creados ? ` · ${creados} creados en el catálogo` : ''}`, 'ok'); pintarApp(); })
       .catch(e => { errForm(e.message); b.disabled = false; b.textContent = txt; if (creados) prevSap(); });
-  }
-
-  /* ================= CÍCLICO: el encargado asigna qué revisar y a quién; la persona lo cuenta aquí ================= */
+  }/* ================= CÍCLICO: el encargado asigna qué revisar y a quién; la persona lo cuenta aquí ================= */
   let cicLista = null, cicSede = null;   // cíclicos de la sede
   let cicSel = null;                     // id del cíclico abierto
   let cicData = null;                    // { ciclico, conteos } del abierto
@@ -5288,10 +5401,9 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         <div class="col gap4"><span class="h2">Cíclicos · ${esc(nombreSede(ses.sedeId))}</span>
           <span class="muted small">${cicSel ? '' : jefe ? 'Crea un cíclico con su nombre y el Excel de SAP. Toca uno de la lista para ver cómo va.'
             : 'Toca el cíclico que vas a contar.'}</span></div>
-        <span class="fila gap8 wrap-f">
-          ${jefe && !cicNuevo && !cicSel ? '<button class="btn btn-pri" onclick="nuevoCiclico()">+ Nuevo cíclico</button>' : ''}
-          <button class="btn btn-sec" onclick="cicLista=null; if (cicSel) abrirCiclico(cicSel, true); pintarApp()">Actualizar</button></span>
       </div>
+      ${accionesHtml([{ t: 'Cíclico', tono: 'azul', b: [jefe && !cicNuevo && !cicSel && accBtn('+ Nuevo cíclico', 'nuevoCiclico()', true)] },
+        { t: 'Pantalla', tono: 'gris', b: [accBtn('Actualizar', 'cicLista=null; if (cicSel) abrirCiclico(cicSel, true); pintarApp()')] }])}
       ${cicNuevo && cicNuevo.tipo === 'CICLICO' && !cicSel ? formNuevoCiclico() : ''}
       ${cicSel ? detalleCiclico() : `<section class="card col gap8">
         <div class="fila-sb wrap-f gap8"><span class="h3">Historial de cíclicos
@@ -5333,15 +5445,15 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   function invActualCli() { return (invData && invData.inventario) || { nombre: '', estado: 'NINGUNO' }; }
 
   function listaInventariosVista(jefe) {
+    const puedeComparar = invLista && invLista.filter(x => x.estado !== 'ABIERTO' || x.id || x.virtual).length >= 2;
     return `<div class="col gap12">
-      <div class="fila-sb wrap-f gap8">
-        <div class="col gap4"><span class="h2">Inventarios · ${esc(nombreSede(ses.sedeId))}</span>
-          <span class="muted small">${invVer ? '' : jefe ? 'Crea el inventario con su nombre y, si lo tienes, el Excel de SAP. Toca el que está en curso para entrar a contar.' : 'Toca el inventario en curso para entrar a contar.'}</span>
-          ${invData.error ? `<span class="error small">${esc(invData.error)}</span>` : ''}</div>
-        <span class="fila gap8 wrap-f">
-          ${puede('inv_sap') && !invNuevo && !invVer ? '<button class="btn btn-pri" onclick="nuevoInventario()">+ Nuevo inventario</button>' : ''}
-          <button class="btn btn-sec" onclick="invLista=null; invData=null; pintarApp()">Actualizar</button></span>
-      </div>
+      <div class="col gap4"><span class="h2">Inventarios · ${esc(nombreRegional() || nombreSede(ses.sedeId))}</span>
+        <span class="muted small">${invVer || invComp ? '' : jefe ? 'Toca el que está en curso para entrar a contar, o uno cerrado para ver cómo quedó.' : 'Toca el inventario en curso para entrar a contar.'}</span>
+        ${invData.error ? `<span class="error small">${esc(invData.error)}</span>` : ''}</div>
+      ${invVer || invComp ? '' : accionesHtml([
+        { t: 'Inventario', tono: 'azul', b: [puede('inv_sap') && accBtn('+ Nuevo inventario', 'nuevoInventario()', true)] },
+        { t: 'Consultar', tono: 'violeta', b: [puedeComparar && accBtn('Comparar inventarios', 'abrirComparar()')] },
+        { t: 'Pantalla', tono: 'gris', b: [accBtn('Actualizar', 'invLista=null; invData=null; pintarApp()')] }])}
       ${vistaInventarios()}
     </div>`;
   }
@@ -5354,46 +5466,153 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       }
       return '<div class="cargando">Cargando inventarios…</div>';
     }
+    if (invComp) return compararHtml();
     if (invVer) return detalleInventarioCerrado();
     const a = invActualCli();
-    return `${invNuevo ? formNuevoInventario() : ''}
+    return `${resumenInventariosHtml()}
       <section class="card col gap8">
         <span class="h3">Historial de inventarios</span>
         <div id="invsLista">${listaInventarios(a)}</div>
       </section>`;
   }
+  // Números de cada inventario: los del cerrado salen de su foto; los del que está en curso, en vivo
+  function numsInv(x) {
+    if (x.estado === 'ABIERTO') {
+      const d = datosInvRc(), cont = d.filter(f => f.contado);
+      return { productos: d.filter(f => f.sapTotal || f.plantaRc || f.contado).length, contados: cont.length, conDif: d.filter(f => f.difRc && (f.sap || f.plantaRc)).length,
+        conDifCont: cont.filter(f => f.difRc && (f.sap || f.plantaRc)).length };
+    }
+    const r = x.resumen || {};
+    // conDifCont (contados con diferencia) se guarda desde esta versión; en los cerrados antes, la exactitud sale en —
+    return { productos: r.productos, contados: r.contados, conDif: r.conDif, conDifCont: r.conDifCont };
+  }
+  const exactitudInv = n => (n.contados && n.conDifCont !== undefined ? Math.max(0, n.contados - n.conDifCont) / n.contados : null);
+  const pctN = v => (v === null || v === undefined ? '—' : (v * 100).toLocaleString('es-CO', { maximumFractionDigits: 1 }) + '%');
+  // Arriba de la lista: cuántos se han hecho, cómo va el de ahora y la exactitud de los últimos (gráfico)
+  function resumenInventariosHtml() {
+    const cerrados = invLista.filter(x => x.estado !== 'ABIERTO'), ab = invLista.find(x => x.estado === 'ABIERTO');
+    const ex = cerrados.map(x => ({ x, e: exactitudInv(numsInv(x)) })).filter(y => y.e !== null);
+    const prom = ex.length ? ex.reduce((a, y) => a + y.e, 0) / ex.length : null;
+    const nA = ab ? numsInv(ab) : null;
+    const ult = ex.slice(0, 8).reverse();
+    return `<section class="card col gap12">
+      <div class="kpis">
+        <div class="kpi"><span class="muted small">Inventarios cerrados</span><span class="kpi-v">${cerrados.length}</span></div>
+        <div class="kpi"><span class="muted small">En curso ${ayudaHtml('Productos contados del que está abierto, sobre los productos que tiene (SAP, plano o contados).')}</span>
+          <span class="kpi-v">${nA ? `${nA.contados} <small class="muted">de ${nA.productos}</small>` : '—'}</span></div>
+        <div class="kpi"><span class="muted small">Exactitud promedio ${ayudaHtml('De los productos contados, cuántos quedaron sin diferencia con SAP. Promedio de los inventarios cerrados.')}</span><span class="kpi-v">${pctN(prom)}</span></div>
+      </div>
+      ${ult.length ? `<div class="col gap4"><span class="small muted">Exactitud de los últimos inventarios cerrados</span>
+        <div class="inv-barras" role="img" aria-label="Exactitud por inventario">${ult.map(y => `<div class="inv-bar" title="${esc(y.x.nombre)}: ${pctN(y.e)}">
+          <span class="inv-bar-v">${pctN(y.e)}</span><div class="inv-bar-p"><i style="height:${Math.max(2, y.e * 100).toFixed(1)}%"></i></div>
+          <span class="inv-bar-n">${esc(fCorta(y.x.fecha))}</span></div>`).join('')}</div></div>` : ''}
+    </section>`;
+  }
   function listaInventarios(a) {
     if (!invLista.length) return '<p class="muted small">Todavía no hay inventarios.</p>';
     const pg = paginar('invs', invLista, () => { if ($('invsLista')) $('invsLista').innerHTML = listaInventarios(invActualCli()); });
-    // El que está en curso: cuántos van contados y con diferencia, en vivo
-    const d = datosInvRc(), vivo = { contados: d.filter(f => f.contado).length, conDif: d.filter(f => f.difRc && (f.sap || f.plantaRc)).length };
     return `<div class="tabla-wrap"><table class="tabla cic-lista">
-      <thead><tr><th>Nombre</th><th>Fecha</th><th class="num">Contados</th><th class="num">Con diferencia</th><th>Estado</th><th>Lo creó</th><th>Lo cerró</th></tr></thead>
+      <thead><tr><th>Nombre</th><th>Fecha</th><th class="num">Productos</th><th>Contados</th><th class="num">Con diferencia</th><th class="num">Exactitud</th><th>Estado</th><th>Lo creó</th><th>Lo cerró</th><th aria-label="Acciones"></th></tr></thead>
       <tbody>${pg.filas.map(x => {
-        const abierto = x.estado === 'ABIERTO', r = abierto ? vivo : (x.resumen || {});
+        const abierto = x.estado === 'ABIERTO', n = numsInv(x), pc = n.productos ? Math.round((n.contados || 0) * 100 / n.productos) : 0;
         return `<tr onclick="${abierto ? 'entrarInventario()' : `verInventario('${x.id}')`}">
-          <td><span class="fila gap8 wrap-f"><b>${esc(x.nombre || 'Inventario')}</b>${puede('inv_sap') ? `<button class="link small" onclick="event.stopPropagation(); renombrarInventario(${invLista.indexOf(x)})">Cambiar nombre</button>` : ''}</span></td>
+          <td><b>${esc(x.nombre || 'Inventario')}</b></td>
           <td class="nowrap">${fCorta(x.fecha)}</td>
-          <td class="num">${r.contados === undefined ? '—' : r.contados}</td>
-          <td class="num">${r.conDif === undefined ? '—' : r.conDif}</td>
+          <td class="num">${n.productos === undefined ? '—' : n.productos}</td>
+          <td>${n.contados === undefined ? '—' : `<span class="cic-avance"><span class="us-barra-p"><i style="width:${pc}%"></i></span>${n.contados}</span>`}</td>
+          <td class="num ${n.conDif ? 'txt-naranja' : ''}">${n.conDif === undefined ? '—' : n.conDif}</td>
+          <td class="num"><b>${pctN(exactitudInv(n))}</b></td>
           <td>${abierto ? '<span class="tag amar">En curso</span>' : '<span class="tag">Cerrado</span>'}</td>
           <td class="muted small">${esc(x.creadoPor || '—')}</td>
-          <td class="muted small">${x.cerrado ? `${esc(x.cerradoPor || '—')} · ${fechaHora(x.cerrado)}` : '—'}</td></tr>`;
+          <td class="muted small">${x.cerrado ? `${esc(x.cerradoPor || '—')} · ${fechaHora(x.cerrado)}` : '—'}</td>
+          <td class="nowrap">${puede('inv_nombre') ? `<button class="ec-btn" onclick="event.stopPropagation(); renombrarInventario(${invLista.indexOf(x)})" title="Cambiar el nombre" aria-label="Cambiar el nombre de ${esc(x.nombre || 'Inventario')}">✎</button>` : ''}</td></tr>`;
       }).join('')}</tbody></table></div>${pg.barra}`;
+  }
+
+  /* ----- Comparar dos inventarios: qué había en uno y qué hay en el otro, producto por producto ----- */
+  let invComp = null;   // { a, b, fa, fb, q, ver: '' | 'cambio' | 'soloA' | 'soloB' }
+  function abrirComparar() {
+    const l = invLista.filter(x => x.estado !== 'ABIERTO');
+    const ab = invLista.find(x => x.estado === 'ABIERTO');
+    invComp = { a: l[0] ? l[0].id : '', b: ab ? 'actual' : (l[1] ? l[0].id : ''), fa: null, fb: null, q: '', ver: '' };
+    if (!ab && l[1]) { invComp.a = l[1].id; invComp.b = l[0].id; }
+    pagInicio('invc'); cargarComparar(); pintarApp(); window.scrollTo(0, 0);
+  }
+  function fotoDe(id) {
+    if (id === 'actual') return Promise.resolve(fotoInventario().foto);
+    return llamar('bdInventario', id).then(d => d.foto || { filas: [] });
+  }
+  function cargarComparar() {
+    const c = invComp; if (!c) return;
+    c.fa = null; c.fb = null;
+    Promise.all([fotoDe(c.a), fotoDe(c.b)]).then(([fa, fb]) => { if (invComp === c) { c.fa = fa; c.fb = fb; pintarApp(); } })
+      .catch(e => { toast(e.message, 'error'); invComp = null; pintarApp(); });
+  }
+  function nombreInvComp(id) { if (id === 'actual') return (invActualCli().nombre || 'En curso') + ' (en curso)'; const x = invLista.find(y => y.id === id); return x ? x.nombre : '—'; }
+  function filasComparar() {
+    const c = invComp, m = {};
+    (c.fa.filas || []).forEach(f => { m[f.c] = { c: f.c, n: f.n, a: f }; });
+    (c.fb.filas || []).forEach(f => { (m[f.c] = m[f.c] || { c: f.c, n: f.n }).b = f; if (!m[f.c].n) m[f.c].n = f.n; });
+    return Object.values(m).map(x => Object.assign(x, { ta: x.a ? x.a.t : null, tb: x.b ? x.b.t : null, cambio: +((x.b ? x.b.t : 0) - (x.a ? x.a.t : 0)).toFixed(3) }));
+  }
+  function compararHtml() {
+    const c = invComp;
+    const ops = [...(invLista.some(x => x.estado === 'ABIERTO') ? [['actual', nombreInvComp('actual')]] : []), ...invLista.filter(x => x.estado !== 'ABIERTO').map(x => [x.id, `${x.nombre} · ${fCorta(x.fecha)}`])];
+    const sel = (k, v) => `<select class="campo" id="icmp${k}" onchange="invComp.${k}=this.value; pagInicio('invc'); cargarComparar(); pintarApp()">${ops.map(([id, t]) => `<option value="${esc(id)}" ${id === v ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+    let cuerpo = '<div class="cargando">Cargando los dos inventarios…</div>';
+    if (c.fa && c.fb) {
+      const l = filasComparar(), suma = (k, w) => l.reduce((t, x) => t + (x[w] ? Number(x[w][k]) || 0 : 0), 0);
+      const kp = (t, va, vb, fmt) => `<div class="kpi"><span class="muted small">${t}</span><span class="kpi-v cmp-v"><span>${fmt(va)}</span><span class="muted">→</span><span>${fmt(vb)}</span></span></div>`;
+      const cont = w => l.filter(x => x[w] && x[w].k).length, dif = w => l.filter(x => x[w] && x[w].d && (x[w].s || x[w].t)).length;
+      cuerpo = `<div class="kpis cmp-kpis">
+          ${kp('Productos', l.filter(x => x.a).length, l.filter(x => x.b).length, v => v)}
+          ${kp('Contados', cont('a'), cont('b'), v => v)}
+          ${kp('Total físico (und)', suma('t', 'a'), suma('t', 'b'), nInv)}
+          ${kp('Con diferencia', dif('a'), dif('b'), v => v)}
+        </div>
+        <div class="inv-filtros">
+          <div class="inv-buscar"><label class="lbl" for="icmpQ">Buscar</label>
+            <input id="icmpQ" class="campo" placeholder="Código o nombre" value="${esc(c.q)}" autocomplete="off" oninput="invComp.q=this.value; pagInicio('invc'); $('icmpTabla').innerHTML = tablaComparar()"></div>
+          <div class="inv-estado"><span class="lbl">Mostrar</span>
+            <div class="seg inv-seg" role="group" aria-label="Mostrar">${[['', 'Todos'], ['cambio', 'Cambiaron'], ['soloA', 'Solo en A'], ['soloB', 'Solo en B']].map(([k, t]) =>
+              `<button class="${c.ver === k ? 'on' : ''}" onclick="invComp.ver='${k}'; pagInicio('invc'); $('icmpTabla').innerHTML = tablaComparar(); this.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === this))">${t}</button>`).join('')}</div></div>
+        </div>
+        <div id="icmpTabla">${tablaComparar()}</div>`;
+    }
+    return `<section class="card col gap12">
+      <div class="fila-sb wrap-f gap8"><span class="h2">Comparar inventarios ${ayudaHtml('Escoge dos inventarios y mira, producto por producto, cuánto se encontró en cada uno (total físico = picking + aéreo + calidad + bloqueado) y cómo cambió.')}</span>
+        ${accBtn('← Volver a la lista', 'invComp=null; pintarApp()')}</div>
+      <div class="dos"><div><label class="lbl" for="icmpa">Inventario A</label>${sel('a', c.a)}</div><div><label class="lbl" for="icmpb">Inventario B</label>${sel('b', c.b)}</div></div>
+      ${cuerpo}
+    </section>`;
+  }
+  function tablaComparar() {
+    const c = invComp, pal = sinTilde(c.q.trim()).split(/\s+/).filter(Boolean);
+    const l = filasComparar().filter(x => (!c.ver || (c.ver === 'cambio' ? x.a && x.b && x.cambio : c.ver === 'soloA' ? x.a && !x.b : x.b && !x.a))
+      && (!pal.length || pal.every(w => sinTilde(`${x.c} ${x.n}`).includes(w)))).sort((x, y) => Math.abs(y.cambio) - Math.abs(x.cambio));
+    if (!l.length) return '<p class="muted small">No hay productos con ese filtro.</p>';
+    const pg = paginar('invc', l, () => { if ($('icmpTabla')) $('icmpTabla').innerHTML = tablaComparar(); });
+    const v = x => (x === null ? '<span class="muted">—</span>' : nInv(x));
+    const d = (f) => (!f ? '<span class="muted">—</span>' : `<span class="${f.d < 0 ? 'txt-rojo' : f.d > 0 ? 'txt-verde' : ''}">${f.d > 0 ? '+' : ''}${nInv(f.d)}</span>`);
+    return `<div class="tabla-wrap"><table class="tabla">
+      <thead><tr><th>Código</th><th>Producto</th><th class="num">Físico A</th><th class="num">Físico B</th><th class="num">Cambio</th><th class="num">Dif. SAP A</th><th class="num">Dif. SAP B</th></tr></thead>
+      <tbody>${pg.filas.map(x => `<tr><td class="nowrap"><b>${esc(x.c)}</b></td><td>${esc(x.n || '')}</td><td class="num">${v(x.ta)}</td><td class="num">${v(x.tb)}</td>
+        <td class="num"><b class="${x.cambio < 0 ? 'txt-rojo' : x.cambio > 0 ? 'txt-verde' : ''}">${x.cambio > 0 ? '+' : ''}${nInv(x.cambio)}</b></td><td class="num">${d(x.a)}</td><td class="num">${d(x.b)}</td></tr>`).join('')}</tbody></table></div>${pg.barra}
+      <span class="muted small">A = ${esc(nombreInvComp(c.a))} · B = ${esc(nombreInvComp(c.b))}. Ordenado por el cambio más grande.</span>`;
   }
 
   function nuevoInventario() {
     if (sinPermiso('inv_sap')) return;
     const f = hoyISO();
     invNuevo = { nombre: 'Inventario ' + fCorta(f), fecha: f, sap: 'si' };
-    pintarApp();
+    abrirModal(formNuevoInventario());
+    const c = $('inNombre'); if (c) { c.focus(); c.select(); }
   }
   function formNuevoInventario() {
     const n = invNuevo, a = invActualCli();
-    return `<section class="card col gap12 cic-nuevo" aria-label="Nuevo inventario">
-      <div class="col gap4"><span class="h3">Nuevo inventario</span>
-        ${a.estado === 'ABIERTO' && a.nombre ? `<span class="muted small">Al crearlo, <b>${esc(a.nombre)}</b> se cierra y queda guardado como está (SAP, picking, aéreo, calidad, bloqueado y diferencias).</span>`
-          : ''}</div>
+    return `<div class="fila-sb"><span class="h2">Nuevo inventario</span><button class="icono icono-claro" aria-label="Cerrar" onclick="invNuevo=null; cerrarModal()">${ICONOS.cerrar}</button></div>
+      <div class="col gap12 mt12">
+      ${a.estado === 'ABIERTO' && a.nombre ? `<span class="muted small">Al crearlo, <b>${esc(a.nombre)}</b> se cierra y queda guardado como está (SAP, picking, aéreo, calidad, bloqueado y diferencias).</span>` : ''}
       <div class="dos">
         <div><label class="lbl" for="inNombre">Nombre</label>
           <input id="inNombre" class="campo" autocomplete="off" maxlength="80" value="${esc(n.nombre)}" oninput="invNuevo.nombre=this.value"></div>
@@ -5403,11 +5622,10 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       <div class="col gap8"><span class="lbl">¿Tienes el Excel de SAP de este inventario?</span>
         <div class="seg" role="group" aria-label="Excel de SAP">${[['si', 'Sí, cargarlo ahora'], ['no', 'No, empezar a contar']].map(([k, t]) =>
           `<button class="${n.sap === k ? 'on' : ''}" onclick="invNuevo.sap='${k}'; this.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === this))">${t}</button>`).join('')}</div>
-        <span class="muted small">Si no lo tienes, lo puedes cargar después con «Cargar Excel de SAP» dentro del inventario.</span></div>
+        <span class="muted small">Si no lo tienes, lo puedes cargar después con «Excel de SAP» dentro del inventario.</span></div>
       <p id="inErr" class="error" hidden></p>
-      <div class="dos"><button class="btn btn-sec" onclick="invNuevo=null; pintarApp()">Cancelar</button>
-        <button id="inOk" class="btn btn-pri" onclick="crearInventario(this)">Crear inventario</button></div>
-    </section>`;
+      <div class="dos"><button class="btn btn-sec btn-xl" onclick="invNuevo=null; cerrarModal()">Cancelar</button>
+        <button id="inOk" class="btn btn-pri btn-xl" onclick="crearInventario(this)">Crear inventario</button></div></div>`;
   }
   // La foto del inventario como quedó: lo mismo que se ve en la tabla contra SAP
   function fotoInventario() {
@@ -5420,7 +5638,8 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       if (f.sap) x.sap = [red(f.sap.inventario), red(f.sap.calidad), red(f.sap.bloqueado)];
       return x;
     });
-    const resumen = { productos: filas.length, contados: filas.filter(x => x.k).length, conDif: filas.filter(x => x.d && (x.s || x.t)).length, sede: nombreSede(ses.sedeId) };
+    const resumen = { productos: filas.length, contados: filas.filter(x => x.k).length, conDif: filas.filter(x => x.d && (x.s || x.t)).length,
+      conDifCont: filas.filter(x => x.k && x.d && (x.s || x.t)).length, sede: nombreSede(ses.sedeId) };
     return { foto: { sedeId: ses.sedeId, sede: nombreSede(ses.sedeId), carga: invData.carga || null, sedes: SD.map(s => ({ id: s.id, nombre: s.nombre })), filas }, resumen };
   }
   async function crearInventario(b) {
@@ -5436,7 +5655,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       const cerrar = a.estado !== 'ABIERTO' ? null : a.id ? { id: a.id } : a.virtual && a.primer ? { nombre: a.nombre, fecha: a.fecha, desde: a.primer } : null;
       await llamar('bdCrearInventario', { sedeId: ses.sedeId, nombre: n.nombre.trim(), fecha: n.fecha, usuario: ses.nombre, usuarioId: ses.id, cerrar, foto: cerrar ? foto : null, resumen: cerrar ? resumen : null });
       const conSap = n.sap === 'si';
-      invNuevo = null; invLista = null; invData = null; invDentro = true; invSub = ''; pagInicio('invs');
+      invNuevo = null; cerrarModal(); invLista = null; invData = null; invDentro = true; invSub = ''; pagInicio('invs');
       pitido(); toast(conSap ? 'Inventario creado. Ahora escoge el Excel de SAP.' : 'Inventario creado. Ya pueden empezar a contar.', 'ok');
       pintarApp(); window.scrollTo(0, 0);
       if (conSap && puede('inv_sap')) abrirCargaSap();
@@ -5445,7 +5664,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
 
   // Cambiar el nombre: i = posición en la lista, 'actual' = el que está en curso, 'ver' = el cerrado que se está viendo
   function renombrarInventario(i) {
-    if (sinPermiso('inv_sap')) return;
+    if (sinPermiso('inv_nombre')) return;
     const x = i === 'actual' ? invActualCli() : i === 'ver' ? invVer && invVer.d : invLista && invLista[i];
     if (!x) return;
     renombrarInventario.x = x;
@@ -5473,7 +5692,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     }).catch(e => { b.disabled = false; b.textContent = 'Guardar'; err(e.message); });
   }
 
-  function entrarInventario() { invDentro = true; invVer = null; invNuevo = null; invSub = ''; pintarApp(); window.scrollTo(0, 0); }
+  function entrarInventario() { invDentro = true; invVer = null; invNuevo = null; invComp = null; invSub = ''; pintarApp(); window.scrollTo(0, 0); }
   // Cerrar el inventario en curso (sin crear otro): queda guardado con su foto y ya no se cuenta en él
   async function cerrarInventario(b) {
     if (b.dataset.ok !== '1') { b.dataset.ok = '1'; b.textContent = '¿Seguro? Toca otra vez para cerrarlo'; return; }
@@ -5511,7 +5730,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const fo = x.foto || { filas: [] }, r = x.resumen || {};
     return `<section class="card col gap12">
       <div class="fila-sb wrap-f gap8">
-        <div class="col gap4"><span class="h2 fila gap8 wrap-f">${esc(x.nombre)} <span class="tag">Cerrado</span>${puede('inv_sap') ? '<button class="link small" onclick="renombrarInventario(\'ver\')">Cambiar nombre</button>' : ''}</span>
+        <div class="col gap4"><span class="h2 fila gap8 wrap-f">${esc(x.nombre)} <span class="tag">Cerrado</span>${puede('inv_nombre') ? `<button class="ec-btn" onclick="renombrarInventario('ver')" title="Cambiar el nombre" aria-label="Cambiar el nombre del inventario">✎</button>` : ''}</span>
           <span class="muted small">${fCorta(x.fecha)}${fo.sede ? ' · ' + esc(fo.sede) : ''} · Lo cerró ${esc(x.cerradoPor || '—')} el ${fechaHora(x.cerrado)}${fo.carga ? ` · SAP cargado el ${fechaHora(fo.carga.fecha)}` : ''}</span></div>
         <span class="fila gap8 wrap-f">
           ${puede('reportes') && fo.filas.length ? '<button class="btn btn-sec" onclick="descargarInventarioCerrado(this)">Descargar Excel de este inventario</button>' : ''}
@@ -5568,10 +5787,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         return { v: n, s: k === 'd' ? (n < 0 ? 7 : n > 0 ? 8 : 6) : 6 };
       })));
       const blob = await xlsxConEstilo('INVENTARIO', hoja, [10, 46, 12, 12, 11, 11, 12, 12, 13, 12, 12, 12, 13, 13]);
-      const url = URL.createObjectURL(blob), a = document.createElement('a');
-      a.href = url; a.download = `${x.nombre} ${x.fecha}.xlsx`.replace(/[\\/:*?"<>|]/g, '-');
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      entregarArchivo(blob, `${x.nombre} ${x.fecha}.xlsx`, 'Excel del inventario');
     } catch (e) { toast('No se pudo armar el Excel: ' + e.message, 'error'); }
     b.disabled = false;
   }
@@ -5584,6 +5800,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (cicSel) return detalleCiclico();
     const ab = (cicLista || []).filter(c => esRcInv(c) && c.estado === 'ABIERTO').length;
     return `${cicNuevo ? formNuevoCiclico() : ''}
+      ${tableroReconteosHtml((cicLista || []).filter(c => esRcInv(c) && c.estado === 'ABIERTO'))}
       <section class="card col gap8">
         <div class="fila-sb wrap-f gap8"><span class="h3">Reconteos de inventario <span class="muted small">(${ab} abierto${ab === 1 ? '' : 's'})</span></span>
           <span class="fila gap8 wrap-f">
@@ -5593,6 +5810,37 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         <span class="muted small">Vuelven a contar los productos que salieron con diferencia contra SAP: el picking y el aéreo estiba por estiba. Toca uno para abrirlo.</span>
         <div id="rcInvLista">${listaRcInv()}</div>
       </section>`;
+  }
+  // Tablero en vivo de los reconteos abiertos: cuánto va cada uno, quién está recontando y lo último que contaron
+  const haceTxt = f => { const m = Math.max(0, Math.round((Date.now() - new Date(f).getTime()) / 60000)); return m < 1 ? 'ahora' : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : fechaHora(f); };
+  function tableroReconteosHtml(l) {
+    if (!l.length) return '';
+    const tot = l.reduce((a, c) => a + c.codigos.length, 0), hechos = l.reduce((a, c) => a + Math.min(c.contados || 0, c.codigos.length), 0);
+    const feed = [].concat(...l.map(c => (c.actividad || []).map(x => Object.assign({ rc: c }, x)))).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))).slice(0, 10);
+    const activos = new Set(feed.filter(x => Date.now() - new Date(x.fecha).getTime() < 30 * 60000).map(x => x.usuario));
+    return `<section class="card col gap12 rct">
+      <div class="fila-sb wrap-f gap8"><span class="h3">Reconteos en curso ${ayudaHtml('Se actualiza solo: cada vez que alguien guarda un reconteo aparece aquí. Toca un reconteo para abrirlo.')}</span>
+        <span class="rct-vivo ${vivoOk ? 'on' : ''}">${vivoOk ? '● En vivo' : '○ Se actualiza cada 20 s'}</span></div>
+      <div class="kpis">
+        <div class="kpi"><span class="muted small">Abiertos</span><span class="kpi-v">${l.length}</span></div>
+        <div class="kpi"><span class="muted small">Recontados</span><span class="kpi-v">${hechos} <small class="muted">de ${tot}</small></span></div>
+        <div class="kpi"><span class="muted small">Personas recontando ${ayudaHtml('Quienes han guardado algo en los últimos 30 minutos.')}</span><span class="kpi-v">${activos.size}</span></div>
+      </div>
+      <div class="rct-grid">${l.map(c => {
+        const n = c.codigos.length, h = Math.min(c.contados || 0, n), pc = n ? Math.round(h * 100 / n) : 0, u = (c.actividad || [])[0];
+        const per = Object.entries(c.personas || {}).sort((a, b) => b[1] - a[1]);
+        return `<button type="button" class="rct-tile" onclick="abrirCiclico('${c.id}')">
+          <span class="fila-sb gap8"><b>${esc(tituloCic(c))}</b><b class="rct-pct">${pc}%</b></span>
+          <span class="us-barra-p rct-barra"><i style="width:${pc}%"></i></span>
+          <span class="small">${h} de ${n} productos${u ? ` · <span class="muted">${haceTxt(u.fecha)}</span>` : ' · <span class="muted">nadie ha empezado</span>'}</span>
+          ${per.length ? `<span class="rct-per">${per.map(([p, k]) => `<span class="rct-chip">${esc(p)} · ${k}</span>`).join('')}</span>` : ''}
+        </button>`;
+      }).join('')}</div>
+      ${feed.length ? `<div class="col gap4"><span class="lbl" style="margin:0">Lo último que recontaron</span>
+        <div class="rct-feed">${feed.map(x => { const p = prodDe(x.codigo); return `<div class="rct-ev"><span class="rct-hora">${haceTxt(x.fecha)}</span>
+          <span class="rct-txt"><b>${esc(x.usuario)}</b> · ${esc(x.codigo)} ${esc(p ? p.nombre : '')} · <b>${nInv(x.cantidad)}</b>${x.tipo && x.tipo !== 'PICKING' ? ' ' + esc(x.tipo.toLowerCase()) : ''}</span>
+          <span class="muted small rct-de">${esc(tituloCic(x.rc))}</span></div>`; }).join('')}</div></div>` : ''}
+    </section>`;
   }
   function listaRcInv() {
     const l = (cicLista || []).filter(c => esRcInv(c) && (!cicF.ver || c.estado === cicF.ver));
@@ -5705,7 +5953,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
           <div class="fila gap8"><input id="rcQ" class="campo" style="flex:1;min-width:0" type="search" placeholder="Código, nombre, EAN o rótulo" value="${esc(rcc.q)}" autocomplete="off">
             ${botonCamara('rcQ', 'btn btn-sec btn-cam2')}</div></div>
       </div>
-      ${rcc.eanPid ? `<div class="rc-ean">${eanMiniHtml(rcc.eanPid)}</div>` : ''}
+      ${rcc.eanPid ? `<div class="rc-ean">${eanMiniHtml(rcc.eanPid, 'inventario')}</div>` : ''}
       <div id="rcTabla">${rcTablaHtml(todas)}</div>
       <div id="rcListo">${rcc.listo}</div>
       <button id="rcFin" class="btn btn-ent-solido btn-xl" onclick="rcFinalizar()">Finalizar</button>
@@ -6357,16 +6605,21 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
             ${rc && c.origen ? `<span class="small">${nombreCic(c)} · sale de: ${c.origenId && (cicLista || []).some(x => x.id === c.origenId) ? `<button class="link" onclick="volverCic()"><b>${esc(c.origen)}</b></button>` : `<b>${esc(c.origen)}</b>`}</span>` : ''}
             <span class="muted small">${fCorta(c.fecha)} · lo creó ${esc(c.creadoPor || '—')}${c.estado === 'CERRADO' ? ` · cerrado por ${esc(c.cerradoPor || '—')} ${c.cerrado ? fechaHora(c.cerrado) : ''}` : ''}</span>
             ${sedesCicTxt(c) ? `<span class="small">Se cuenta en: <b>${esc(sedesCicTxt(c))}</b></span>` : ''}</div>
-          <span class="fila gap8 wrap-f">
-            <button class="btn btn-sec btn-mini" onclick="historialCiclico()">Historial</button>
-            ${puede('ciclico_asignar') && c.estado === 'ABIERTO' ? '<button class="btn btn-sec btn-mini" onclick="agregarProdCicModal()">+ Producto</button>' : ''}
-            ${puede('ciclico_asignar') && ini.sedes.length > 1 && c.estado === 'ABIERTO' ? '<button class="btn btn-sec btn-mini" onclick="editarSedesCiclico()">Sedes</button>' : ''}
-            ${puede('ciclico_asignar') && cicVeSap(c) && c.estado === 'ABIERTO' && !rc ? `<button class="btn btn-sec btn-mini" onclick="abrirCargaSap('ciclicoAct')" title="Si te equivocaste de Excel, sube el correcto">${c.archivo ? 'Volver a cargar el Excel' : 'Cargar Excel de SAP'}</button>` : ''}
-            ${puede('reportes') && cicVeSap(c) ? '<button class="btn btn-sec btn-mini" onclick="descargarCiclico()">Descargar Excel</button>' : ''}
-            ${puede('ciclico_asignar') ? (c.estado === 'ABIERTO' ? `<button class="btn btn-sec btn-mini" onclick="estadoCiclico('CERRADO')">Cerrar ${rc ? 'reconteo' : 'cíclico'}</button>`
-              : '<button class="btn btn-sec btn-mini" onclick="estadoCiclico(\'ABIERTO\')">Volver a abrir</button>') + '<button class="btn btn-sal btn-mini" onclick="borrarCiclico()">Eliminar</button>' : ''}
-            </span>
         </div>
+        ${(() => {
+          const ab = c.estado === 'ABIERTO', asig = puede('ciclico_asignar'), capC = c.base && c.base._captura;
+          return accionesHtml([
+            { t: rc ? 'Reconteo' : 'Cíclico', tono: 'gris', b: [accBtn('Historial', 'historialCiclico()'),
+              asig && ab && accBtn('+ Producto', 'agregarProdCicModal()'),
+              asig && ini.sedes.length > 1 && ab && accBtn('Sedes', 'editarSedesCiclico()')] },
+            { t: 'Cargar', tono: 'azul', b: [asig && cicVeSap(c) && ab && !rc && accBtn(c.archivo ? 'Volver a cargar el Excel' : 'Excel de SAP', "abrirCargaSap('ciclicoAct')", !c.archivo, 'title="Si te equivocaste de Excel, sube el correcto"')] },
+            { t: 'Capturar', tono: 'violeta', b: asig && ab && !rc ? [accBtn(capC ? 'Recapturar aéreo' : 'Capturar aéreo', 'capturarCiclico(false)'),
+              capC && accBtn('Aéreo de ahora', 'capturarCiclico(true)', false, 'title="Dejar de usar la captura"')] : [],
+              nota: capC ? `Aéreo: ${fechaHora(capC.fecha)} · ${esc(capC.por || '—')} ${ayudaHtml('El aéreo de este cíclico es el que se capturó. Lo que muevan o saquen después no lo cambia.')}` : ayudaHtml('Capturar guarda el aéreo de ahora para seguir contando otro día sin que cambie.') },
+            { t: 'Descargar', tono: 'verde', b: [puede('reportes') && cicVeSap(c) && accBtn('Excel', 'descargarCiclico()', true)] },
+            { t: 'Estado', tono: 'rojo', b: asig ? [ab ? accBtn(`Cerrar ${rc ? 'reconteo' : 'cíclico'}`, "estadoCiclico('CERRADO')") : accBtn('Volver a abrir', "estadoCiclico('ABIERTO')"),
+              accBtn('Eliminar', 'borrarCiclico()')] : [] }]);
+        })()}
         <div class="cic-progreso"><span class="us-barra-p"><i style="width:${pct}%"></i></span><b>${hechos} de ${d.length}</b> ${rc ? (rcI ? 'recontados' : 'recontados (picking + aéreo)') : 'contados'}</div>
       </section>
       ${(() => {
@@ -6438,6 +6691,31 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     });
     return { aereo, tot, ok, sap };
   }
+  // Aéreo de un producto del cíclico como está ahora en el plano (y en las otras sedes donde se cuenta)
+  function aereoVivoCic(cod) {
+    let n = 0;
+    sede.lineas.forEach(l => { const e = sede.espPorId[l.ubicacionId]; if (l.productoId === cod && e && e.nivel !== 0) n += Number(l.unidades) || 0; });
+    // Cíclico en varias sedes: más el aéreo de las otras (el de esta sede es el del plano en vivo)
+    const as = (cicData && cicData.aereoSedes) || {};
+    Object.keys(as).forEach(sid => { if (sid !== ses.sedeId && as[sid]) n += Number(as[sid][cod]) || 0; });
+    return +n.toFixed(3);
+  }
+  // Capturar el aéreo del cíclico: si se sigue contando otro día, lo que muevan o saquen del aéreo no lo cambia
+  function capturarCiclico(quitar, ok) {
+    const c = cicData && cicData.ciclico;
+    if (!c || sinPermiso('ciclico_asignar')) return;
+    if (!quitar && ok !== true) return abrirModal(`<div class="fila-sb"><span class="h2">¿Capturar el aéreo?</span>${btnCerrar()}</div>
+      <p class="mt12">Se guarda cuánto hay ahora en el aéreo de los ${c.codigos.length} productos de este cíclico. Si siguen contando otro día y mueven, sacan o llega algo al aéreo, el cíclico no cambia. Lo contado de picking sigue igual.</p>
+      ${c.base && c.base._captura ? '<p class="small txt-naranja">Ya había una captura: esta la reemplaza.</p>' : ''}
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-pri btn-xl" onclick="capturarCiclico(false, true)">Sí, capturar</button></div>`);
+    const aereo = {};
+    if (!quitar) c.codigos.forEach(cod => { aereo[cod] = aereoVivoCic(cod); });
+    llamar('bdCapturaCiclico', { id: c.id, aereo: quitar ? null : aereo, usuario: ses.nombre }).then(n => {
+      cicData.ciclico = n; const x = (cicLista || []).find(y => y.id === n.id); if (x) x.base = n.base;
+      cerrarModal(); toast(quitar ? 'Listo: el aéreo vuelve a ser el de ahora' : 'Aéreo capturado. Pueden seguir mañana sin que cambie.', 'ok'); pintarApp();
+    }).catch(e => { cerrarModal(); toast(e.message, 'error'); });
+  }
   function datosCiclico() {
     if (!cicData) return [];
     const sap = {}; ((invData && invData.sap) || []).forEach(x => (sap[x.codigo] = x));
@@ -6448,14 +6726,10 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     return cicData.ciclico.codigos.map(cod => {
       const f = { cod, p: prodDe(cod), sap: propio ? (propio[cod] ? Object.assign({ codigo: cod }, propio[cod]) : (sap[cod] || null)) : (sap[cod] || null), picking: 0, aereo: 0, calidad: 0, bloqueado: 0, contado: false, ult: null, lugares: new Set() };
       if (ci && ci.sap) f.sap = ci.sap[cod] ? Object.assign({ codigo: cod }, ci.sap[cod]) : null;
+      const capC = !ci && !rc && cicData.ciclico.base && cicData.ciclico.base._captura;   // aéreo capturado (para seguir otro día)
       if (ci && ci.aereo && ci.aereo[cod] !== undefined) f.aereo = Number(ci.aereo[cod]) || 0;
-      else {
-        sede.lineas.forEach(l => { const e = sede.espPorId[l.ubicacionId]; if (l.productoId === cod && e && e.nivel !== 0) f.aereo += Number(l.unidades) || 0; });
-        // Cíclico en varias sedes: más el aéreo de las otras (el de esta sede es el del plano en vivo)
-        const as = cicData.aereoSedes || {};
-        Object.keys(as).forEach(sid => { if (sid !== ses.sedeId && as[sid]) f.aereo += Number(as[sid][cod]) || 0; });
-        f.aereo = +f.aereo.toFixed(3);
-      }
+      else if (capC && capC.aereo) f.aereo = Number(capC.aereo[cod]) || 0;
+      else f.aereo = aereoVivoCic(cod);
       cicData.conteos.filter(c => c.codigo === cod).forEach(c => {
         f.contado = true; f.lugares.add(c.ubicacion);
         if (c.tipo === 'CALIDAD') f.calidad += c.cantidad; else if (c.tipo === 'BLOQUEADO') f.bloqueado += c.cantidad; else f.picking += c.cantidad;
@@ -6564,10 +6838,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     invProdInfo();
     $('invLug').closest('.inv-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (!sede.espPorId[invForm.ubic]) $('invLug').focus({ preventScroll: true }); else $('invCPICKING').focus({ preventScroll: true });
-  }
-
-
-  /* ================= Códigos nuevos de ubicación: ALMACÉN-RAK-NIVEL-POSICIÓN =================
+  }  /* ================= Códigos nuevos de ubicación: ALMACÉN-RAK-NIVEL-POSICIÓN =================
      El código interno de cada espacio (SEC-F01-P001-2A) NUNCA cambia: lo ubicado, los rótulos y el historial siguen igual.
      El código nuevo (2000-01-02-01) va al lado: es el que se ve, se imprime y se escanea (el viejo también sirve).
      - Almacén: lo tiene cada zona (Configuración → Códigos). Varias zonas pueden ser del mismo almacén y siguen la numeración.
@@ -7034,7 +7305,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     imprimirEtiquetas(lista);
   }
 
-  /* ================= Contar por almacén y pasillo (Inventario y Cíclico) =================
+/* ================= Contar por almacén y pasillo (Inventario y Cíclico) =================
      Quien cuenta escoge almacén → pasillo y le sale una tabla con los productos de ese pasillo:
      llena picking, confirma calidad y bloqueado (vienen de lo que cargó el encargado) y el aéreo queda confirmado.
      El jefe ve el avance de cada pasillo y de cada persona, y asigna pasillos. */
@@ -7050,9 +7321,11 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       return { cic: c, id: c.id, conteos: cicData.conteos || [], val: cicData.validaciones || [], codigos: new Set(c.codigos),
         asig: cicData.asignaciones || [], abierto: c.estado === 'ABIERTO', sapDe: cod => propio ? propio[cod] || sap[cod] || null : sap[cod] || null };
     }
-    const desde = invData && invData.carga ? invData.carga.fecha : null;
+    // Todos los conteos del inventario en curso (el servidor ya trae solo los de este inventario).
+    // Antes se escondían los que se hicieron antes de cargar el Excel de SAP: por eso al volver a cargarlo
+    // «Lo último que contaste» y Consultar quedaban vacíos.
     const sap = {}; ((invData && invData.sap) || []).forEach(x => (sap[x.codigo] = x));
-    return { cic: null, id: null, conteos: ((invData && invData.conteos) || []).filter(c => !desde || c.fecha >= desde), val: (invData && invData.validaciones) || [],
+    return { cic: null, id: null, conteos: (invData && invData.conteos) || [], val: (invData && invData.validaciones) || [],
       codigos: null, asig: (invData && invData.asignaciones) || [], abierto: true, sapDe: cod => sap[cod] || null };
   }
   const cpPuedeContar = S => S.cic ? cicPuedeContar(S.cic) : puede('inv_contar');
@@ -7489,7 +7762,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const sapAlm = {};   // código → [{ almacen, inventario, calidad, bloqueado, vLib, vCal, vBlq }]
     ((invData && invData.sapAlm) || []).forEach(x => { (sapAlm[x.codigo] = sapAlm[x.codigo] || []).push(x); });
     const hayValores = d.some(f => costoUnit(f) !== null);
-    // Universo: lo que se subió de SAP; si todavía no hay SAP, todos los productos activos del catálogo de la regional
+    // Base del inventario: lo que se subió de SAP; si todavía no hay SAP, todos los productos activos del catálogo de la regional
     const sinSap = !((invData && invData.sap) || []).length;
     const enCat = f => !!(f.p && f.p.activo !== false && prodDeMiRegional(f.p));
     const filas = d.filter(f => f.sapTotal || f.plantaRc || f.contado || f.hayCal || f.hayBlo || (sinSap && enCat(f))).map(f => {
@@ -7604,17 +7877,17 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       { n: a.sinDif, tono: 'verde', nom: 'Cuadradas con SAP' },
       { n: a.conDif, tono: 'rojo', nom: 'Con novedad' },
       { n: a.reclas, tono: 'violeta', nom: 'Cambio de estado' },
-      { n: a.sinLinea, tono: 'amar', nom: 'Fuera del universo' }];
+      { n: a.sinLinea, tono: 'amar', nom: 'Fuera de la base' }];
     // ---- Cobertura ----
     const hero = `<section class="card tb-hero">
       <div class="tb-hero-g">${tbAnillo(a.contados, a.alcance, 'azul', 'cobertura')}</div>
       <div class="col gap12 tb-min0">
-        <div class="fila-sb wrap-f gap8"><span class="h3">Cobertura del inventario ${ayudaHtml(`Cuántas referencias del universo ya se verificaron físicamente. El universo sale del ${uni}${a.sinSap ? '; cuando cargues el Excel de SAP se toma el de SAP' : ''}.`)}</span>
-          <span class="tb-chip">Universo: ${esc(uni)}</span></div>
+        <div class="fila-sb wrap-f gap8"><span class="h3">Cobertura del inventario ${ayudaHtml(`Cuántas de las referencias a inventariar ya se verificaron físicamente. La base sale del ${uni}${a.sinSap ? '; cuando cargues el Excel de SAP se toma el de SAP' : ''}.`)}</span>
+          <span class="tb-chip">Base: ${esc(uni)}</span></div>
         <div class="tb-kpis3">
-          ${kpi('Universo a inventariar', a.alcance.toLocaleString('es-CO'), `en ${a.almacenes} ${a.almacenes === 1 ? 'almacén' : 'almacenes'}`, '', 'Total de referencias que se deben contar en este inventario.')}
-          ${kpi('Referencias verificadas', a.contados.toLocaleString('es-CO'), 'ya tienen conteo', 'verde', 'Referencias del universo que ya tienen al menos un conteo registrado.')}
-          ${kpi('Por verificar', a.pendientes.toLocaleString('es-CO'), a.hayValores ? `${plata(a.sapSinVerificar)} sin verificar` : 'faltan por contar', a.pendientes ? 'naranja' : '', 'Referencias del universo que todavía nadie ha contado. Con valores de SAP se muestra cuánta plata falta por verificar.')}
+          ${kpi('Referencias a inventariar', a.alcance.toLocaleString('es-CO'), `en ${a.almacenes} ${a.almacenes === 1 ? 'almacén' : 'almacenes'}`, '', 'Total de referencias que se deben contar en este inventario.')}
+          ${kpi('Referencias verificadas', a.contados.toLocaleString('es-CO'), 'ya tienen conteo', 'verde', 'Referencias a inventariar que ya tienen al menos un conteo registrado.')}
+          ${kpi('Por verificar', a.pendientes.toLocaleString('es-CO'), a.hayValores ? `${plata(a.sapSinVerificar)} sin verificar` : 'faltan por contar', a.pendientes ? 'naranja' : '', 'Referencias a inventariar que todavía nadie ha contado. Con valores de SAP se muestra cuánta plata falta por verificar.')}
         </div>
         ${tbApilada([{ n: a.contados, tono: 'azul', nom: 'Verificadas' }, { n: a.pendientes, tono: 'gris', nom: 'Por verificar' }], a.alcance)}
         ${tbLeyenda([{ n: a.contados, tono: 'azul', nom: 'Verificadas' }, { n: a.pendientes, tono: 'gris', nom: 'Por verificar' }], a.alcance)}
@@ -7632,7 +7905,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
           <div class="tb-acc">
             ${kpi('Reconteo prioritario', a.alta, `más de ${a.tol.pct}% o ${plata(a.tol.valor)} · <button class="link small" onclick="cambiarTolerancia()">ajustar</button>`, a.alta ? 'rojo' : '', 'Novedades tan grandes (en porcentaje o en plata) que conviene volver a contarlas antes de ajustar.')}
             ${kpi('Posibles cruces', a.cruces.length, a.cruces.length ? '<button class="link small" onclick="verCruces()">ver parejas</button>' : 'sin parejas por ahora', a.cruces.length ? 'violeta' : '', 'Referencias parecidas (misma subcategoría) donde a una le sobra y a otra le falta casi lo mismo en plata: puede que se contó una por la otra.')}
-            ${kpi('Fuera del universo', a.sinLinea, a.sinLinea ? '<button class="link small" onclick="verFueraAlcance()">ver cuáles</button>' : 'todo dentro', a.sinLinea ? 'naranja' : '', 'Referencias que se contaron pero no estaban en lo que se subió a contar. Revisa el código o el almacén.')}
+            ${kpi('Fuera de la base', a.sinLinea, a.sinLinea ? '<button class="link small" onclick="verFueraAlcance()">ver cuáles</button>' : 'todo dentro', a.sinLinea ? 'naranja' : '', 'Referencias que se contaron pero no estaban en lo que se subió a contar. Revisa el código o el almacén.')}
             ${kpi('Referencias en altura', a.conAereo, `${nInv(a.aereo)} unidades en aéreo`, '', 'Referencias que tienen producto ubicado en el aéreo (nivel 1 hacia arriba).')}
           </div>
         </div>
@@ -7717,7 +7990,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   function verFueraAlcance() {
     const a = analisisInv();
     const pg = paginar('fua', a.fuera, verFueraAlcance);
-    abrirModal(`<div class="fila-sb"><span class="h2">Contadas fuera del universo</span>${btnCerrar()}</div>
+    abrirModal(`<div class="fila-sb"><span class="h2">Contadas fuera de la base</span>${btnCerrar()}</div>
       <span class="muted small mt8">Se contaron pero no estaban en ${a.sinSap ? 'el catálogo de la regional' : 'el Excel de SAP'}. Revisa si el código o el almacén están bien.</span>
       <div class="tabla-wrap mt12"><table class="tabla"><thead><tr><th>Código</th><th>Producto</th><th class="num">Físico</th><th>Almacén</th></tr></thead><tbody>
         ${pg.filas.map(r => `<tr onclick="cerrarModal(); historialInventario('${esc(r.cod)}')"><td><b>${esc(r.cod)}</b></td><td class="small">${esc(r.p ? r.p.nombre : 'No está en el catálogo')}</td><td class="num">${nInv(r.fis)}</td><td>${esc(r.alm || '—')}</td></tr>`).join('')}
@@ -7835,10 +8108,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   // Pestañas de Inventario / Cíclico
   function subTabsHtml(actual, lista, campo) {
     return `<div class="tabs tabs-sub" role="tablist">${lista.map(([k, t]) => `<button class="tab ${actual === k ? 'on' : ''}" onclick="${campo}='${k}'; pintarApp()">${t}</button>`).join('')}</div>`;
-  }
-
-
-  /* ================= Contar: Ingresar (como el rótulo: código y cantidad) y Confirmar (buscar lo que se llenó) =================
+  }/* ================= Contar: Ingresar (como el rótulo: código y cantidad) y Confirmar (buscar lo que se llenó) =================
      Inventario y cíclico son procesos aparte: cada uno guarda sus propios conteos.
      Siempre se escoge primero el almacén. En el cíclico solo se aceptan los productos que mandaron a contar.
      Lo que se ingresa es el picking; calidad y bloqueado se toman del Excel que cargó el encargado. */
@@ -7961,7 +8231,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   }
   let ubTmp = null;
   function abrirCargaUbicSede() {
-    if (!puede('inv_sap') && sinPermiso('productos')) return;
+    if (sinPermiso('prod_almacenes')) return;
     ubTmp = { sede: '' };
     abrirModal(`<div class="fila-sb"><span class="h2 fila gap8">Actualizar almacenes y pasillos ${ayudaHtml('El almacén y el pasillo de un producto pueden cambiar de una sede a otra. Por eso primero escoges la sede y después subes el Excel con el código del producto, su almacén y su pasillo. Si un producto no trae pasillo, se usa el del plano. Lo que subas reemplaza lo cargado de esa sede; las demás sedes no cambian.')}</span>${btnCerrar()}</div>
       <div class="mt12"><label class="lbl" for="ubSede">1. ¿De qué sede vas a cargar?</label>
@@ -8009,11 +8279,23 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     r.readAsArrayBuffer(f);
   }
   /* ----- Cargar el Excel maestro de productos (COD, Texto breve, Unidad medida base, Equiv Kg, Categoría, EAN 13, EAN 13, EAN 14, UND / CJ…) ----- */
-  let maeTmp = null;
-  function abrirCargaMaestro() {
-    if (sinPermiso('productos')) return;
+  let maeTmp = null, maeModo = 'actualizar';
+  // «Cargar productos»: escoger qué se va a hacer (cada opción es un permiso)
+  function abrirCargarProductos() {
+    const op = (perm, t, d, onclick, peligro) => puede(perm) ? `<button class="op-carga ${peligro ? 'op-peligro' : ''}" onclick="${onclick}"><b>${t}</b><span class="muted small">${d}</span></button>` : '';
+    abrirModal(`<div class="fila-sb"><span class="h2">Cargar productos</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Escoge qué quieres hacer con el Excel.</span>
+      <div class="col gap8 mt12">
+        ${op('prod_cargar', 'Actualizar productos', 'Agrega los productos nuevos y, a los que ya están, les completa o actualiza los datos que traiga el Excel. Lo que venga vacío se deja como estaba.', "abrirCargaMaestro('actualizar')")}
+        ${op('prod_reemplazar', 'Reemplazar todo', 'Los productos quedan exactamente como vienen en el Excel. Los que no vienen se desactivan (no se borran: su historial sigue guardado).', "abrirCargaMaestro('reemplazar')", true)}
+        ${op('prod_almacenes', 'Actualizar almacenes', 'Sube el código de cada producto y su almacén (sirve la MB52).', 'abrirCargaAlmProd()')}
+      </div>`);
+  }
+  function abrirCargaMaestro(modo) {
+    maeModo = modo === 'reemplazar' ? 'reemplazar' : 'actualizar';
+    if (sinPermiso(maeModo === 'reemplazar' ? 'prod_reemplazar' : 'prod_cargar')) return;
     maeTmp = null;
-    abrirModal(`<div class="fila-sb"><span class="h2 fila gap8">Cargar datos de productos ${ayudaHtml('Sube el Excel maestro con las columnas COD, Texto breve de material, Unidad medida base, Equiv Kg, Categoría, Subcategoría, Observaciones Abastecimiento, EAN 13, EAN 13, EAN 14, UM PROVEEDOR, UND / CJ, LARGO, ANCHO, ALTO y OBSERVACIONES. Los datos que vengan en el Excel se actualizan; si una celda viene vacía, se deja lo que ya tenía el producto. El nombre de los productos que ya existen no se cambia.')}</span>${btnCerrar()}</div>
+    abrirModal(`<div class="fila-sb"><span class="h2 fila gap8">${maeModo === 'reemplazar' ? 'Reemplazar todos los productos' : 'Actualizar productos'} ${ayudaHtml('Sube el Excel maestro con las columnas COD, Texto breve de material, Unidad medida base, Equiv Kg, Categoría, Subcategoría, Observaciones Abastecimiento, EAN 13, EAN 13, EAN 14, UM PROVEEDOR, UND / CJ, LARGO, ANCHO, ALTO y OBSERVACIONES. Los datos que vengan en el Excel se actualizan; si una celda viene vacía, se deja lo que ya tenía el producto. El nombre de los productos que ya existen no se cambia.')}</span>${btnCerrar()}</div>
       <label for="maeArch" class="btn btn-pri btn-xl mt12" role="button" tabindex="0">Escoger el Excel</label>
       <input id="maeArch" type="file" accept=".xlsx,.xls,.csv" class="oculto">
       <div id="maeCaja" class="mt12"></div>
@@ -8056,6 +8338,19 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         const faltanCols = [['nombre', 'Texto breve'], ['unidadMedida', 'Unidad medida base'], ['ean14', 'EAN 14'], ['undPorCaja', 'UND / CJ']].filter(([k]) => C[k] < 0).map(([, n]) => n);
         maeTmp = { archivo: f.name, filas: lista };
         $('fErr').hidden = true;
+        if (maeModo === 'reemplazar') {
+          const enArch = new Set(lista.map(o => o.codigo));
+          const fuera = ini.productos.filter(p => p.activo !== false && !enArch.has(p.id));
+          const conStock = new Set(sede.lineas.map(l => l.productoId));
+          const fueraStock = fuera.filter(p => conStock.has(p.id)).length;
+          $('maeCaja').innerHTML = `<div class="info"><b>${lista.length}</b> productos en el archivo · <b>${existen}</b> ya están · <b>${nuevos}</b> nuevos</div>
+            ${faltanCols.length ? `<span class="small txt-naranja mt8">No encontré estas columnas: ${faltanCols.map(esc).join(', ')}. Esos datos quedan vacíos.</span>` : ''}
+            <div class="alerta-fefo mt12"><b>Ojo:</b> los productos quedan exactamente como vienen en el Excel (nombre, datos y EAN; lo vacío queda vacío).
+              <b>${fuera.length}</b> producto${fuera.length === 1 ? '' : 's'} que no ${fuera.length === 1 ? 'viene' : 'vienen'} en el Excel se ${fuera.length === 1 ? 'desactiva' : 'desactivan'}${fueraStock ? ` (<b class="txt-rojo">${fueraStock} tienen producto en el plano de esta sede</b>)` : ''}: ya no salen en las listas, pero su historial sigue guardado.</div>
+            <div class="dos mt12"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+              <button id="maeOk" class="btn btn-sal-solido btn-xl" onclick="if (this.dataset.ok !== '1') { this.dataset.ok = '1'; this.textContent = '¿Seguro? Toca otra vez'; return; } guardarMaestro()">Reemplazar todo</button></div>`;
+          return;
+        }
         $('maeCaja').innerHTML = `<div class="info"><b>${lista.length}</b> productos en el archivo · <b>${existen}</b> ya están en Productos${nuevos ? ` · <span class="txt-naranja"><b>${nuevos}</b> no están</span>` : ''}<br>
             <b>${con13}</b> con EAN 13 · <b>${con14}</b> con EAN 14 (caja)</div>
           ${faltanCols.length ? `<span class="small txt-naranja mt8">No encontré estas columnas: ${faltanCols.map(esc).join(', ')}. Esos datos no se cargan.</span>` : ''}
@@ -8073,11 +8368,12 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (!b || b.disabled || !maeTmp) return;
     b.disabled = true; b.textContent = 'Cargando…';
     const reemplazarEan = !!($('maeReemp') && $('maeReemp').checked), crear = !!($('maeCrear') && $('maeCrear').checked);
-    llamar('bdCargarMaestroProductos', { filas: maeTmp.filas, reemplazarEan, crear, usuario: ses.nombre }).then(r => {
+    const reemplazarTodo = maeModo === 'reemplazar';
+    llamar('bdCargarMaestroProductos', { filas: maeTmp.filas, reemplazarEan, crear, reemplazarTodo, usuario: ses.nombre }).then(r => {
       ini.productos = r.productos; prodRefrescado();
       pitido();
       const lst = (l, n) => l.length ? `<span class="small mt8">${n} (${l.length}): ${l.slice(0, 20).map(esc).join(' · ')}${l.length > 20 ? '…' : ''}</span>` : '';
-      $('maeCaja').innerHTML = `<div class="info"><b>Listo.</b> ${plural(r.actualizados, 'producto actualizado', 'productos actualizados')}${r.creados ? ` · ${plural(r.creados, 'creado', 'creados')}` : ''}${r.sinCambios ? ` · ${plural(r.sinCambios, 'ya estaba igual', 'ya estaban iguales')}` : ''}<br>
+      $('maeCaja').innerHTML = `<div class="info"><b>Listo.</b> ${plural(r.actualizados, 'producto actualizado', 'productos actualizados')}${r.creados ? ` · ${plural(r.creados, 'creado', 'creados')}` : ''}${r.sinCambios ? ` · ${plural(r.sinCambios, 'ya estaba igual', 'ya estaban iguales')}` : ''}${r.desactivados ? ` · ${plural(r.desactivados, 'desactivado', 'desactivados')}` : ''}<br>
           ${plural(r.eanPuestos, 'EAN puesto', 'EAN puestos')}${r.eanQuitados ? ` · ${plural(r.eanQuitados, 'EAN quitado', 'EAN quitados')}` : ''}</div>
         ${lst(r.repetidos, '<b class="txt-naranja">EAN que no se pusieron porque ya son de otro producto</b>')}
         ${lst(r.malos, '<b class="txt-naranja">EAN con números de más o de menos</b>')}
@@ -9027,9 +9323,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       'Total planta': f.contado ? f.planta : '', 'Diferencia': f.contado ? f.dif : '', 'Lugares contados': [...f.lugares].join(', '),
       'Contó': f.ult ? f.ult.usuario : '', 'Fecha conteo': f.ult ? fechaHora(f.ult.fecha) : '' })),
       'Datos': [{ 'Nombre': tituloCic(c), 'Fecha': c.fecha, 'Creó': c.creadoPor, 'Estado': c.estado }] }, 'reportes');
-  }
-
-  /* ================= Productos totales: una tabla con lo que hay de cada producto en cada almacén =================
+  }/* ================= Productos totales: una tabla con lo que hay de cada producto en cada almacén =================
      Picking, calidad y bloqueado: del inventario en curso (todas las sedes). Aéreo: lo ubicado en el plano.
      El almacén de cada producto sale de la lista que se carga (un producto con dos almacenes sale en dos filas). */
   let prodAlm = null;                    // { codigo: ['2000', ...] }
@@ -9053,7 +9347,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   }
 
   function vistaProductosTotales() {
-    if (ptEd && puede('productos')) return ptEdVista();
+    if (ptEd && puede('prod_editar')) return ptEdVista();
     const listo = asegurarInvData();
     if (prodAlm === null && !vistaProductosTotales.pidiendo) {
       vistaProductosTotales.pidiendo = true;
@@ -9065,17 +9359,16 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     return `<div class="col gap12">
       <div class="fila-sb wrap-f gap8">
         <span class="h2 fila gap8">Productos totales ${ayudaHtml('Aquí ves lo que tienes de cada producto en cada almacén. Picking, calidad y bloqueado salen del inventario en curso (todas las sedes) y el aéreo es lo que está ubicado en el plano. Total = picking + aéreo + calidad + bloqueado. Almacén y pasillo: con «Usar el pasillo cargado» encendido (Configuración → Ajustes) son los cargados para esta sede; apagado, los del plano. Toca «Ver» en un producto para moverlo, darle salida, ver su historial o dónde está.')}</span>
-        <div class="fila gap8 wrap-f">
-          ${puede('salida') ? '<button class="btn btn-sec" onclick="abrirSalidasRecientes()">Deshacer una salida</button>' : ''}
-          ${puede('productos') ? `<button class="btn btn-sec" onclick="abrirCargaAlmProd()">Cargar almacenes</button>
-          <button class="btn btn-sec" onclick="abrirCargaMaestro()">Cargar datos de productos</button>` : ''}
-          ${puede('reportes') ? `<button class="btn btn-sec" onclick="descargarInventario()">Descargar inventario</button>
-          <button class="btn btn-sec" onclick="abrirSalidas()">Salidas y rotación</button>
-          <button class="btn btn-sec" onclick="pedirBitacora()">Descargar bitácora</button>` : ''}
-          ${puede('productos') ? `<button class="btn btn-sec" onclick="ptEdAbrir()">Editar productos</button>
-          <button class="btn btn-pri" onclick="formProducto(false)">+ Nuevo producto</button>` : ''}
-          <button class="btn btn-sec" onclick="invData=null; prodAlm=null; ptMemo=null; pintarApp()">Actualizar</button>
-        </div></div>
+      </div>
+      ${accionesHtml([
+        { t: 'Productos', tono: 'azul', b: [puede('productos') && accBtn('+ Nuevo producto', 'formProducto(false)', true),
+          puede('prod_editar') && accBtn('Editar productos', 'ptEdAbrir()'),
+          puedeAlguno(['prod_cargar', 'prod_reemplazar', 'prod_almacenes']) && accBtn('Cargar productos', 'abrirCargarProductos()')] },
+        { t: 'Descargar', tono: 'verde', b: [puede('reportes') && accBtn('Inventario', 'descargarInventario()'),
+          puede('reportes') && accBtn('Salidas y rotación', 'abrirSalidas()'),
+          puede('bitacora') && accBtn('Bitácora', 'pedirBitacora()')] },
+        { t: 'Corregir', tono: 'rojo', b: [puede('deshacer_salida') && accBtn('Deshacer una salida', 'abrirSalidasRecientes()')] },
+        { t: 'Pantalla', tono: 'gris', b: [accBtn('Actualizar', 'invData=null; prodAlm=null; ptMemo=null; pintarApp()')] }])}
       <div class="pt-filtros">
         <div class="pt-buscar">${campoConCamara(`<input id="prodQ" class="campo" autocomplete="off" spellcheck="false"
           placeholder="Buscar por código AFS, Nutresa, barras o nombre" value="${esc(prodFiltro)}" aria-label="Buscar producto">`, 'prodQ')}</div>
@@ -9102,7 +9395,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     ['umProveedor', 'UM proveedor', 'um'], ['categoria', 'Categoría', 'nut'], ['subcategoria', 'Subcategoría', 'nut'],
     ['largo', 'Largo', 'um'], ['ancho', 'Ancho', 'um'], ['alto', 'Alto', 'um'], ['obsAbast', 'Obs. abastecimiento', 'nombre'], ['observaciones', 'Observaciones', 'nombre']];
   function ptEdAbrir() {
-    if (sinPermiso('productos')) return;
+    if (sinPermiso('prod_editar')) return;
     ptEd = { q: prodFiltro || '', cambios: {}, ok: false };
     pagInicio('pted'); pintarApp();
   }
@@ -9277,7 +9570,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     abrirModal(`<div class="fila-sb"><span class="h2">${esc(p.nombre)}</span>${btnCerrar()}</div>
       <span class="muted small">Código ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')} · ${p.undPorCaja} und/cj${prodAlm && prodAlm[cod] ? ' · Almacén ' + prodAlm[cod].map(esc).join(', ') : ''}</span>
       <span class="small">${p.codigoBarras ? `EAN <b>${esc(p.codigoBarras)}</b>` : '<b class="txt-naranja">Sin EAN</b>'}
-        ${puede('productos') ? `<button class="link" onclick="hojaCtx = { p: prodDe('${esc(cod)}'), e: null, volver: () => abrirOpcionesProd('${esc(cod)}') }; hojaEan()">${p.codigoBarras ? 'Cambiar EAN' : '+ Agregar EAN'}</button>` : ''}</span>
+        ${puede('prod_editar') ? `<button class="link" onclick="hojaCtx = { p: prodDe('${esc(cod)}'), e: null, volver: () => abrirOpcionesProd('${esc(cod)}') }; hojaEan()">${p.codigoBarras ? 'Cambiar EAN' : '+ Agregar EAN'}</button>` : ''}</span>
       <span class="lbl mt12 fila gap8">Dónde está en ${esc(nombreSede(ses.sedeId))} ${ayudaHtml('Cada cuadro es un lugar del plano donde está este producto. Tócalo para abrir esa posición.')}</span>
       ${ls.length ? `<span class="muted small">${ls.length} lugar${ls.length === 1 ? '' : 'es'} · ${und(unds, p)}</span>
         <div class="lugares">${ls.map(l => `<button class="lugar-chip e2-${estadoDe([l])}" title="${esc(lugarTxt(l.ubicacionId))}"
@@ -9314,7 +9607,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     </div>`).join('')}</div>`;
   }
   function abrirSalidasRecientes() {
-    if (sinPermiso('salida')) return;
+    if (sinPermiso('deshacer_salida')) return;
     abrirModal(`<div class="fila-sb"><span class="h2 fila gap8">Deshacer una salida ${ayudaHtml('Aquí están las salidas de los últimos 5 días en esta sede. Si alguna fue por error, toca «Deshacer»: el producto vuelve al mismo lugar del plano, con su rótulo, vencimiento y cantidad. Cada salida se puede deshacer una sola vez.')}</span>${btnCerrar()}</div>
       <div id="ptSalidas" class="mt12"><div class="cargando">Buscando…</div></div>`);
     cargarSalidasRecientes('');
@@ -9335,7 +9628,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   // Cargar la lista de almacenes de cada producto (Excel con código y almacén; sirve la MB52)
   let almTmp = null;
   function abrirCargaAlmProd() {
-    if (sinPermiso('productos')) return;
+    if (sinPermiso('prod_almacenes')) return;
     almTmp = null;
     abrirModal(`<div class="fila-sb"><span class="h2 fila gap8">Cargar almacenes ${ayudaHtml('Sube un Excel con el código del producto y su almacén (sirve la MB52). Si un producto viene con dos almacenes, en la tabla sale una fila por cada almacén. La lista que subas reemplaza la anterior.')}</span>${btnCerrar()}</div>
       <label for="almArch" class="btn btn-pri btn-xl mt12" role="button" tabindex="0">Escoger Excel</label>
@@ -9383,9 +9676,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       pitido(); toast(`Listo: ${r.guardados} filas de almacén guardadas`, 'ok');
       pintarApp();
     }).catch(e => { b.disabled = false; b.textContent = 'Guardar'; errForm(e.message); });
-  }
-
-  /* ================= Identificador del producto (rótulo) ================= */
+  }/* ================= Identificador del producto (rótulo) ================= */
   let rotulos = null;     // últimos identificadores creados
   let sinImp = null;      // cargados sin código de barras que falta imprimir
   let ubicando = null;    // identificador escaneado que se va a poner en un espacio
@@ -9394,6 +9685,12 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
+  // Fecha de recibo que sale escrita: la de hoy. Si hoy ya se escribió otra (varios rótulos del mismo recibo), esa.
+  function reciboDefecto() {
+    const u = leerLS('ultRecibo2');
+    return u && u.dia === hoyISO() && u.fecha ? u.fecha : hoyISO();
+  }
+  function recordarRecibo(fecha) { if (fecha) guardarLS('ultRecibo2', { fecha, dia: hoyISO() }); }
   const fCorta = f => /^\d{4}-\d{2}-\d{2}$/.test(f || '') ? f.split('-').reverse().join('/') : (f || '');
 
   /* ----- Rótulos: se llenan varios seguidos (cada uno completo) y al final se elige cuáles imprimir ----- */
@@ -9627,7 +9924,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         <div id="rtTipoCaja"></div>
         <div id="rtTotal" class="total-op" aria-live="polite"></div>
         <div class="dos">
-          <div><label class="lbl" for="rtRec">Fecha de recibo</label><input id="rtRec" class="campo" type="date" value="${esc(leerLS('ultRecibo') || hoyISO())}"></div>
+          <div><label class="lbl" for="rtRec">Fecha de recibo</label><input id="rtRec" class="campo" type="date" value="${esc(reciboDefecto())}"></div>
           <div><label class="lbl" for="rtVen">Fecha de vencimiento</label><input id="rtVen" class="campo" type="date"></div>
         </div>
         <div class="resp-fijo"><span class="lbl">Responsable</span><span class="resp-nom">${esc(ses.nombre)}</span></div>
@@ -9797,7 +10094,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       if (p) {
         info.hidden = false;
         info.innerHTML = `<span class="fuerte">${esc(p.nombre)}</span>
-          <span class="muted small">Código AFS ${esc(p.id)} · Código Nutresa ${esc(p.codigoNutresa || '—')} · Embalaje ${p.undPorCaja} und x caja${p.unidadMedida ? ' · ' + esc(p.unidadMedida) : ''}</span>${eanMiniHtml(p.id)}`;
+          <span class="muted small">Código AFS ${esc(p.id)} · Código Nutresa ${esc(p.codigoNutresa || '—')} · Embalaje ${p.undPorCaja} und x caja${p.unidadMedida ? ' · ' + esc(p.unidadMedida) : ''}</span>${eanMiniHtml(p.id, 'rotular')}`;
         if (p.id !== ultimo) {
           ultimo = p.id;
           // Producto por kilo: se sugiere peso variable
@@ -10001,7 +10298,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (!datos.vencimiento) return errForm('Escribe la fecha de vencimiento.');
     if (!datos.responsable) return errForm('Elige el responsable.');
     guardarLS('ultResp', datos.responsable);
-    guardarLS('ultRecibo', datos.recibo);
+    recordarRecibo(datos.recibo);
     const n = Math.max(1, Math.min(50, Math.floor(Number($('rtN') ? $('rtN').value : 1)) || 1));
     const b = $('rtOk');
     b.disabled = true; b.textContent = n > 1 ? `Guardando 1 de ${n}…` : 'Guardando…';
@@ -10435,7 +10732,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       </div>
       ${lleno ? `<p class="error">Este espacio ya tiene ${yaHay.length} productos (${esc(yaHay.map(l => l.nombre).join(', '))}) y el máximo es ${maxEsp()}. Elige otro.</p>`
         : yaHay.length ? `<p class="muted small">En este espacio ya está: ${esc(yaHay.map(l => l.nombre).join(', '))}. Quedará junto (${yaHay.length + 1} de ${maxEsp()}).</p>` : ''}
-      ${eanMiniHtml(e.codigo)}
+      ${eanMiniHtml(e.codigo, 'plano')}
       <p id="fErr" class="error" hidden></p>
       <div class="dos mt16">
         <button class="btn btn-sec btn-xl" onclick="otroLugar()">Otro lugar</button>
@@ -10571,7 +10868,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
      El Excel trae el código de la ubicación (ej. 2000-01-02-01), el producto y la cantidad. Cada fila queda como
      un rótulo ubicado. Se escoge si solo se llenan los espacios vacíos o si se reemplaza lo que hay en esos espacios,
      y se confirma dos veces. El picking (nivel 0) no se carga aquí: se cuenta en Ingresar. */
-  const puedeCargarAereo = () => puedeAlguno(['carga_manual', 'inv_sap']);
+  const puedeCargarAereo = () => puede('cargar_aereo');
   let ca = null;   // { archivo, filas: [{ fila, ubic, espacioId, codigo, cantidad, undXCaja, vencimiento, lote, error }], modo, paso, sim }
   function abrirCargaAereo() {
     if (!puedeCargarAereo()) return toast('No tienes permiso para cargar el aéreo', 'error');
@@ -10723,12 +11020,11 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (!esp) return toast('Toca primero el espacio (por ejemplo 2A)', 'error');
     if (espacioLleno(esp.id)) return;
     const ultResp = leerLS('ultResp') || ses.nombre;
-    // Vencimiento, recibo y lote: opcionales solo para quien tiene ese permiso
-    const opc = puede('cm_sin_datos') ? ' <span class="muted small">(opcional)</span>' : '';
     abrirModal(`<div class="fila-sb"><span class="h2">Cargar en ${esc(etiqueta(esp))}</span>${btnCerrar()}</div>
-      <span class="muted small">${esc(esp.id)} · Sin código de barras: la app le crea su identificador y queda en <b>Pendientes por imprimir</b> para pegarle el rótulo después.</span>
-      <label class="lbl" for="cmProd">Producto (código AFS, Nutresa o nombre)</label>
-      <input id="cmProd" class="campo" list="dlProductos" autocomplete="off" placeholder="Escribe y elige de la lista">
+      <span class="muted small"><b class="mono-c">${esc(cu(esp.id))}</b> · Sin código de barras: la app le crea su identificador y queda en <b>Pendientes por imprimir</b> para pegarle el rótulo después.</span>
+      <label class="lbl" for="cmProd">Producto (código Atlantic, Nutresa, EAN o nombre)</label>
+      <input id="cmProd" class="campo" autocomplete="off" spellcheck="false" placeholder="Escribe y elige de la lista">
+      <div id="cmSug" class="ing-sug" role="listbox" aria-label="Productos" hidden></div>
       <div id="cmInfo" class="info" hidden></div>
       <span class="lbl">Tipo de mercancía</span>
       <div class="seg" role="group" aria-label="Tipo de mercancía">
@@ -10738,11 +11034,11 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       <div id="cmCant"></div>
       <div id="cmTotal" class="total-op" aria-live="polite"></div>
       <div class="dos">
-        <div><label class="lbl" for="cmVen">Fecha de vencimiento${opc}</label><input id="cmVen" class="campo" type="date"></div>
-        <div><label class="lbl" for="cmRec">Fecha de recibo${opc}</label><input id="cmRec" class="campo" type="date" value="${esc(leerLS('ultRecibo') || hoyISO())}"></div>
+        <div><label class="lbl" for="cmVen">Fecha de vencimiento</label><input id="cmVen" class="campo" type="date"></div>
+        <div><label class="lbl" for="cmRec">Fecha de recibo</label><input id="cmRec" class="campo" type="date" value="${esc(reciboDefecto())}"></div>
       </div>
       <div class="dos">
-        <div><label class="lbl" for="cmLote">Lote${opc}</label><input id="cmLote" class="campo" autocomplete="off"></div>
+        <div><label class="lbl" for="cmLote">Lote</label><input id="cmLote" class="campo" autocomplete="off"></div>
         <div class="resp-fijo"><span class="lbl">Responsable</span><span class="resp-nom">${esc(ses.nombre)}</span></div>
       </div>
       <p id="fErr" class="error" hidden></p>
@@ -10751,7 +11047,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const act = () => {
       const p = buscarProducto(c.value);
       $('cmInfo').hidden = !c.value.trim();
-      $('cmInfo').innerHTML = p ? `<span class="fuerte">${esc(p.nombre)}</span><span class="muted small">AFS ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')} · ${p.undPorCaja} und x caja</span>${eanMiniHtml(p.id)}`
+      $('cmInfo').innerHTML = p ? `<span class="fuerte">${esc(p.nombre)}</span><span class="muted small">Atlantic ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')} · ${p.undPorCaja} und x caja</span>${eanMiniHtml(p.id, 'plano')}`
         : '<span class="txt-rojo small">Producto no encontrado. Elígelo de la lista.</span>';
       if (p) {
         const t = (p.unidadMedida || '').toUpperCase() === 'KG' ? 'PESO' : 'NORMAL';
@@ -10761,6 +11057,8 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       calcCm();
     };
     c.addEventListener('input', act); c.addEventListener('change', act);
+    // Lista de productos propia (la del navegador se quedaba abierta después de escoger)
+    enlazarSugProd(c, $('cmSug'), null, () => act());
     c.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); act(); const s = $('cmCajas') || $('cmKg'); if (s) s.focus(); } });
     pintarCmCant();
     if (!('ontouchstart' in window)) c.focus();
@@ -10778,12 +11076,12 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     $('cmCant').innerHTML = cm.tipo === 'NORMAL'
       ? `<div class="dos mt8">
           <div><label class="lbl" for="cmUnd">Unidades por caja</label><input id="cmUnd" class="campo" type="number" inputmode="numeric" min="1" value="${p ? p.undPorCaja : ''}" oninput="this.dataset.tocado='1'"></div>
-          <div><label class="lbl" for="cmCajas">Número de cajas <span class="muted small">(opcional)</span></label><input id="cmCajas" class="campo" type="number" inputmode="numeric" min="1"></div></div>
+          <div><label class="lbl" for="cmCajas">Número de cajas</label><input id="cmCajas" class="campo" type="number" inputmode="numeric" min="1"></div></div>
         <div class="mt8"><span class="lbl"><label for="cmTot">Cantidad total en unidades</label> ${ayudaHtml('Si sabes cuántas cajas son, escríbelas y el total sale solo. Si no, escribe aquí la cantidad total.')}</span>
           <input id="cmTot" class="campo" type="number" inputmode="numeric" min="1"></div>`
       : `<div class="dos mt8">
           <div><label class="lbl" for="cmKg">Kilos en total</label><input id="cmKg" class="campo" type="number" inputmode="decimal" step="any" min="0"></div>
-          <div><label class="lbl" for="cmCavas">Cajas o cavas <span class="muted small">(opcional)</span></label><input id="cmCavas" class="campo" type="number" inputmode="numeric" min="1"></div></div>`;
+          <div><label class="lbl" for="cmCavas">Cajas o cavas</label><input id="cmCavas" class="campo" type="number" inputmode="numeric" min="1"></div></div>`;
     $('cmCant').querySelectorAll('input').forEach(i => i.addEventListener('input', calcCm));
     calcCm();
   }
@@ -10812,8 +11110,8 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (!p) return errForm('Elige el producto de la lista.');
     const d = { codigo: p.id, tipo: cm.tipo, vencimiento: $('cmVen').value, recibo: $('cmRec').value, responsable: ses.nombre,
       loteOrigen: $('cmLote').value.trim(), ubicacionId: esp.id, sedeId: ses.sedeId, usuario: ses.nombre };
-    // Vencimiento, recibo y lote: obligatorios, salvo para quien tiene el permiso «Cargar sin vencimiento, recibo ni lote»
-    if (!puede('cm_sin_datos')) {
+    // Vencimiento, recibo y lote: obligatorios para quien tiene el permiso «Pedir vencimiento, recibo y lote»
+    if (puede('cm_obligatorio')) {
       if (!d.vencimiento) { $('cmVen').focus(); return errForm('Escribe la fecha de vencimiento.'); }
       if (!d.recibo) { $('cmRec').focus(); return errForm('Escribe la fecha de recibo.'); }
       if (!d.loteOrigen) { $('cmLote').focus(); return errForm('Escribe el lote.'); }
@@ -10829,7 +11127,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       if (!(k > 0)) { $('cmKg').focus(); return errForm('Escribe los kilos.'); }
       Object.assign(d, { numCavas: n > 0 ? n : 1, pesoCava: 0, pesoEstiba: 0, pesoBascula: k });
     }
-    if (d.recibo) guardarLS('ultRecibo', d.recibo);
+    recordarRecibo(d.recibo);
     guardarLS('ultResp', d.responsable);
     const b = $('cmOk'); b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdCargarManual', d).then(r => {
@@ -10874,9 +11172,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         pintarApp();
       })
       .catch(err => { toast(err.message, 'error'); boton.disabled = false; boton.textContent = 'Poner aquí'; });
-  }
-
-  /* ================= Escanear con la cámara del celular (en vivo) =================
+  }/* ================= Escanear con la cámara del celular (en vivo) =================
    * Abre la cámara en pantalla completa y lee el código apenas lo ve, sin tomar foto.
    * Usa el lector nativo del celular (BarcodeDetector) y, si no existe, ZXing.
    * Si el navegador no deja usar la cámara en vivo, ofrece tomar foto o escribir el código.
@@ -11385,7 +11681,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       asignar ? '<button class="btn btn-ent-solido btn-xl" onclick="hojaAsignar()">Asignar en un lugar</button>' : '',
       sale && puede('mover') ? `<button class="btn btn-pri btn-xl" onclick="hojaAccion('MOVER')">Mover</button>` : '',
       sale && puede('salida') ? `<button class="btn btn-sal btn-xl" onclick="hojaAccion('SALIDA')">Salida</button>` : '',
-      prodDe(p.id) && puede('productos') ? `<button class="btn btn-sec btn-xl" onclick="hojaEan()">${p.codigoBarras ? 'Cambiar EAN' : 'Agregar EAN'}</button>` : ''
+      prodDe(p.id) && puedeEan('plano') ? `<button class="btn btn-sec btn-xl" onclick="hojaEan()">${p.codigoBarras ? 'Cambiar EAN' : 'Agregar EAN'}</button>` : ''
     ].filter(Boolean);
     abrirModal(`<div class="fila-sb"><span class="h2">${e ? 'Rótulo ' + esc(e.id) : 'Producto'}</span>${btnCerrar()}</div>
       ${est ? `<span class="mt8"><span class="tag ${est[0]}">${esc(est[1])}</span></span>` : ''}
@@ -11445,7 +11741,8 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   // EAN: foto del código del fabricante (o la pistola / escribirlo) y se guarda en el producto
   function hojaEan() {
     const p = hojaCtx && hojaCtx.p;
-    if (!p || sinPermiso('productos')) return;
+    if (!p) return;
+    if (!puedeEan('plano') && !puede('prod_editar')) return toast('No tienes permiso para agregar o cambiar el EAN. Pídeselo al administrador.', 'error');
     abrirModal(`<div class="fila-sb"><span class="h2">EAN de ${esc(p.nombre)}</span>${btnCerrar()}</div>
       <span class="muted small mt8">Escanea el código de barras que trae la caja del fabricante. Queda guardado en el código ${esc(p.id)} y desde ahí, al escanearlo, la app ya sabe qué producto es.</span>
       ${p.codigoBarras ? `<span class="small mt8">EAN actual: <b>${esc(p.codigoBarras)}</b></span>` : ''}
@@ -11515,9 +11812,9 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (!('ontouchstart' in window)) $('raTxt').focus();
   }
   // Pequeño "+ Agregar EAN" para el producto que todavía no tiene (al ubicar un rótulo, rotular o cargar sin código)
-  function eanMiniHtml(pid) {
+  function eanMiniHtml(pid, mod) {
     const p = prodDe(pid);
-    if (!p || p.codigoBarras || !puede('productos')) return '';
+    if (!p || p.codigoBarras || !puedeEan(mod)) return '';
     return `<details class="ean-mini" id="eanMiniCaja"><summary>+ Agregar EAN de este producto</summary>
       <div class="fila gap8 mt8"><input id="eanMini" data-pid="${esc(pid)}" class="campo" style="flex:1;min-width:0" inputmode="numeric" autocomplete="off" placeholder="Escanea o escribe el EAN"
         onkeydown="if (event.key === 'Enter') { event.preventDefault(); guardarEanMini('${esc(pid)}'); }">
@@ -11547,14 +11844,14 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     abrirModal(`<div class="fila-sb"><span class="h2">EAN no registrado</span>${btnCerrar()}</div>
       <span class="hoja-cod mt8">EAN <b>${esc(ean)}</b></span>
       <span class="muted small">Este código de barras no está en ningún producto.</span>
-      ${puede('productos') ? `<div class="hoja-acc mt16">
-          <button class="btn btn-pri btn-xl" onclick="hojaEanAsignar()">Ponérselo a un producto</button>
-          <button class="btn btn-sec btn-xl" onclick="formProducto(false, '${esc(ean)}')">Crear producto nuevo</button></div>`
+      ${puedeEan('plano') || puede('productos') ? `<div class="hoja-acc mt16">
+          ${puedeEan('plano') ? '<button class="btn btn-pri btn-xl" onclick="hojaEanAsignar()">Ponérselo a un producto</button>' : ''}
+          ${puede('productos') ? `<button class="btn btn-sec btn-xl" onclick="formProducto(false, '${esc(ean)}')">Crear producto nuevo</button>` : ''}</div>`
         : '<p class="small mt16">Pídele a quien maneja los productos que lo agregue.</p>'}`);
   }
   // Desde Inventario (Ingresar o Contar): escanearon un EAN que no está → escoger de qué producto es, guardarlo y seguir contando
   function eanNuevoEn(ean, volverA) {
-    if (!puede('productos')) return toast(`El EAN ${ean} no está en ningún producto. Pídele a quien maneja los productos que lo agregue, o escanea el rótulo de la caja.`, 'error');
+    if (!puedeEan(volverA === 'rcProd' ? 'recibidor' : 'inventario')) return toast(`El EAN ${ean} no está en ningún producto. Pídele a quien maneja los productos que lo agregue, o escanea el rótulo de la caja.`, 'error');
     if (!$('modal').hidden && hojaCtx && hojaCtx.ean === ean) return;   // ya está abierto
     hojaCtx = { ean, volverA };
     hojaEanAsignar();
@@ -11656,9 +11953,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
 
   function cerrarPos() { posSel = null; espSel = null; pintarApp(); }
 
-  function selEsp(id) { espSel = (id && id !== espSel) ? id : null; pintarApp(); if (espSel) proponerEnEspacio(espSel); }
-
-  /* ================= Por imprimir: la persona del PC imprime lo que llenan en planta ================= */
+  function selEsp(id) { espSel = (id && id !== espSel) ? id : null; pintarApp(); if (espSel) proponerEnEspacio(espSel); }/* ================= Por imprimir: la persona del PC imprime lo que llenan en planta ================= */
   let piLista = null;                 // rótulos que nadie ha impreso (de todos)
   const piF = { quien: '', q: '' };
   const quienHizo = e => e.creadoPor || e.responsable || 'Sin nombre';
@@ -11833,6 +12128,8 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (hay('ciclicos') && invLista && !invNuevo) invLista = null;   // otro creó un inventario
     if (vista === 'productos' && prodTab !== 'totales' && invData && hay('inv_conteos', 'inv_sap', 'inv_sap_cargas', 'inv_validaciones', 'conteo_asignaciones', 'ciclicos', ...TABLAS_SEDE))
       tareas.push(llamar('bdInventarioGeneral', ses.sedeId).then(d => { invData = d; }).catch(() => {}));
+    // Le cambiaron los permisos a alguien (puede ser a esta persona): se traen los suyos de una vez, sin recargar
+    if (hay('operarios')) revisarSesion();
     if (vista === 'usuarios' && usLista && !usEdit && !pfEdit && hay('operarios'))
       tareas.push(Promise.all([llamar('bdUsuarios', ses.token), pfFalta ? Promise.resolve(pfLista) : llamar('bdPerfiles', ses.token)])
         .then(([u, p]) => { usLista = u; pfLista = p; }).catch(() => {}));
@@ -11886,9 +12183,13 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     }).catch(() => {});
   }
 
-  setInterval(() => { if (pantalla === 'app' && vista === 'mapa') refrescar(); }, 60000);
-
-  /* ================= Vista de frente de una posición ================= */
+  setInterval(() => { if (pantalla === 'app' && vista === 'mapa') refrescar(); }, 60000);/* ================= Vista de frente de una posición ================= */
+  // Cada espacio se nombra como siempre (1A, 2B, Picking A) y al lado, pequeño, su número del código (nivel-posición: 02-01)
+  const nombreEsp = e => etiqueta(e);
+  function numEsp(e) {
+    const p = String(cuNuevo(e.id) || '').split('-');
+    return p.length >= 4 ? p.slice(2).join('-') : '';
+  }
   function vistaPosicion(conVolver) {
     if (!posSel) return panelZonas();
     const r = sede.rackPorId[posSel.rackId];
@@ -11924,13 +12225,15 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
                   <div class="fr-lados" style="flex:1">${letras.map(l => {
                     const e = esps.find(x => x.nivel === n && x.lado === l);
                     if (!e) return '<span class="fr-no">No existe</span>';
+                    const nom = nombreEsp(e);
                     if (sede.bloqueos[e.id]) return `<button class="fr-esp fr-bloq ${espSel === e.id ? 'sel' : ''}" onclick="selEsp('${esc(e.id)}')"
-                      aria-label="${esc(etiqueta(e))}: bloqueado, ${esc(sede.bloqueos[e.id])}" title="No se puede poner producto aquí"><b>${esc(etiqueta(e))}</b><span>⛔ ${esc(sede.bloqueos[e.id])}</span></button>`;
+                      aria-label="${esc(nom)}: bloqueado, ${esc(sede.bloqueos[e.id])}" title="No se puede poner producto aquí"><b>${esc(nom)}</b><span>⛔ ${esc(sede.bloqueos[e.id])}</span></button>`;
                     const ls = fefo(lineasDe(e.id));
-                    const res = !ls.length ? 'Vacío' : ls.map(l => esc(l.nombre)).join(' · ');
+                    const res = !ls.length ? 'Vacío' : ls.map(l => esc(l.productoId + ' ' + l.nombre)).join(' · ');
+                    // Con producto: el código Atlantic y el nombre, en letra más pequeña
                     return `<button class="fr-esp t-${estadoDe(ls)} ${espSel === e.id ? 'sel' : ''}" onclick="selEsp('${esc(e.id)}')"
-                      aria-label="${esc(etiqueta(e))}: ${res}"><b>${esc(etiqueta(e))}${ls.length > 1 ? ` <small class="fr-cupo">${ls.length}/${maxEsp()}</small>` : ''}</b>${
-                      ls.length > 1 ? ls.map(l => `<span class="fr-prod">${esc(l.nombre)}</span>`).join('') : `<span>${res}</span>`}</button>`;
+                      aria-label="${esc(nom)}: ${res}"><b>${esc(nom)}${numEsp(e) ? ` <small class="fr-num">${esc(numEsp(e))}</small>` : ''}${ls.length > 1 ? ` <small class="fr-cupo">${ls.length}/${maxEsp()}</small>` : ''}</b>${
+                      ls.length ? ls.map(l => `<span class="fr-prod"><b class="fr-cod">${esc(l.productoId)}</b> ${esc(l.nombre)}</span>`).join('') : '<span>Vacío</span>'}</button>`;
                   }).join('')}</div>
                 </div>`).join('')}
             </div>
@@ -11990,7 +12293,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const lista = sel ? [sel] : [...esps].sort((a, b) => b.nivel - a.nivel || a.lado.localeCompare(b.lado));
     const items = [];
     lista.forEach(e => fefo(lineasDe(e.id)).forEach(l => items.push({ l, e })));
-    let h = `<div class="fila-sb"><span class="h3">${sel ? 'En ' + esc(etiqueta(sel)) : 'Productos en esta posición'}</span>
+    let h = `<div class="fila-sb"><span class="h3">${sel ? 'En ' + esc(nombreEsp(sel)) : 'Productos en esta posición'}</span>
       ${sel ? `<button class="link" onclick="selEsp(null)">Ver todos</button>` : ''}</div>`;
     if (sel && sede.bloqueos[sel.id]) h += `<span class="txt-naranja fuerte">⛔ ${esc(etiqueta(sel))} está bloqueado (${esc(sede.bloqueos[sel.id])}): aquí no se puede poner producto.</span>`;
     else if (sel && moviendo) h += sel.id === moviendo.origenId
@@ -12015,7 +12318,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const i = sede.lineas.indexOf(l);
     return `<div class="linea">
       <div class="fila gap10 inicio">
-        <span class="chip">${esc(etiqueta(e))}</span>
+        <span class="chip">${esc(nombreEsp(e))}</span>
         <div class="col flex1 gap4">
           <span class="nombre">${esc(l.nombre)}</span>
           <span class="small">Cód. Atlantic <b>${esc(l.productoId)}</b></span>
@@ -12038,9 +12341,8 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const texto = niveles.length
       ? `${normales} ${normales === 1 ? 'nivel' : 'niveles'}${niveles.includes(0) ? ' + picking' : ''} · ${doble ? 'doble fondo (A-B-C-D)' : 'sin doble fondo (A-B)'}`
       : 'Sin niveles';
-    return `<div class="estructura col gap8">
-      <span class="h3">Estructura</span>
-      <span class="muted small">${texto}</span>
+    // Plegada: solo la ve quien tiene el permiso «Estructura de la posición», y se abre al tocarla
+    return `<details class="estructura est-det"><summary><span class="h3">Estructura</span> <span class="muted small">${texto}</span></summary><div class="col gap8 mt8">
       <div class="fila wrap-f gap8">
         <button class="btn btn-sec" onclick="pedirNivel()">+ Agregar nivel</button>
         ${niveles.length ? `<button class="btn btn-sec" onclick="quitarNivel()">− Quitar nivel de arriba</button>` : ''}
@@ -12048,7 +12350,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         ${vacia ? `<button class="btn btn-sal" onclick="desactivarPos()">Quitar esta posición</button>` : ''}
       </div>
       ${bloqueoHtml(esps)}
-    </div>`;
+    </div></details>`;
   }
 
   // Bloquear espacios que no se pueden usar (un aire acondicionado, una columna…): no deja poner producto ahí
@@ -12240,9 +12542,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       sedeId: ses.sedeId, rackId: r.id, niveles: rn.niv, picking: rn.pk,
       posiciones: rn.donde === 'pos' && posSel ? [posSel.posicion] : []
     }, rn.donde === 'pos' ? 'Niveles de la posición listos' : `Niveles de ${r.nombre} listos`, boton);
-  }
-
-  /* ================= Configuración (jefe) ================= */
+  }/* ================= Configuración (jefe) ================= */
   function vistaConfig() {
     const tabs = [['editor', 'Editor del plano'], ['lista', 'Zonas y filas'], ['codigos', 'Códigos y pasillos'], ['sedes', 'Sedes'], ['ajustes', 'Ajustes']];
     return `<div class="col gap12">
@@ -12897,7 +13197,92 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (regCargando) return;
     regCargando = true;
     llamar('bdRegionalesConfig', ses.token).then(l => { regCfg = l || []; }).catch(e => { regCfg = { error: e.message }; })
-      .finally(() => { regCargando = false; if (vista === 'config' || !ses.sedeId) pintarApp(); });
+      .finally(() => { regCargando = false; if (vista === 'config' || vista === 'usuarios' || !ses.sedeId) pintarApp(); });
+  }
+  /* ----- Logo de la empresa (solo el superadministrador): uno para modo claro y otro para modo oscuro ----- */
+  const logoNuevo = { claro: null, oscuro: null };   // null = sin cambios; '' = quitar
+  function logoCardHtml() {
+    if (!puede('superadmin')) return '';
+    const caja = (t, nom) => {
+      const ver = logoNuevo[t] !== null ? logoNuevo[t] : logoApp[t];
+      return `<div class="col gap8 logo-modo">
+        <span class="lbl" style="margin:0">${nom}</span>
+        <div class="logo-prev-fila">
+          <div class="logo-prev logo-prev-top-${t}" title="Así se ve en la barra de arriba">${ver ? `<img src="${esc(ver)}" alt="Logo ${nom} en la barra de arriba">` : '<span class="small" style="color:#C9D3DE">Sin logo</span>'}</div>
+          <div class="logo-prev logo-prev-fondo-${t}" title="Así se ve en la entrada">${ver ? `<img src="${esc(ver)}" alt="Logo ${nom} en la entrada">` : '<span class="muted small">Sin logo</span>'}</div>
+        </div>
+        <div class="fila gap8 wrap-f">
+          <label for="logoArch-${t}" class="btn btn-sec" role="button" tabindex="0">Escoger imagen</label>
+          <input id="logoArch-${t}" type="file" accept="image/png,image/jpeg,image/webp" class="oculto" onchange="leerLogo('${t}', this.files[0]); this.value=''">
+          ${logoNuevo[t] !== null ? `<button class="btn btn-pri" onclick="guardarLogo('${t}', this)">${logoNuevo[t] ? 'Guardar' : 'Sí, quitar'}</button><button class="btn btn-sec" onclick="logoNuevo['${t}']=null; pintarApp()">Cancelar</button>`
+            : logoApp[t] ? `<button class="btn btn-sec txt-rojo" onclick="logoNuevo['${t}']=''; pintarApp()">Quitar</button>` : ''}
+        </div></div>`;
+    };
+    return `<section class="card col gap12">
+      <div class="col gap4"><span class="h3">Logo de la empresa ${ayudaHtml('Sale tal como lo subes (si es PNG con fondo transparente, sin fondo) arriba a la izquierda, en la pantalla de entrada y en la pestaña del navegador, para todas las regionales. Puedes subir uno para el modo claro y otro para el modo oscuro; si subes solo uno, sale en los dos. La barra de arriba es oscura en los dos modos.')}</span>
+        <span class="muted small">Sube una imagen PNG (mejor con fondo transparente) o JPG. Se ajusta sola al tamaño. A la izquierda ves cómo queda en la barra de arriba y a la derecha en la pantalla de entrada.</span></div>
+      <div class="logo-modos">${caja('claro', 'Modo claro')}${caja('oscuro', 'Modo oscuro')}</div>
+      ${hayLogo() ? `<div class="fila gap8 wrap-f"><button class="btn btn-sec" onclick="descargarIconosApp(this)">Descargar íconos de la app</button>
+        <span class="muted small">Para la app instalada: ponlos en la carpeta public (usa el logo del modo claro).</span></div>` : ''}
+    </section>`;
+  }
+  // Achica la imagen (máximo 512 px). Un PNG queda PNG, con su fondo (o sin fondo) tal cual.
+  function leerLogo(t, f) {
+    if (!f) return;
+    if (!/^image\/(png|jpe?g|webp)$/.test(f.type)) return toast('Escoge una imagen PNG o JPG', 'error');
+    const r = new FileReader();
+    r.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 512, k = Math.min(1, max / Math.max(img.width, img.height));
+        let url = r.result;
+        if (k < 1 || url.length > 650000) {
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          url = c.toDataURL(f.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', 0.9);
+          if (url.length > 650000) url = c.toDataURL('image/jpeg', 0.85);
+        }
+        logoNuevo[t] = url; pintarApp();
+      };
+      img.onerror = () => toast('No se pudo leer la imagen', 'error');
+      img.src = r.result;
+    };
+    r.readAsDataURL(f);
+  }
+  function guardarLogo(t, b) {
+    if (b) b.disabled = true;
+    const nuevo = logoNuevo[t] || '';
+    llamar('bdGuardarLogo', { token: ses.token, tema: t, logo: nuevo }).then(() => {
+      logoApp = Object.assign({}, logoApp, { [t]: nuevo }); logoNuevo[t] = null; guardarLS('logoApp2', logoApp); ponerFavicon();
+      toast(nuevo ? `Logo del modo ${t} guardado` : `Logo del modo ${t} quitado`, 'ok'); pintarApp();
+    }).catch(e => { if (b) b.disabled = false; toast(e.message, 'error'); });
+  }
+  // Íconos para la app instalada (celular y computador): se ponen en la carpeta public del proyecto. Sin fondo.
+  async function descargarIconosApp(b) {
+    const u = logoApp.claro || logoApp.oscuro;
+    if (!u) return;
+    b.disabled = true;
+    try {
+      if (!window.JSZip) await cargarScript(JSZIP_URL);
+      const img = await new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = mal; i.src = u; });
+      const icono = (tam, margen) => {
+        const c = document.createElement('canvas'); c.width = c.height = tam;
+        const x = c.getContext('2d');
+        const libre = tam * (1 - 2 * margen), k = Math.min(libre / img.width, libre / img.height);
+        const w = img.width * k, h = img.height * k;
+        x.drawImage(img, (tam - w) / 2, (tam - h) / 2, w, h);
+        return c.toDataURL('image/png').split(',')[1];
+      };
+      const zip = new JSZip();
+      zip.file('icono-192.png', icono(192, 0.04), { base64: true });
+      zip.file('icono-512.png', icono(512, 0.04), { base64: true });
+      zip.file('icono-mask.png', icono(512, 0.18), { base64: true });   // el celular lo recorta en círculo: va con más margen
+      zip.file('apple-touch-icon.png', icono(180, 0.04), { base64: true });
+      zip.file('LEEME.txt', 'Pon estos 4 archivos en la carpeta public del proyecto (reemplazan los que hay) y vuelve a publicar la app.\r\nEn los equipos donde ya está instalada, el ícono nuevo puede tardar en salir: si no cambia, desinstálala y vuélvela a instalar.');
+      entregarArchivo(await zip.generateAsync({ type: 'blob' }), 'iconos-app.zip', 'Íconos de la app');
+    } catch (e) { toast('No se pudieron armar los íconos: ' + e.message, 'error'); }
+    b.disabled = false;
   }
   function vistaRegionales() {
     if (!puede('superadmin') || !hayRegionales()) return '';
@@ -12915,6 +13300,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         ${r.id === regionalAct() ? '<span class="tag ok">Aquí estás</span>' : !r.sedes && !r.personas ? `<button class="btn btn-sec txt-rojo" onclick="borrarRegional('${esc(r.id)}')">Eliminar</button>` : ''}
       </div>`).join('')}
       <div class="fila gap8 wrap-f mt8"><input class="campo" id="rgNueva" placeholder="Nombre de la regional nueva (ej. Cali)" style="flex:1 1 220px">
+        <input class="campo" id="rgNuevaC" placeholder="Código" aria-label="Código de la regional nueva (ej. 1500)" style="flex:0 1 140px" inputmode="numeric">
         <button class="btn btn-pri" onclick="guardarRegional(null, this)">+ Crear regional</button></div>
     </section>`;
   }
@@ -12922,10 +13308,15 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const nombre = (id ? $('rgN-' + id) : $('rgNueva')).value.trim();
     if (!nombre) return toast('Escribe el nombre de la regional', 'error');
     const r = id && (regCfg || []).find(x => x.id === id);
-    const cod = id ? $('rgC-' + id).value.trim() : '';
+    const cod = (id ? $('rgC-' + id) : $('rgNuevaC')).value.trim();
     b.disabled = true;
     const pasos = !id || nombre !== r.nombre ? llamar('bdGuardarRegional', { token: ses.token, id, nombre }) : Promise.resolve(regCfg);
-    pasos.then(l => (id && cod !== (r.codigo || '') ? llamar('bdCodigoRegional', { token: ses.token, id, codigo: cod }) : l)).then(l => {
+    pasos.then(l => {
+      // La nueva: se busca por el nombre para ponerle el código
+      const rid = id || ((l || []).find(x => sinTilde(x.nombre) === sinTilde(nombre)) || {}).id;
+      const antes = id ? r.codigo || '' : '';
+      return rid && cod !== antes ? llamar('bdCodigoRegional', { token: ses.token, id: rid, codigo: cod }) : l;
+    }).then(l => {
       regCfg = l;
       llamar('bdInicio').then(d => { ini.regionales = d.regionales || ini.regionales; pintarApp(); }).catch(() => {});
       toast(id ? 'Regional guardada' : `Regional ${nombre} creada. Para crearle sedes, sal y entra escogiendo ${nombre}.`, 'ok');
@@ -13070,7 +13461,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   }
 
   function vistaSedes() {
-    return `${vistaRegionales()}${vistaProdRegionalCard()}<section class="card col gap12">
+    return `${vistaProdRegionalCard()}<section class="card col gap12">
       <div class="col gap4"><span class="h3">Sedes${nombreRegional() ? ' de ' + esc(nombreRegional()) : ''}</span>
         <span class="muted small">Cámbiale el nombre a una sede o crea una nueva. Para dibujar el plano de una sede, ábrela (arriba, en el nombre de la sede) y usa el «Editor del plano».</span></div>
       ${ini.sedes.map(s => `<div class="fila gap8 wrap-f sede-fila">
@@ -13325,9 +13716,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     llamar('bdEliminarRack', ses.sedeId, rackId)
       .then(d => { setSede(d); cerrarModal(); toast('Rack eliminado', 'ok'); pintarApp(); })
       .catch(e => errForm(e.message));
-  }
-
-  /* ================= Ventanas ================= */
+  }/* ================= Ventanas ================= */
   function btnCerrar() {
     return `<button class="icono icono-claro" aria-label="Cerrar" onclick="cerrarModal()">${ICONOS.cerrar}</button>`;
   }
@@ -13478,8 +13867,8 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (antes.length && !forzar) {
       const a = antes[0], ea = sede.espPorId[a.ubicacionId];
       return abrirModal(`<div class="fila-sb"><span class="h2">Ojo con la rotación</span>${btnCerrar()}</div>
-        <div class="alerta-fefo mt12"><b>No saques de aquí.</b> Este lote vence el <b>${fFecha(l.vencimiento)}</b> y hay otro que vence antes:
-          <b>${esc(cu(a.ubicacionId))}</b> · lote ${esc(a.lote || '—')} · vence ${fFecha(a.vencimiento)}.</div>
+        <div class="alerta-fefo mt12"><b>No saques de aquí.</b> Este rótulo vence el <b>${fFecha(l.vencimiento)}</b> y hay otro que vence antes:
+          <b>${esc(cu(a.ubicacionId))}</b> · rótulo ${esc(a.lote || '—')} · vence ${fFecha(a.vencimiento)}.</div>
         <button class="btn btn-ent btn-xl mt12" onclick="cerrarModal(); abrirPos('${esc(ea.rackId)}', ${ea.posicion}, '${esc(a.ubicacionId)}')">Ir al que vence antes</button>
         <button class="btn btn-sec btn-xl mt8" onclick="confirmarSalida(${i}, true)">Sacar de aquí de todos modos</button>
         <span class="muted small mt8">Si lo sacas de aquí, queda registrado como salida fuera de rotación.</span>`);
@@ -13536,7 +13925,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
           const a = antes[0], ea = sede.espPorId[a.ubicacionId];
           const p = $('fErr');
           p.className = 'alerta-fefo mt12';
-          p.innerHTML = `<b>No saques de aquí.</b> Hay un lote que vence antes: <b>${esc(cu(a.ubicacionId))}</b> · lote ${esc(a.lote || '—')} · vence ${fFecha(a.vencimiento)}.
+          p.innerHTML = `<b>No saques de aquí.</b> Hay un rótulo que vence antes: <b>${esc(cu(a.ubicacionId))}</b> · rótulo ${esc(a.lote || '—')} · vence ${fFecha(a.vencimiento)}.
             <span class="fila gap8 wrap-f mt8">
               <button class="btn btn-ent" onclick="cerrarModal(); abrirPos('${esc(ea.rackId)}', ${ea.posicion}, '${esc(a.ubicacionId)}')">Ir al que vence antes</button>
               <button class="btn btn-sec" onclick="salidaDeTodosModos()">Sacar de aquí de todos modos</button></span>`;
