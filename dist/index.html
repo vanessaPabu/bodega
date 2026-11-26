@@ -30,6 +30,7 @@
     --tag-bg:#FFE2B8; --tag-tx:#7A4300; --venc-bg:#F9D6D5; --venc-tx:#8E1F1B;
     --chip-bg:#14202E; --chip-tx:#FFFFFF;
     --txt-naranja:#9A5300; --txt-rojo:#A12622;
+    --violeta:#6E4FCF;
   }
   /* ---------- Tema oscuro ---------- */
   :root[data-tema="oscuro"] {
@@ -45,6 +46,7 @@
     --tag-bg:#4A3312; --tag-tx:#FFC77A; --venc-bg:#4A1F1F; --venc-tx:#FF9C97;
     --chip-bg:#E8EDF2; --chip-tx:#0F141A;
     --txt-naranja:#FFB060; --txt-rojo:#FF8A85;
+    --violeta:#A893F2;
   }
 
   * { box-sizing: border-box; }
@@ -540,7 +542,7 @@
   .cic-progreso .us-barra-p { width: 220px; max-width: 50vw; }
   .cic-cab { border-left: 6px solid var(--pri); }
   tr.cic-pend td { background: color-mix(in srgb, var(--amar, #F9A825) 6%, transparent); }
-  /* Reconfirmación */
+  /* Reconteo */
   .cic-cab-rc { border-left-color: var(--rojo, #C62828); }
   .ra-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--borde); border-radius: 10px; background: var(--card); }
   .ra-fila.ra-ok { background: var(--seg); }
@@ -904,6 +906,96 @@
   .ing { max-width: 640px; }
   /* Ingresar: en pantallas anchas, lo último contado va al lado del formulario y tiene su propio scroll */
   .ing-lado { display: flex; flex-direction: column; gap: 12px; }
+  /* Coincidencias al escribir el producto en Ingresar (código Atlantic, Nutresa, EAN o nombre) */
+  .ing-sug { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 300px; overflow-y: auto; border: 1px solid var(--borde2); border-radius: 10px; padding: 4px; background: var(--card); }
+  .ing-sug-op { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 10px; border: 0; border-radius: 8px; background: transparent; color: var(--txt); font: inherit; cursor: pointer; min-height: 44px; }
+  .ing-sug-op:hover, .ing-sug-op:focus-visible { background: var(--pri-suave); }
+  /* Resumen del conteo (Avance y SAP) */
+
+  /* Tablero del conteo físico (Avance y SAP) */
+  .tb-min0 { min-width: 0; }
+  .tb-hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; border-top: 4px solid var(--pri); }
+  @media (max-width: 640px) { .tb-hero { grid-template-columns: 1fr; } .tb-hero-g { justify-self: center; } }
+  .tb-chip { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--pri-suave); color: var(--pri); }
+  .tb-anillo { width: 140px; height: 140px; display: block; }
+  .tb-anillo-f { fill: none; stroke: var(--seg); stroke-width: 14; }
+  .tb-anillo-v { fill: none; stroke-width: 14; stroke-linecap: round; }
+  .tb-anillo-n { font-size: 20px; font-weight: 800; fill: currentColor; }
+  .tb-anillo-s { font-size: 10px; fill: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .tb-s-azul { stroke: var(--pri); } .tb-s-verde { stroke: var(--ocupado); }
+  .tb-b-azul { background: var(--pri); } .tb-b-verde { background: var(--ocupado); } .tb-b-rojo { background: var(--vencido); }
+  .tb-b-amar { background: var(--pronto); } .tb-b-violeta { background: var(--violeta); } .tb-b-gris { background: var(--vacio); }
+  .tb-kpis3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 640px) { .tb-kpis3 { grid-template-columns: 1fr; } }
+  .tb-kpi { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 10px; background: var(--bg); border-left: 4px solid var(--borde2); min-width: 0; }
+  .tb-kpi b { font-size: 24px; line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .tb-kpi-t { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; display: flex; align-items: center; gap: 6px; }
+  .tb-kpi-s { font-size: 12px; color: var(--muted); }
+  .tb-t-verde { border-left-color: var(--ocupado); } .tb-t-verde b { color: var(--ent-tx); }
+  .tb-t-rojo { border-left-color: var(--vencido); } .tb-t-rojo b { color: var(--txt-rojo); }
+  .tb-t-naranja { border-left-color: var(--pronto); } .tb-t-naranja b { color: var(--txt-naranja); }
+  .tb-t-violeta { border-left-color: var(--violeta); } .tb-t-violeta b { color: var(--violeta); }
+  .tb-apil { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: var(--seg); }
+  .tb-apil i { display: block; height: 100%; }
+  .tb-ley { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+  .tb-ley span { display: inline-flex; align-items: center; gap: 6px; }
+  .tb-ley i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+  .tb-cal { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: start; }
+  @media (max-width: 640px) { .tb-cal { grid-template-columns: 1fr; } }
+  .tb-cal-g { display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 160px; justify-self: center; }
+  .tb-centro { text-align: center; display: flex; align-items: center; gap: 4px; }
+  .tb-acc { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 480px) { .tb-acc { grid-template-columns: 1fr; } }
+  .tb-bal { display: flex; flex-direction: column; gap: 8px; }
+  .tb-bal-l { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+  .tb-bal-x { height: 14px; background: var(--seg); border-radius: 7px; overflow: hidden; display: flex; }
+  .tb-bal-x.izq { justify-content: flex-end; }
+  .tb-bal-x i { display: block; height: 100%; }
+  .tb-pista { flex: 1; min-width: 60px; height: 10px; background: var(--seg); border-radius: 5px; overflow: hidden; }
+  .tb-pista i { display: block; height: 100%; }
+  .tb-fila-b { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .tb-alm td:nth-child(2) { min-width: 150px; }
+  .tb-est { display: flex; flex-direction: column; gap: 12px; }
+  .tb-est-f { display: flex; flex-direction: column; gap: 4px; }
+  .tb-det summary { cursor: pointer; color: var(--pri); font-weight: 600; }
+  .tb-div { display: flex; flex-direction: column; }
+  .tb-div-f { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); grid-template-areas: "n v" "x x"; gap: 2px 10px; padding: 6px 4px; border: 0; border-bottom: 1px solid var(--borde); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .tb-div-f:hover { background: var(--pri-suave); }
+  .tb-div-n { grid-area: n; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tb-div-v { grid-area: v; font-size: 13px; font-weight: 700; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tb-div-x { grid-area: x; position: relative; height: 10px; background: linear-gradient(var(--borde2), var(--borde2)) center / 1px 100% no-repeat; }
+  .tb-div-x i { position: absolute; top: 1px; bottom: 1px; border-radius: 3px; }
+  .av-res { gap: 10px; }
+  .av-sec { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-top: 6px; }
+  .av-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 900px) { .av-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .av-kpi { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--borde); border-radius: 10px; padding: 10px 12px; min-width: 0; background: var(--card); }
+  .av-kpi b { font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .av-kpi-t { font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .av-kpi.txt-verde b { color: var(--ent-tx); } .av-kpi.txt-rojo b { color: var(--txt-rojo); } .av-kpi.txt-naranja b { color: var(--txt-naranja); }
+  .av-neg { background: var(--sal-bg); border-color: var(--sal-bd); }
+  .av-pt { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  .pt-verde { background: var(--ocupado); } .pt-rojo { background: var(--vencido); } .pt-amar { background: var(--pronto); } .pt-azul { background: var(--pri); } .pt-gris { background: var(--borde2); }
+  .av-barra { display: inline-block; width: 100%; min-width: 70px; height: 8px; border-radius: 4px; background: var(--seg); overflow: hidden; vertical-align: middle; }
+  .av-barra i { display: block; height: 100%; background: var(--ocupado); }
+  .av-tabla td.av-pend { background: var(--t-pronto); } .av-tabla td.av-dif { background: var(--t-vencido); }
+  .av-tabla tr.av-total td { font-weight: 700; border-top: 2px solid var(--borde2); }
+  .av-tabla tr.av-sub td { color: var(--muted); font-style: italic; }
+  .av-tabla tbody tr[onclick] { cursor: pointer; }
+  .av-dos { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  @media (max-width: 1100px) { .av-dos { grid-template-columns: 1fr; } }
+  /* Capturas del inventario (aéreo y picking) */
+  .cap-barra { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; }
+  .cap-fila { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+  /* Corregir lo contado: producto, almacén y cantidad en una sola fila */
+  .ec-form { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; align-items: start; }
+  @media (max-width: 760px) { .ec-form { grid-template-columns: 1fr; } }
+  .ec-prod { position: relative; min-width: 0; }
+  .ec-mas summary { cursor: pointer; color: var(--pri); }
+  /* Detalle de quién contó */
+  .dc-personas { display: flex; flex-wrap: wrap; gap: 6px; }
+  .dc-persona { background: var(--pri-suave); border-radius: 999px; padding: 4px 10px; font-size: 14px; }
+  .dc-anulado td { text-decoration: line-through; color: var(--muted); }
   .ing-recs-l { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
   @media (min-width: 900px) {
     .ing-lado { display: grid; grid-template-columns: minmax(0, 640px) minmax(280px, 1fr); align-items: start; }
@@ -922,7 +1014,7 @@
   .th-ord.on { color: #1a5fd0; }
   .inv-sede { font-weight: 400; font-size: 11px; opacity: .75; white-space: nowrap; }
   .inv-tabla td.g-ae, .inv-tabla th.g-ae { background: rgba(232,163,61,.07); }
-  /* Columnas de reconfirmación (al lado de cada una) */
+  /* Columnas de reconteo (al lado de cada una) */
   .inv-tabla td.g-rc, .inv-tabla th.g-rc { background: rgba(197,90,17,.10); }
   /* Recibidor: partes agrupadas por lote y vencimiento */
   .rb-lote { border: 1px solid var(--borde, #ddd); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
@@ -949,7 +1041,7 @@
     .tabla.cp-av { min-width: 0; } .tabla.cp-av th, .tabla.cp-av td { padding: 6px 4px; }
     .tabla.cp-av .cp-barra { max-width: 50px; min-width: 0; }
   }
-  /* Reconfirmación de inventario: lista para contar */
+  /* Reconteo de inventario: lista para contar */
   .rc-filtros { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
   .rc-filtros > div { min-width: 0; } .rc-filtros .campo { width: 100%; }
   @media (max-width: 760px) { .inv-sap-info { display: none !important; } }   /* en el celular solo se cuenta */
@@ -1137,7 +1229,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-tAyVPD0K.js"></script>
+  <script type="module" crossorigin src="./assets/index-BNT3ftc9.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>

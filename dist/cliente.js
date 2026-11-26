@@ -266,7 +266,8 @@
       ['mover', 'Mover producto', 'Cambiar producto de un lugar a otro'],
       ['salida', 'Dar salida', 'Sacar producto de la bodega'],
       ['estructura', 'Niveles y posiciones', 'Agregar o quitar niveles y posiciones del plano'],
-      ['carga_manual', 'Cargar sin código de barras', 'Registrar a mano lo que ya está en la bodega con su rótulo viejo']] },
+      ['carga_manual', 'Cargar sin código de barras', 'Registrar a mano lo que ya está en la bodega con su rótulo viejo'],
+      ['cm_sin_datos', 'Cargar sin vencimiento, recibo ni lote', 'En «Cargar sin código de barras» puede dejar vacíos la fecha de vencimiento, la fecha de recibo y el lote (por ejemplo, para registrar el aéreo durante el inventario)']] },
     { k: 'inventario', t: 'Inventario', d: 'Conteos de planta contra SAP', p: [
       ['inventario', 'Ver inventario contra SAP', 'La tabla de SAP contra lo que hay en planta'],
       ['inv_contar', 'Registrar conteos', 'Llenar picking, calidad y bloqueado'],
@@ -295,7 +296,8 @@
       ['inv_excel', 'Descargar Excel', 'Bajar el inventario del recibo en Excel']] },
     { k: 'admin', t: 'Administración', d: 'Plano y seguridad', p: [
       ['config', 'Configuración del plano', 'Zonas y filas'],
-      ['usuarios', 'Usuarios y permisos', 'Crear usuarios, asignar PIN y permisos']] }
+      ['usuarios', 'Usuarios y permisos', 'Crear usuarios, asignar PIN y permisos'],
+      ['superadmin', 'Superadministrador', 'Entra a todas las regionales, crea regionales y administra los usuarios de cada una. Solo otro superadministrador lo da']] }
   ];
   const PERMISOS = MODULOS.flatMap(m => m.p);
   const PERM_RC = ['rc_facturas', 'rc_lista', 'recibir', 'rc_corregir', 'rc_fotos', 'rc_cerrar'];
@@ -338,7 +340,24 @@
   }
   const lineasDe = id => (sede.porUbic[id] || []);
   const espaciosDe = (rackId, p) => (sede.espPorPos[rackId + '|' + p] || []);
-  const nombreSede = id => { const s = ini.sedes.find(x => x.id === id); return s ? s.nombre : id; };
+  const nombreSede = id => { const s = (ini.sedesTodas || ini.sedes).find(x => x.id === id); return s ? s.nombre : id; };
+  // Regional (ciudad) escogida antes de entrar: arriba solo se ven las sedes de esa regional
+  const regionalAct = () => (window.regionalActual ? window.regionalActual() : '');
+  const hayRegionales = () => !!(ini.regionales && ini.regionales.length);
+  const nombreRegional = id => { const r = (ini.regionales || []).find(x => x.id === (id || regionalAct())); return r ? r.nombre : ''; };
+  function aplicarRegional() {
+    if (!ini.sedesTodas) ini.sedesTodas = ini.sedes;
+    const r = regionalAct();
+    // Antes del script 42 las sedes no tienen regional: se ven todas
+    ini.sedes = hayRegionales() && ini.sedesTodas.some(s => s.regionalId) ? ini.sedesTodas.filter(s => s.regionalId === r) : ini.sedesTodas;
+    if (!ini.sedes.some(s => s.id === lg.sedeId)) lg.sedeId = ini.sedes[0] ? ini.sedes[0].id : '';
+  }
+  function cambiarRegional(id) {
+    if (window.ponerRegional) window.ponerRegional(id);
+    aplicarRegional();
+    guardarLS('sesion', { perfil: lg.perfil, nombre: lg.nombre, sedeId: lg.sedeId });
+    pinError = ''; pintarPin();
+  }
   const coincide = id => {
     const q = busqueda.trim().toLowerCase();
     return !q || lineasDe(id).some(l => (l.nombre + ' ' + l.productoId + ' ' + l.lote).toLowerCase().includes(q));
@@ -421,23 +440,34 @@
   llamar('bdInicio')
     .then(d => {
       ini = d;
+      ini.regionales = d.regionales || [];
+      ini.sedesTodas = d.sedes;
+      if (hayRegionales() && !ini.regionales.some(r => r.id === regionalAct()) && window.ponerRegional) window.ponerRegional(ini.regionales.length === 1 ? ini.regionales[0].id : '');
+      aplicarRegional();
       $('dlProductos').innerHTML = d.productos.map(p => `<option value="${esc(p.id + ' · ' + p.nombre)}">`).join('');
       const tok = leerLS('token');
       if (!tok) return pintar();
       $('app').innerHTML = '<div class="cargando" style="padding:40px">Entrando…</div>';
       llamar('bdSesion', tok)
-        .then(r => { if (r && r.ok) return iniciarSesion(r); quitarToken(); pintar(); })
+        .then(r => { if (r && r.ok) return iniciarSesion(r); if (r && r.error) pinError = r.error; quitarToken(); pintar(); })
         .catch(() => pintar());
     })
     .catch(e => { $('app').innerHTML = `<div class="wrap"><p class="error">No se pudo cargar: ${esc(e.message)}</p></div>`; });
 
   /* ================= Pantalla de ingreso ================= */
   function pintarLogin() {
-    if (!ini.sedes.some(s => s.id === lg.sedeId) && ini.sedes[0]) lg.sedeId = ini.sedes[0].id;
+    aplicarRegional();
+    const reg = regionalAct();
     $('app').innerHTML = `
     <div class="login"><div class="login-caja login-simple">
       <div class="fila-sb"><div class="logo">${ICONOS.casa}</div>${btnTema(true)}</div>
-      <div class="col gap4"><h1 class="h1">Bodega</h1><span class="muted">Entra con tu cédula y tu PIN</span></div>
+      <div class="col gap4"><h1 class="h1">Bodega</h1><span class="muted">${hayRegionales() ? 'Escoge la regional y entra con tu cédula y tu PIN' : 'Entra con tu cédula y tu PIN'}</span></div>
+      ${hayRegionales() ? `<div>
+        <label class="lbl" for="lgReg">Regional ${ayudaHtml('Es la ciudad a la que te conectas. Adentro, arriba, solo verás las sedes de esta regional. Este equipo recuerda la última que escogiste.')}</label>
+        <select id="lgReg" class="campo campo-grande" onchange="cambiarRegional(this.value)">
+          ${reg ? '' : '<option value="" selected>Escoge la regional</option>'}
+          ${ini.regionales.map(r => `<option value="${esc(r.id)}" ${r.id === reg ? 'selected' : ''}>${esc(r.nombre)}</option>`).join('')}
+        </select></div>` : ''}
 
       <div class="ced-caja">
         <label class="lbl" for="lgCed">Cédula</label>
@@ -569,7 +599,8 @@
     const cedula = ($('lgCed').value || '').replace(/\D/g, '');
     if ($('lgPin')) pinTxt = pinValor('lgPin');
     if (cedula.length < 5) { pinError = 'Escribe tu número de cédula'; pintarPin(); return $('lgCed').focus(); }
-    if (!lg.sedeId) return toast('No hay sedes creadas', 'error');
+    if (hayRegionales() && !regionalAct()) { pinError = 'Escoge la regional a la que te vas a conectar'; pintarPin(); return $('lgReg') && $('lgReg').focus(); }
+    if (!lg.sedeId && !hayRegionales()) return toast('No hay sedes creadas', 'error');
     if (pinTxt.length !== 4) { pinError = 'Escribe tu PIN de 4 números'; return pintarPin(); }
     if (entrando) return;
     // Primera vez del sistema: el PIN se escribe dos veces
@@ -578,7 +609,7 @@
     }
     entrando = true;
     const b = $('btnEntrar'); b.disabled = true; b.textContent = 'Entrando…';
-    llamar('bdLogin', { cedula, pin: pinTxt, sedeId: lg.sedeId, confirmar: !!pinPrimero })
+    llamar('bdLogin', { cedula, pin: pinTxt, sedeId: lg.sedeId || null, regionalId: regionalAct(), confirmar: !!pinPrimero })
       .then(r => {
         entrando = false;
         if (r.primerPin) { pinPrimero = pinTxt; pinTxt = ''; b.disabled = false; b.textContent = 'Entrar'; return pintarPin(); }
@@ -593,11 +624,14 @@
   // Sesión lista (al entrar con PIN o al recargar con el token guardado)
   function iniciarSesion(r) {
     guardarLS('token', r.token);
-    if (!ini.sedes.some(s => s.id === lg.sedeId) && ini.sedes[0]) lg.sedeId = ini.sedes[0].id;
-    ses = { nombre: r.nombre, perfil: r.rol, sedeId: lg.sedeId, permisos: r.permisos || [], token: r.token, id: r.id };
+    aplicarRegional();
+    ses = { nombre: r.nombre, perfil: r.rol, sedeId: lg.sedeId, permisos: r.permisos || [], token: r.token, id: r.id, regionalId: regionalAct() };
     lg.perfil = r.rol; lg.nombre = r.nombre;
     guardarLS('sesion', { perfil: lg.perfil, nombre: lg.nombre, sedeId: lg.sedeId });
     posSel = null; espSel = null; busqueda = ''; vista = 'mapa';
+    cargarProdRegional();
+    // Regional sin sedes todavía: se entra igual (para crearlas en Configuración → Sedes)
+    if (!ses.sedeId) { sede = null; pantalla = 'app'; pintar(); iniciarVivo(); return Promise.resolve(); }
     return llamar('bdSede', ses.sedeId)
       .then(d => { setSede(d); pantalla = 'app'; pintar(); iniciarVivo(); })
       .catch(e => { toast(e.message, 'error'); ses = null; pantalla = 'login'; pintar(); });
@@ -616,7 +650,7 @@
   function revisarSesion() {
     if (pantalla !== 'app' || !ses || !ses.token) return;
     llamar('bdSesion', ses.token).then(r => {
-      if (!r || !r.ok) { toast('Tu sesión terminó. Vuelve a entrar con tu PIN.', 'error'); return salir(); }
+      if (!r || !r.ok) { toast((r && r.error) || 'Tu sesión terminó. Vuelve a entrar con tu PIN.', 'error'); return salir(); }
       const antes = (ses.permisos || []).join();
       ses.permisos = r.permisos || []; ses.perfil = r.rol; ses.nombre = r.nombre;
       if (antes !== ses.permisos.join() && $('modal').hidden) pintarApp();
@@ -647,8 +681,8 @@
     <header class="top">
       <div class="col flex1">${ini.sedes.length > 1
           ? `<button class="t1 sede-top" onclick="elegirSede()" aria-label="Cambiar de sede">${esc(nombreSede(ses.sedeId))} <span aria-hidden="true">▾</span></button>`
-          : `<span class="t1">${esc(nombreSede(ses.sedeId))}</span>`}
-        <span class="t2">${esc(ses.nombre)} · ${esJefe() ? 'Jefe' : 'Operario'}</span></div>
+          : `<span class="t1">${ses.sedeId ? esc(nombreSede(ses.sedeId)) : 'Sin sedes'}</span>`}
+        <span class="t2">${esc(ses.nombre)} · ${esJefe() ? 'Jefe' : 'Operario'}${nombreRegional() ? ' · ' + esc(nombreRegional()) : ''}</span></div>
       <nav class="nav" aria-label="Secciones">
         <button class="${vista === 'mapa' ? 'on' : ''}" onclick="irVista('mapa')">Plano</button>
         <button class="${vista === 'productos' ? 'on' : ''}" onclick="irVista('productos')">Productos</button>
@@ -662,7 +696,9 @@
 
     let cuerpo;
     if (!vistaPermitida(vista)) vista = 'mapa';
-    if (vista === 'usuarios') {
+    if (!ses.sedeId && vista !== 'usuarios') {
+      cuerpo = `<main class="wrap wrap-ancho">${vistaSinSedes()}</main>`;
+    } else if (vista === 'usuarios') {
       cuerpo = `<main class="wrap wrap-ancho">${vistaUsuarios()}</main>`;
     } else if (vista === 'config') {
       cuerpo = `<main class="wrap wrap-ancho">${vistaConfig()}</main>`;
@@ -686,9 +722,9 @@
     enlazarRecibidor();
     enlazarCalidad();
     enlazarUsuarios();
-    enlazarInventario();
-    if (vista === 'config' && cfgTab === 'editor') enlazarEditor();
-    ajustarPlano();
+    if (sede) enlazarInventario();
+    if (vista === 'config' && cfgTab === 'editor' && sede) enlazarEditor();
+    if (sede) ajustarPlano();
     dibujarCodigos($('app'));
     if (misma) {
       internos.forEach(([sel, t, l]) => { const el = document.querySelector(sel); if (el) { el.scrollTop = t; el.scrollLeft = l; } });
@@ -754,6 +790,7 @@
     const solo = $('bpSolo').checked;
     let lista = ini.productos.filter(p => {
       if (solo && !bpTotales[p.id]) return false;
+      if (!bpTotales[p.id] && !prodDeMiRegional(p)) return false;   // de otra regional (y no está en esta bodega)
       if (!palabras.length) return true;
       const t = sinTilde(p.id + ' ' + p.codigoNutresa + ' ' + p.codigoBarras + ' ' + p.nombre);
       return palabras.every(w => t.includes(w));
@@ -1244,7 +1281,7 @@
   }
 
   /* ================= Historial (bitácora) de un producto ================= */
-  const TIPOS = { ENTRADA: 'Ingreso', SALIDA: 'Salida', 'TRASLADO-SALIDA': 'Sale (traslado)', 'TRASLADO-ENTRADA': 'Llega (traslado)', AJUSTE: 'Corregido en reconfirmación' };
+  const TIPOS = { ENTRADA: 'Ingreso', SALIDA: 'Salida', 'TRASLADO-SALIDA': 'Sale (traslado)', 'TRASLADO-ENTRADA': 'Llega (traslado)', AJUSTE: 'Corregido en reconteo' };
 
   // Mismo orden en que pasó: en un traslado, primero sale y luego llega
   function ordenMov(lista) {
@@ -2759,6 +2796,7 @@
 
   /* ================= USUARIOS Y PERMISOS (administrador) ================= */
   let usLista = null;            // usuarios cargados
+  let usRegs = {};               // regionales de cada usuario: { id: ['BAQ', …] }
   let pfLista = null;            // perfiles (paquetes de permisos)
   let pfFalta = false;           // todavía no se corrió el script 21
   let usCargando = false;
@@ -2781,8 +2819,9 @@
   function cargarUsuarios() {
     if (usCargando) return;
     usCargando = true;
-    Promise.all([llamar('bdUsuarios', ses.token), llamar('bdPerfiles', ses.token).then(l => { pfFalta = false; return l; }).catch(() => { pfFalta = true; return []; })])
-      .then(([u, p]) => { usLista = u; pfLista = p; })
+    Promise.all([llamar('bdUsuarios', ses.token), llamar('bdPerfiles', ses.token).then(l => { pfFalta = false; return l; }).catch(() => { pfFalta = true; return []; }),
+      llamar('bdRegionalesUsuarios', ses.token).catch(() => ({}))])
+      .then(([u, p, rg]) => { usLista = u; pfLista = p; usRegs = rg || {}; })
       .catch(e => { usLista = []; pfLista = []; toast(e.message, 'error'); })
       .finally(() => { usCargando = false; if (vista === 'usuarios') pintarApp(); });
   }
@@ -2796,6 +2835,7 @@
       <div class="fila-sb wrap-f gap12">
         <div class="col gap4"><span class="h2">Usuarios y permisos</span>
           <span class="muted small">${usTab === 'perfiles' ? 'Un perfil es un paquete de permisos: lo armas una vez y se lo pones a muchas personas.'
+            : hayRegionales() ? `Solo las personas de ${esc(nombreRegional() || 'esta regional')}. Cada una entra con su cédula y su PIN y lo que puede hacer lo da su perfil.`
             : 'Cada persona entra con su cédula y su PIN. Lo que puede hacer lo da su perfil.'}</span></div>
         <span class="fila gap8 wrap-f">${usTab === 'perfiles'
           ? (pfFalta ? '' : '<button class="btn btn-pri" onclick="editarPerfil()">+ Nuevo perfil</button>')
@@ -3011,8 +3051,10 @@
   function editarUsuario(id) {
     const u = id ? usLista.find(x => x.id === id) : null;
     const pi = perfilInicial();
-    usEdit = u ? { id: u.id, nombre: u.nombre, cedula: u.cedula || '', cargo: u.cargo || '', rol: u.rol, activo: u.activo, permisos: [...(u.permisos || [])], perfilId: perfilDe(u.perfilId) ? u.perfilId : '', tienePin: u.tienePin, bloqueado: u.bloqueado, ultimaVez: u.ultimaVez }
-      : { id: '', nombre: '', cedula: '', cargo: '', rol: pi ? pi.rol : 'OPERARIO', activo: true, permisos: pi ? [...pi.permisos] : [...PERM_OPERARIO], perfilId: pi ? pi.id : '', tienePin: false };
+    usEdit = u ? { id: u.id, nombre: u.nombre, cedula: u.cedula || '', cargo: u.cargo || '', rol: u.rol, activo: u.activo, permisos: [...(u.permisos || [])], perfilId: perfilDe(u.perfilId) ? u.perfilId : '', tienePin: u.tienePin, bloqueado: u.bloqueado, ultimaVez: u.ultimaVez,
+        regionales: [...(usRegs[u.id] || [])] }
+      : { id: '', nombre: '', cedula: '', cargo: '', rol: pi ? pi.rol : 'OPERARIO', activo: true, permisos: pi ? [...pi.permisos] : [...PERM_OPERARIO], perfilId: pi ? pi.id : '', tienePin: false ,
+        regionales: regionalAct() ? [regionalAct()] : [] };
     usAbiertos = new Set();
     pintarApp();
     window.scrollTo(0, 0);
@@ -3071,6 +3113,10 @@
             <span class="col gap4"><b>Activo</b><span class="muted small">${yo ? 'No te puedes desactivar a ti mismo' : 'Si lo apagas, no puede entrar a la app'}</span></span>
             <span class="switch"><input type="checkbox" id="usAct" ${u.activo ? 'checked' : ''} ${yo ? 'disabled' : ''} onchange="usEdit.activo=this.checked"><span></span></span>
           </label>
+          ${!hayRegionales() ? '' : puede('superadmin') ? `<div><span class="lbl">Regionales donde trabaja ${ayudaHtml('Marca las ciudades donde trabaja esta persona. Solo la ven y la administran en esas regionales. Si le quitas esta regional, desaparece de esta lista.')}</span>
+            <div class="cic-sedes">${ini.regionales.map(r => `<label class="cic-sede-op"><input type="checkbox" ${u.regionales.indexOf(r.id) >= 0 ? 'checked' : ''}
+              onchange="usRegional('${esc(r.id)}', this.checked)"> ${esc(r.nombre)}</label>`).join('')}</div></div>`
+            : `<div><span class="lbl">Regional</span><span>${esc(nombreRegional() || '—')} ${ayudaHtml('Las personas que creas quedan en la regional con la que entraste. Para pasar a alguien a otra regional, pídeselo al superadministrador.')}</span></div>`}
         </section>
         <section class="card col gap12">
           <div class="fila-sb wrap-f gap8"><span class="h3">Permisos</span>
@@ -3094,10 +3140,14 @@
   // ¿Se le puede quitar "usuarios"? No, si es uno mismo o su propio perfil
   const usuariosFijo = () => pfEdit ? (!!pfEdit.id && pfEdit.id === miPerfilId()) : usEdit.id === ses.id;
 
+  // «Superadministrador» no va en perfiles y solo lo ve (y lo da) el superadministrador
+  const verSuper = () => !pfEdit && puede('superadmin');
+  const permsMod = m => m.p.filter(p => p[0] !== 'superadmin' || verSuper());
   function acordeonPermisos() {
     const u = permEd(), fijoU = usuariosFijo();
     return `<div class="acc-lista">${MODULOS.map(m => {
-      const n = m.p.filter(p => u.permisos.includes(p[0])).length;
+      const mp = permsMod(m);
+      const n = mp.filter(p => u.permisos.includes(p[0])).length;
       const abierto = usAbiertos.has(m.k);
       return `<div class="acc ${abierto ? 'abierto' : ''}">
         <div class="acc-cab">
@@ -3105,11 +3155,11 @@
             <span class="acc-flecha" aria-hidden="true">›</span>
             <span class="col gap4" style="min-width:0"><b>${m.t}</b><span class="muted small">${m.d}</span></span>
           </button>
-          <span class="acc-n ${n === m.p.length ? 'todo' : n ? 'algo' : ''}">${n}/${m.p.length}</span>
-          <span class="switch" title="Todo el módulo"><input type="checkbox" class="usMod" data-m="${m.k}" data-n="${n}" data-t="${m.p.length}"
-            ${n === m.p.length ? 'checked' : ''} onchange="usModulo('${m.k}', this.checked)" aria-label="Todo el módulo ${m.t}"><span></span></span>
+          <span class="acc-n ${n === mp.length ? 'todo' : n ? 'algo' : ''}">${n}/${mp.length}</span>
+          <span class="switch" title="Todo el módulo"><input type="checkbox" class="usMod" data-m="${m.k}" data-n="${n}" data-t="${mp.length}"
+            ${n === mp.length ? 'checked' : ''} onchange="usModulo('${m.k}', this.checked)" aria-label="Todo el módulo ${m.t}"><span></span></span>
         </div>
-        <div class="acc-panel" id="acc-${m.k}" ${abierto ? '' : 'hidden'}>${m.p.map(([k, t, d]) => {
+        <div class="acc-panel" id="acc-${m.k}" ${abierto ? '' : 'hidden'}>${mp.map(([k, t, d]) => {
           const fijo = fijoU && k === 'usuarios';
           return `<label class="perm-fila ${fijo ? 'fijo' : ''}">
             <span class="col gap4"><b>${t}</b><span class="muted small">${d}${fijo ? (pfEdit ? ' · es tu perfil, no se lo puedes quitar' : ' · no te lo puedes quitar') : ''}</span></span>
@@ -3148,20 +3198,27 @@
   }
   function usModulo(mk, on) {
     const u = permEd();
-    const ks = MODULOS.find(m => m.k === mk).p.map(p => p[0]);
+    const ks = permsMod(MODULOS.find(m => m.k === mk)).map(p => p[0]);
     u.permisos = u.permisos.filter(x => !ks.includes(x));
     if (on) u.permisos.push(...ks);
     usAbiertos.add(mk);
     repintarPermisos();
   }
+  function usRegional(id, on) {
+    const l = usEdit.regionales.filter(x => x !== id);
+    if (on) l.push(id);
+    usEdit.regionales = l;
+  }
   function usPreset(cual) {
-    permEd().permisos = cual === 'todos' ? PERMISOS.map(p => p[0]) : cual === 'operario' ? [...PERM_OPERARIO] : [];
+    // «Superadministrador» no entra con «Todos»: se marca a mano
+    const yaSuper = (permEd().permisos || []).indexOf('superadmin') >= 0;
+    permEd().permisos = cual === 'todos' ? PERMISOS.map(p => p[0]).filter(k => k !== 'superadmin' || yaSuper) : cual === 'operario' ? [...PERM_OPERARIO] : [];
     repintarPermisos();
   }
   function usRol(r) {
     if (usEdit.rol === r) return;
     usEdit.rol = r;
-    usEdit.permisos = r === 'JEFE' ? PERMISOS.map(p => p[0]) : [...PERM_OPERARIO];
+    usEdit.permisos = r === 'JEFE' ? PERMISOS.map(p => p[0]).filter(k => k !== 'superadmin' || usEdit.permisos.indexOf('superadmin') >= 0) : [...PERM_OPERARIO];
     const pin = pinValor('usPin');
     pintarApp();
     pinPoner('usPin', pin);
@@ -3278,7 +3335,7 @@
 
   function guardarListaUsuarios() {
     if (!usCarga || !usCarga.filas.length) return;
-    const todos = PERMISOS.map(p => p[0]).filter(k => k !== 'usuarios');
+    const todos = PERMISOS.map(p => p[0]).filter(k => k !== 'usuarios' && k !== 'superadmin');
     const filas = usCarga.filas.map(f => {
       const p = !pfFalta ? perfilCarga(f) : null;
       return p ? { cedula: f.cedula, nombre: f.nombre, cargo: f.cargo, rol: p.rol, permisos: p.permisos, perfilId: p.id }
@@ -3289,6 +3346,8 @@
       usLista = r.usuarios;
       if (!pfFalta) llamar('bdPerfiles', ses.token).then(p => { pfLista = p; }).catch(() => {});
       llamar('bdInicio').then(d => { ini.operarios = d.operarios; }).catch(() => {});
+      // Los nuevos quedan en la regional con la que entraste (lo hace el servidor)
+      llamar('bdRegionalesUsuarios', ses.token).then(rg => { usRegs = rg || {}; }).catch(() => {});
       abrirModal(`<div class="fila-sb"><span class="h2">Lista cargada</span>${btnCerrar()}</div>
         <div class="inv-res mt12">
           <div><span class="muted small">Creados</span><b class="txt-verde">${r.creados}</b></div>
@@ -3312,7 +3371,16 @@
     const b = $('usOk'); b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdGuardarUsuario', { token: ses.token, id: u.id, nombre: u.nombre.trim(), cedula: u.cedula, cargo: (u.cargo || '').trim(), rol: u.rol, activo: u.activo, permisos: u.permisos, perfilId: u.perfilId || null, pin })
       .then(l => {
+        // La persona queda en la regional con la que entraste (eso lo hace el servidor). Solo el superadministrador le cambia las regionales.
+        const nuevo = u.id || (l.find(x => String(x.cedula) === String(u.cedula)) || {}).id;
+        if (!nuevo || !puede('superadmin') || !hayRegionales()) return l;
+        return llamar('bdGuardarRegionalesUsuario', { token: ses.token, id: nuevo, regionales: u.regionales })
+          .then(() => llamar('bdUsuarios', ses.token))   // si le quitaste esta regional, sale de la lista
+          .then(l2 => l2, e => { toast('El usuario se guardó, pero sus regionales no: ' + e.message, 'error'); return l; });
+      })
+      .then(l => {
         usLista = l; usEdit = null;
+        llamar('bdRegionalesUsuarios', ses.token).then(r => { usRegs = r || {}; }).catch(() => {});
         if (!pfFalta) llamar('bdPerfiles', ses.token).then(p => { pfLista = p; }).catch(() => {});
         llamar('bdInicio').then(d => { ini.operarios = d.operarios; }).catch(() => {});
         toast(u.id ? 'Cambios guardados' : `Usuario creado. Su PIN es ${pin}`, 'ok');
@@ -3354,7 +3422,7 @@
         else if ($('raTxt')) rotuloAquiTexto(t);
         else if (flujo && flujo.paso === 'lugar') flujoLugarCodigo(t);
         else if (flujo && flujo.paso === 'origen') flujoOrigenCodigo(t);
-        else if ($('rcQ') && $('rcTabla')) rcEscaneado(t);   // reconfirmación: solo busca el producto para contarlo
+        else if ($('rcQ') && $('rcTabla')) rcEscaneado(t);   // reconteo: solo busca el producto para contarlo
         else { cerrarModal(); buscarCodigo(t); }
       }
       pistola.txt = '';
@@ -3609,6 +3677,7 @@
           <button onclick="cambiarZoom(0)">Ajustar</button>
           <button onclick="cambiarZoom(1.25)" aria-label="Acercar">+</button>
         </div>`}
+        ${puedeCargarAereo() ? '<button class="btn btn-sec" onclick="abrirCargaAereo()">Cargar aéreo (Excel)</button>' : ''}
         ${pc3d() && !colocando ? `<label class="sw3d"><input type="checkbox" role="switch" ${ver3d ? 'checked' : ''} onchange="ponerVer3d(this.checked)"><span class="sw3d-i" aria-hidden="true"></span>Ver en 3D</label>` : ''}
       </div></div>
       ${zonasBarHtml()}
@@ -3916,7 +3985,7 @@
 
   /* ----- Inventario contra SAP ----- */
   let invData = null;                                      // { sap, carga, conteos } de la sede
-  let invRcs = null, invRcsCargando = false, invRcsHora = 0;   // reconfirmaciones del inventario en curso, con sus conteos
+  let invRcs = null, invRcsCargando = false, invRcsHora = 0;   // reconteos del inventario en curso, con sus conteos
   let invSede = null;                                      // sede de los datos cargados
   const invF = { zona: '', q: '', soloDif: false, alm: '', pas: '', sede: '', estado: '' };
   const invForm = { ubic: '', prod: '', tipo: 'PICKING' };
@@ -3938,7 +4007,7 @@
     const tabs = [];
     if (puede('inv_contar')) tabs.push(['ingresar', 'Ingresar'], ['confirmar', 'Consultar']);
     if (jefe || !puede('inv_contar')) tabs.push(['tabla', jefe ? 'Avance y SAP' : 'Tabla contra SAP']);   // el avance va arriba de la tabla
-    if (puedeAlguno(['ciclico', 'ciclico_asignar'])) tabs.push(['reconf', 'Reconfirmaciones']);
+    if (puedeAlguno(['ciclico', 'ciclico_asignar'])) tabs.push(['reconf', 'Reconteos']);
     if (!tabs.some(t => t[0] === invSub)) invSub = tabs[0][0];
     // Primero la lista de inventarios (como en Cíclico). Quien solo cuenta entra de una al que está en curso.
     const ia = invActualCli();
@@ -3963,11 +4032,13 @@
         <span class="fila gap8 wrap-f">
           ${puede('inv_sap') ? '<button class="btn btn-pri" onclick="abrirCargaSap()">Cargar Excel de SAP</button>' : ''}
           ${puede('inv_sap') || puede('productos') ? '<button class="btn btn-sec" onclick="abrirCargaUbicSede()">Actualizar almacenes y pasillos</button>' : ''}
+          ${puedeCargarAereo() ? '<button class="btn btn-sec" onclick="abrirCargaAereo()">Cargar aéreo (Excel)</button>' : ''}
           ${puede('reportes') && jefe ? '<button class="btn btn-sec" onclick="descargarInventarioSap()">Descargar Excel</button>' : ''}
           <button class="btn btn-sec" onclick="invData=null; invRcs=null; pintarApp()">Actualizar</button>
           ${puede('inv_sap') ? '<button class="btn btn-sal-solido" onclick="cerrarInventario(this)">Cerrar inventario</button>' : ''}
           <button class="btn btn-ent-solido" onclick="invDentro=false; invSub=''; invLista=null; pintarApp(); window.scrollTo(0, 0)">Volver</button></span>
       </div>
+      ${puede('inv_sap') ? capturasHtml() : ''}
       ${tabs.length > 1 ? subTabsHtml(invSub, tabs, 'invSub') : ''}
       ${invSub === 'reconf' ? vistaRcInv() : invSub === 'ingresar' ? cpIngresarHtml() : invSub === 'confirmar' ? cpConfirmarHtml() : `
       ${jefe ? `<div id="cpAvance">${cpAvanceHtml()}</div>` : ''}
@@ -3991,10 +4062,68 @@
         </div>
         <div id="invTabla">${tablaInventario()}</div>
         <span class="muted small">Todo en unidades. <b>Total SAP</b> = Inventario + Calidad + Bloqueado de SAP. <b>Aéreo</b> = lo ubicado en el plano del nivel 2 hacia arriba (sin picking).
-          <b>Reconf.</b> = el picking de la última reconfirmación del producto en esa sede. <b>Total planta</b> = Picking + Aéreo + Calidad + Bloqueado; en la sede donde se reconfirmó, el picking es el de la reconfirmación.
+          <b>Recont.</b> = el picking de la último reconteo del producto en esa sede. <b>Total planta</b> = Picking + Aéreo + Calidad + Bloqueado; en la sede donde se recontó, el picking es el del reconteo.
           <b>Diferencia</b> = Total planta − Total SAP. Toca un producto para ver su historial.</span>
       </div>`}
     </div>`;
+  }
+
+  /* ----- Capturar el aéreo o el picking del inventario en curso (de toda la regional) -----
+     Si el inventario se termina otro día y mientras tanto mueven o sacan del aéreo, o llega producto nuevo,
+     lo capturado no cambia. Al picking capturado se le suma lo que se cuente después. */
+  function capturasHtml() {
+    const cap = (invData && invData.capturas) || {};
+    const linea = (t, nom) => {
+      const c = cap[t];
+      return `<div class="cap-fila"><span class="small"><b>${nom}:</b> ${c ? `capturado el ${fechaHora(c.fecha)} por ${esc(c.por || '—')} · ${nInv((c.resumen || {}).total || 0)} und`
+          : '<span class="muted">en vivo (lo que hay ahora)</span>'}</span>
+        <span class="fila gap8 wrap-f"><button class="btn btn-sec btn-mini" onclick="capturarInv('${t}')">${c ? 'Volver a capturar' : 'Capturar ' + nom.toLowerCase()}</button>
+          ${c ? `<button class="btn btn-sec btn-mini" onclick="quitarCaptura('${t}')">Usar el de ahora</button>` : ''}</span></div>`;
+    };
+    return `<div class="card cap-barra">${linea('AEREO', 'Aéreo')}${linea('PICKING', 'Picking')}
+      <span class="muted small">${ayudaHtml('Capturar guarda cómo está ahora el aéreo (o el picking contado) de todas las sedes de la regional. Si el inventario sigue otro día y mueven o sacan del aéreo, o llega producto nuevo, lo capturado no cambia. Lo que se cuente de picking después de capturar se suma a lo capturado.')} Sirve si el inventario sigue otro día.</span></div>`;
+  }
+  function datosCaptura(tipo) {
+    const yo = ses.sedeId, d = {}, almDe = u => { u = String(u || ''); return u.startsWith('PICKING-') ? u.slice(8) : ((pasilloDe(u) || {}).key || ''); };
+    let total = 0;
+    if (tipo === 'AEREO') {
+      const pon = (k, n) => { d[k] = +((d[k] || 0) + n).toFixed(3); total += n; };
+      sede.lineas.forEach(l => { const e = sede.espPorId[l.ubicacionId]; if (!e || e.nivel === 0) return; pon(`${yo}|${l.productoId}|${almDe(l.ubicacionId)}`, Number(l.unidades) || 0); });
+      (invData.otrasSedes || []).forEach(o => o.aereo.forEach(x => pon(`${o.sedeId}|${x.codigo}|${x.almacen}`, x.cantidad)));
+    } else {
+      // Picking por lugar, como lo está mostrando el inventario (con la captura anterior, si hay)
+      const capP = invData.capturas && invData.capturas.PICKING;
+      if (capP) Object.entries(capP.datos).forEach(([k, x]) => { d[k] = { alm: x.alm, c: Number(x.c) || 0 }; });
+      const poner = (sid, c, alm) => {
+        if (c.tipo !== 'PICKING') return;
+        const k = `${sid}|${c.codigo}|${c.ubicacion}`;
+        if (capP && !(String(c.fecha) > String(capP.fecha))) return;   // ya estaba en la captura anterior
+        d[k] = { alm, c: +Number(c.cantidad).toFixed(3) };
+      };
+      (invData.conteos || []).forEach(c => poner(yo, c, almDe(c.ubicacion)));
+      (invData.otrasSedes || []).forEach(o => o.conteos.forEach(c => poner(o.sedeId, c, c.almacen)));
+      Object.values(d).forEach(x => { total += x.c; });
+    }
+    return { datos: d, resumen: { productos: new Set(Object.keys(d).map(k => k.split('|')[1])).size, total: +total.toFixed(3) } };
+  }
+  function capturarInv(tipo, ok) {
+    const nom = tipo === 'AEREO' ? 'el aéreo' : 'el picking';
+    if (ok !== true) return abrirModal(`<div class="fila-sb"><span class="h2">¿Capturar ${nom}?</span>${btnCerrar()}</div>
+      <p class="mt12">Se guarda cómo está ${nom} ahora en todas las sedes de ${esc(nombreRegional() || 'la regional')}. Desde ahí el inventario usa lo capturado${tipo === 'AEREO' ? ': si mueven, sacan o llega algo al aéreo, no cambia.' : ', y lo que se cuente de picking después se le suma.'}</p>
+      ${(invData.capturas || {})[tipo] ? '<p class="small txt-naranja">Ya había una captura: esta la reemplaza.</p>' : ''}
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-pri btn-xl" onclick="capturarInv('${tipo}', true)">Sí, capturar</button></div>`);
+    const { datos, resumen } = datosCaptura(tipo);
+    llamar('bdCapturar', { tipo, datos, resumen, usuario: ses.nombre }).then(c => {
+      invData.capturas = Object.assign({}, invData.capturas, { [tipo]: c }); diMemo = null;
+      cerrarModal(); toast(`${tipo === 'AEREO' ? 'Aéreo' : 'Picking'} capturado: ${resumen.productos} productos`, 'ok'); pintarApp();
+    }).catch(e => { cerrarModal(); toast(e.message, 'error'); });
+  }
+  function quitarCaptura(tipo) {
+    llamar('bdQuitarCaptura', { tipo }).then(() => {
+      const c = Object.assign({}, invData.capturas); delete c[tipo]; invData.capturas = c; diMemo = null;
+      toast(`Listo: ${tipo === 'AEREO' ? 'el aéreo' : 'el picking'} vuelve a ser el de ahora`, 'ok'); pintarApp();
+    }).catch(e => toast(e.message, 'error'));
   }
 
   // Formulario de conteo (lo usan Inventario y Cíclico)
@@ -4025,7 +4154,7 @@
   // Se calcula una sola vez mientras no cambien los datos (la pantalla lo pide varias veces y son miles de productos)
   let diMemo = null;
   function datosInventario() {
-    const k = [invData, invData && invData.conteos, invData && invData.sap, invData && invData.otrasSedes, sede, sede && sede.lineas, sede && sede.espPorId, ini.productos, ini.productos.length, codGen()];
+    const k = [invData, invData && invData.conteos, invData && invData.sap, invData && invData.otrasSedes, sede, sede && sede.lineas, sede && sede.espPorId, ini.productos, ini.productos.length, codGen(), ini.prodReg];
     if (diMemo && diMemo.k.length === k.length && diMemo.k.every((x, i) => x === k[i])) return diMemo.v;
     const v = calcDatosInventario();
     diMemo = { k, v };
@@ -4041,14 +4170,22 @@
     const enAlm = (f, ubic) => enAlmK(f, almDe(ubic));
     const pasK = ubic => { const x = pasilloDe(ubic); return x ? x.key + '|' + x.pasillo : ''; };
     const zonaDe = ubic => { const e = sede.espPorId[ubic]; const r = e && sede.rackPorId[e.rackId]; return r ? r.zonaId : ''; };
-    ini.productos.forEach(p => { if (p.activo !== false) fila(p.id); });   // todos, aunque no tengan nada
+    ini.productos.forEach(p => { if (p.activo !== false && prodDeMiRegional(p)) fila(p.id); });   // todos los de la regional, aunque no tengan nada
+    // Capturas: el aéreo capturado reemplaza al de ahora; al picking capturado se le suma lo que se cuente después
+    const capA = invData.capturas && invData.capturas.AEREO, capP = invData.capturas && invData.capturas.PICKING;
+    const pkCap = (sid, c) => {   // cuánto suma un conteo de picking cuando hay captura
+      if (!capP) return c.cantidad;
+      if (!(String(c.fecha) > String(capP.fecha))) return 0;   // ya está en la captura
+      const x = capP.datos[`${sid}|${c.codigo}|${c.ubicacion}`];
+      return c.cantidad - (x ? Number(x.c) || 0 : 0);
+    };
     (invData.sap || []).forEach(x => (fila(x.codigo).sap = x));
     sede.lineas.forEach(l => {
       const e = sede.espPorId[l.ubicacionId];
       if (e && e.nivel === 0) { const k = pasK(l.ubicacionId); if (k) fila(l.productoId).pas.add(k); }
       if (!e || e.nivel === 0) return;                    // el picking se cuenta a mano
       const f = fila(l.productoId), n = Number(l.unidades) || 0, a = enAlm(f, l.ubicacionId);
-      f.aereo += n; a.aereo += n; suma(f.ae, yo, n); suma(a.ae, yo, n);
+      if (!capA) { f.aereo += n; a.aereo += n; suma(f.ae, yo, n); suma(a.ae, yo, n); }
       const z = zonaDe(l.ubicacionId); if (z) f.zonas.add(z);
       const k = pasK(l.ubicacionId); if (k) f.pas.add(k);
     });
@@ -4059,14 +4196,14 @@
       if (c.tipo === 'BLOQUEADO') f.hayBlo = true;
       if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
       else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
-      else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, yo, c.cantidad); suma(a.pk, yo, c.cantidad); }
+      else { const n = pkCap(yo, c); f.picking += n; a.picking += n; suma(f.pk, yo, n); suma(a.pk, yo, n); }
       const z = zonaDe(c.ubicacion); if (z) f.zonas.add(z);
       const k = pasK(c.ubicacion); if (k) f.pas.add(k);
       if (!f.ult || c.fecha > f.ult.fecha) f.ult = c;
     });
     // Las demás sedes: su picking y su aéreo van en sus columnas; todo se suma contra el mismo SAP
     (invData.otrasSedes || []).forEach(o => {
-      o.aereo.forEach(x => { const f = fila(x.codigo), a = enAlmK(f, x.almacen); f.aereo += x.cantidad; a.aereo += x.cantidad; suma(f.ae, o.sedeId, x.cantidad); suma(a.ae, o.sedeId, x.cantidad); });
+      if (!capA) o.aereo.forEach(x => { const f = fila(x.codigo), a = enAlmK(f, x.almacen); f.aereo += x.cantidad; a.aereo += x.cantidad; suma(f.ae, o.sedeId, x.cantidad); suma(a.ae, o.sedeId, x.cantidad); });
       o.conteos.forEach(c => {
         const f = fila(c.codigo), a = enAlmK(f, c.almacen);
         if (c.tipo === 'PICKING') f.contado = true;
@@ -4074,8 +4211,17 @@
         if (c.tipo === 'BLOQUEADO') f.hayBlo = true;
         if (c.tipo === 'CALIDAD') { f.calidad += c.cantidad; a.calidad += c.cantidad; }
         else if (c.tipo === 'BLOQUEADO') { f.bloqueado += c.cantidad; a.bloqueado += c.cantidad; }
-        else { f.picking += c.cantidad; a.picking += c.cantidad; suma(f.pk, o.sedeId, c.cantidad); suma(a.pk, o.sedeId, c.cantidad); }
+        else { const n = pkCap(o.sedeId, c); f.picking += n; a.picking += n; suma(f.pk, o.sedeId, n); suma(a.pk, o.sedeId, n); }
       });
+    });
+    // Lo capturado (aéreo: sede|código|almacén → cantidad · picking: sede|código|lugar → { alm, c })
+    if (capA) Object.entries(capA.datos).forEach(([k, n]) => {
+      const [sid, cod, alm] = k.split('|'), f = fila(cod), a = enAlmK(f, alm); n = Number(n) || 0;
+      f.aereo += n; a.aereo += n; suma(f.ae, sid, n); suma(a.ae, sid, n);
+    });
+    if (capP) Object.entries(capP.datos).forEach(([k, x]) => {
+      const p = k.split('|'), f = fila(p[1]), a = enAlmK(f, x.alm || ''), n = Number(x.c) || 0;
+      f.picking += n; a.picking += n; suma(f.pk, p[0], n); suma(a.pk, p[0], n); f.contado = true;
     });
     return Object.values(m).map(f => {
       // Calidad y bloqueado = lo del sistema + lo nuevo que reportan. Lo guardado ya trae los dos;
@@ -4095,9 +4241,9 @@
     });
   }
 
-  /* ----- Reconfirmaciones del inventario en curso: por producto, lo de su última reconfirmación con conteo.
+  /* ----- Reconteos del inventario en curso: por producto, lo de su último reconteo con conteo.
      Se cuenta solo el picking; si no se volvió a contar calidad o bloqueado, queda lo del inventario.
-     El aéreo es el del plano (ya trae lo corregido en las estibas). Total y diferencia van con la reconfirmación. ----- */
+     El aéreo es el del plano (ya trae lo corregido en las estibas). Total y diferencia van con el reconteo. ----- */
   function asegurarRcInv(forzar) {
     if (invRcsCargando || (!forzar && invRcs !== null) || !invData || invData.error) return;
     invRcsCargando = true;
@@ -4110,7 +4256,7 @@
     if (rcMemo && rcMemo.d === d && rcMemo.r === invRcs) return d;
     const rcs = invRcs || [];
     d.forEach(f => {
-      // Por cada sede: el picking de la última reconfirmación que lo contó en esa sede
+      // Por cada sede: el picking de la último reconteo que lo contó en esa sede
       const rcPk = {};
       for (let i = rcs.length - 1; i >= 0; i--) {
         const r = rcs[i];
@@ -4121,7 +4267,7 @@
       }
       f.rcPk = rcPk;
       const hay = Object.keys(rcPk).length > 0;
-      // Picking con la reconfirmación: en cada sede reconfirmada se usa lo de la reconfirmación; en las demás, lo contado
+      // Picking con el reconteo: en cada sede recontada se usa lo del reconteo; en las demás, lo contado
       const pk = hay ? +(f.picking + Object.entries(rcPk).reduce((t, [sd, n]) => t + n - (f.pk[sd] || 0), 0)).toFixed(3) : f.picking;
       f.rc = hay ? { pk } : null;
       f.plantaRc = hay ? +(pk + f.aereo + f.calidad + f.bloqueado).toFixed(3) : f.planta;
@@ -4198,7 +4344,7 @@
         <td class="num">${nInv(f.bloqueado)}</td>
         <td class="num fuerte">${nInv(f.plantaRc)}</td>
         <td class="num"><span class="dif ${difCls(f.difRc)}">${f.difRc > 0 ? '+' : ''}${nInv(f.difRc)}</span></td>
-        <td class="ec-td">${f.ult && puede('inv_contar') ? btnEditarConteo(f) : ''}</td>
+        <td class="ec-td">${f.ult ? `<span class="fila gap4">${btnDetalleConteo(f)}${puedeAlguno(['inv_contar', 'inv_sap']) ? btnEditarConteo(f) : ''}</span>` : ''}</td>
       </tr>${abierto ? f.almacenes.map(a => `<tr class="inv-sub"><td></td><td></td><td class="inv-prod small">↳ Almacén <b>${esc(almCorto(a.key) || '—')}</b></td><td></td>
         <td class="g-sap" colspan="4"></td>
         ${pkRc(a.pk, null)}${porSede(a.ae, 'g-ae')}<td class="num">${nInv(a.calidad)}</td><td class="num">${nInv(a.bloqueado)}</td>
@@ -4207,10 +4353,10 @@
     return `<div class="muted small">${l.length} de ${todos.length} productos · <b class="${con ? 'txt-rojo' : ''}">${con}</b> con diferencia</div>
       <div class="tabla-wrap mt8"><table class="tabla inv-tabla">
         <thead>
-          <tr class="inv-grupos"><th colspan="4"></th><th colspan="4" class="g-sap">SAP</th><th colspan="${SD.length * 3 + 3}">Planta (conteo + plano + reconfirmación) · todas las sedes</th><th></th><th></th></tr>
+          <tr class="inv-grupos"><th colspan="4"></th><th colspan="4" class="g-sap">SAP</th><th colspan="${SD.length * 3 + 3}">Planta (conteo + plano + reconteo) · todas las sedes</th><th></th><th></th></tr>
           <tr>${thO('inv', 'nutresa', 'Cód. Nutresa')}${thO('inv', 'cod', 'Cód. Atlantic')}${thO('inv', 'prod', 'Producto')}${thO('inv', 'und', 'Unidad')}
             ${thO('inv', 'sapInv', 'Inventario', 'num g-sap')}${thO('inv', 'sapCal', 'Calidad', 'num g-sap')}${thO('inv', 'sapBlq', 'Bloqueado', 'num g-sap')}${thO('inv', 'sapTot', 'Total', 'num g-sap')}
-            ${SD.map(x => thO('inv', 'pk:' + x.id, `Picking<br><span class="inv-sede">${esc(x.nombre)}</span>`, 'num') + thO('inv', 'rc:' + x.id, `Reconf.<br><span class="inv-sede">${esc(x.nombre)}</span>`, 'num g-rc')).join('')}
+            ${SD.map(x => thO('inv', 'pk:' + x.id, `Picking<br><span class="inv-sede">${esc(x.nombre)}</span>`, 'num') + thO('inv', 'rc:' + x.id, `Recont.<br><span class="inv-sede">${esc(x.nombre)}</span>`, 'num g-rc')).join('')}
             ${SD.map(x => thO('inv', 'ae:' + x.id, `Aéreo<br><span class="inv-sede">${esc(x.nombre)}</span>`, 'num g-ae')).join('')}
             ${thO('inv', 'cal', 'Calidad', 'num')}${thO('inv', 'blq', 'Bloqueado', 'num')}${thO('inv', 'planta', 'Total', 'num')}
             ${thO('inv', 'dif', 'Diferencia', 'num')}<th><span class="sr">Corregir</span></th></tr>
@@ -4445,7 +4591,7 @@
       $('histVal').innerHTML = v.length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Fecha</th><th>Lugar</th><th>Rótulo</th><th>Qué pasó</th><th class="num">Antes</th><th class="num">Después</th><th>Motivo</th><th>Quién</th></tr></thead>
         <tbody>${v.slice(0, 15).map(x => `<tr><td class="nowrap">${fechaHora(x.fecha)}</td><td>${esc(cu(x.ubicacion))}</td><td>${esc(x.lote || '—')}</td><td>${tx[x.accion] || x.accion}</td>
           <td class="num">${nInv(x.antes)}</td><td class="num">${nInv(x.despues)}${x.vencDespues !== x.vencAntes ? `<span class="muted small"> · vence ${fCorta(x.vencDespues)}</span>` : ''}</td><td>${esc(x.motivo || '')}</td><td>${esc(x.usuario || '—')}</td></tr>`).join('')}</tbody></table></div>`
-        : '<p class="muted small">No ha tenido reconfirmaciones del aéreo.</p>';
+        : '<p class="muted small">No ha tenido reconteos del aéreo.</p>';
     }).catch(() => { if ($('histVal')) $('histVal').innerHTML = ''; });
     llamar('bdHistorialConteos', { sedeId: ses.sedeId, codigo: cod }).then(function pintar(h) {
       if (!$('histInv')) return;
@@ -4483,43 +4629,192 @@
     });
     return filas;
   }
-  // Excel del inventario (lo que está filtrado en la tabla): una fila por producto, con la reconfirmación
+  // Excel del inventario (lo que está filtrado en la tabla): una fila por producto, con el reconteo
+  /* ----- Libro de Excel con varias hojas y estilos (para el Control Interno) -----
+     hojas: [{ nombre, celdas: [[{ v, s } | null]], anchos, fijar (filas fijas arriba), filtro ('A8:AD900'), unir: ['A1:D3'], altos: { fila: alto } }]
+     Estilos: 1 título oscuro · 2 título verde · 3 título naranja · 4 título gris · 5 texto · 6 número · 7 número rojo · 8 número verde
+       9 título grande · 10 etiqueta negrita · 11 plata · 12 plata roja · 13 plata verde · 14 porcentaje · 15 texto verde claro · 16 texto rojo claro
+       17 texto negrita gris · 18 plata negrita · 19 número negrita */
+  async function xlsxLibro(hojas) {
+    if (!window.JSZip) await cargarScript(JSZIP_URL);
+    const xe = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const letra = i => { let s = ''; i++; while (i) { const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+    const hojaXml = h => {
+      const nCol = Math.max(1, ...h.celdas.map(f => f.length));
+      const filas = h.celdas.map((f, r) => `<row r="${r + 1}"${h.altos && h.altos[r] ? ` ht="${h.altos[r]}" customHeight="1"` : ''}>${f.map((c, i) => {
+        if (!c) return '';
+        const ref = letra(i) + (r + 1), st = c.s ? ` s="${c.s}"` : '';
+        if (c.v === '' || c.v === null || c.v === undefined) return `<c r="${ref}"${st}/>`;
+        if (typeof c.v === 'number' && isFinite(c.v)) return `<c r="${ref}"${st}><v>${c.v}</v></c>`;
+        return `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${xe(c.v)}</t></is></c>`;
+      }).join('')}</row>`).join('');
+      const fin = `${letra(nCol - 1)}${h.celdas.length}`;
+      return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:${fin}"/><sheetViews><sheetView workbookViewId="0">${h.fijar ? `<pane ySplit="${h.fijar}" topLeftCell="A${h.fijar + 1}" activePane="bottomLeft" state="frozen"/>` : ''}</sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/><cols>${(h.anchos || []).map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>
+<sheetData>${filas}</sheetData>${h.filtro ? `<autoFilter ref="${h.filtro}"/>` : ''}${h.unir && h.unir.length ? `<mergeCells count="${h.unir.length}">${h.unir.map(u => `<mergeCell ref="${u}"/>`).join('')}</mergeCells>` : ''}
+<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;
+    };
+    const borde = '<border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border>';
+    const relleno = c => `<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`;
+    const tit = '<alignment horizontal="center" vertical="center" wrapText="1"/>';
+    const xf = (num, font, fill, extra) => `<xf numFmtId="${num}" fontId="${font}" fillId="${fill}" borderId="${fill === 0 && font === 5 ? 0 : 1}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"${extra ? ' applyAlignment="1">' + extra + '</xf>' : '/>'}`;
+    // fuentes: 0 normal · 1 blanca negrita · 2 roja · 3 verde · 4 negrita · 5 grande negrita · 6 roja negrita · 7 verde negrita
+    // rellenos: 2 azul oscuro · 3 verde · 4 naranja · 5 gris oscuro · 6 verde claro · 7 rojo claro · 8 gris claro · 9 negro
+    const estilos = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="2"><numFmt numFmtId="164" formatCode="#,##0.00"/><numFmt numFmtId="165" formatCode="&quot;$&quot;#,##0;-&quot;$&quot;#,##0"/></numFmts>
+<fonts count="8"><font><sz val="10"/><name val="Calibri"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+<font><sz val="10"/><color rgb="FFC00000"/><name val="Calibri"/></font><font><sz val="10"/><color rgb="FF2E7D32"/><name val="Calibri"/></font><font><b/><sz val="10"/><name val="Calibri"/></font>
+<font><b/><sz val="16"/><name val="Calibri"/></font><font><b/><sz val="10"/><color rgb="FFC00000"/><name val="Calibri"/></font><font><b/><sz val="10"/><color rgb="FF2E7D32"/><name val="Calibri"/></font></fonts>
+<fills count="10"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${['1F3864', '548235', 'C55A11', '404040', 'E2EFDA', 'FCE4D6', 'EDEDED', '1A1A1A'].map(relleno).join('')}</fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>${borde}</borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="20"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+${xf(0, 1, 9, tit)}${xf(0, 1, 3, tit)}${xf(0, 1, 4, tit)}${xf(0, 1, 5, tit)}
+${xf(0, 0, 0)}${xf(164, 0, 0)}${xf(164, 2, 0)}${xf(164, 3, 0)}
+${xf(0, 5, 0, '<alignment vertical="center"/>')}${xf(0, 4, 8)}${xf(165, 0, 0)}${xf(165, 2, 0)}${xf(165, 3, 0)}${xf(10, 4, 8)}
+${xf(0, 7, 6, '<alignment horizontal="center"/>')}${xf(0, 6, 7, '<alignment horizontal="center"/>')}${xf(0, 4, 8, '<alignment horizontal="center" vertical="center" wrapText="1"/>')}${xf(165, 4, 8)}${xf(164, 4, 8)}</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`);
+    zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
+    zip.file('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${hojas.map((h, i) => `<sheet name="${xe(h.nombre)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets>
+<definedNames>${hojas.map((h, i) => h.filtro ? `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${xe(h.nombre)}'!${h.filtro.replace(/([A-Z]+)(\d+)/g, '$$$1$$$2')}</definedName>` : '').join('')}</definedNames></workbook>`);
+    zip.file('xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${hojas.map((h, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}
+<Relationship Id="rId${hojas.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+    zip.file('xl/styles.xml', estilos);
+    hojas.forEach((h, i) => zip.file(`xl/worksheets/sheet${i + 1}.xml`, hojaXml(h)));
+    return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', compression: 'DEFLATE' });
+  }
+
+  // Excel del inventario como el formato de CONTROL INTERNO (más la hoja de AJUSTES SAP y el RESUMEN).
+  // Sale lo que está filtrado en la tabla. Una fila por producto y almacén.
   async function descargarInventarioSap() {
     if (sinPermiso('reportes')) return;
     toast('Preparando el Excel…', 'ok');
     try {
       if (invRcs === null) { try { invRcs = await reconfsInventario(); } catch (e) { invRcs = []; } }
-      const l = filtrarInventario(datosInvRc()).filter(f => f.sap || f.plantaRc || f.contado);
+      const A = analisisInv(), vis = new Set(filtrarInventario(datosInvRc()).map(f => f.cod));
+      const l = A.filas.filter(r => r.algo && vis.has(r.cod));
       if (!l.length) return toast('No hay datos para descargar', 'error');
-      if (!window.JSZip) await cargarScript(JSZIP_URL);
-      const red = n => +Number(n || 0).toFixed(3);
+      const red = n => +Number(n || 0).toFixed(3), din = n => (n === null || n === undefined || isNaN(n) ? '' : Math.round(n));
       const codN = c => /^\d+$/.test(String(c)) ? Number(c) : String(c);
-      // Almacén: donde está o se contó; si no, el registrado del producto
-      const almDeF = f => f.almacenes.map(a => almCorto(a.key)).filter(Boolean).join(' / ') || ((prodAlm && prodAlm[f.cod]) || []).join(' / ');
-      // Estilos de xlsxConEstilo: 1 SAP (azul), 2 contado (verde), 3 reconfirmación (naranja), 4 totales (gris); 5 texto, 6 número, 7 rojo, 8 verde, 12 número de reconfirmación
-      const C = [['Código', 1], ['Producto', 1], ['Almacén', 1], ['Total SAP', 1], ['Picking', 2], ['Confirmación', 3], ['Aéreo', 2], ['Calidad', 2], ['Bloqueado', 2], ['Total planta', 4], ['Diferencia', 4]];
-      const hoja = [C.map(([v, st]) => ({ v, s: st }))];
-      l.forEach(f => {
-        const rc = f.rc, d = red(f.difRc);
-        hoja.push([{ v: codN(f.cod), s: 5 }, { v: f.p ? f.p.nombre : '', s: 5 }, { v: codN(almDeF(f)), s: 5 }, { v: red(f.sapTotal), s: 6 },
-          { v: red(f.picking), s: 6 }, rc ? { v: red(rc.pk), s: 12 } : { v: '', s: 5 },
-          { v: red(f.aereo), s: 6 }, { v: red(f.calidad), s: 6 }, { v: red(f.bloqueado), s: 6 },
-          { v: red(f.plantaRc), s: 6 }, { v: d, s: d < 0 ? 7 : d > 0 ? 8 : 6 }]);
+      const T = (v, s) => ({ v, s }), N = v => T(red(v), 6), P = v => T(din(v), 11);
+      // Filas por almacén: SAP de cada almacén (MB52) y lo contado en cada almacén
+      const filasXls = [];
+      l.forEach(r => {
+        const f = r.f, porAlm = {};
+        const de = k => porAlm[k] || (porAlm[k] = { alm: k, lib: 0, cal: 0, blq: 0, vLib: null, vCal: null, vBlq: null, pk: 0, ae: 0, fcal: 0, fblq: 0, umb: '' });
+        if (r.almSap.length) r.almSap.forEach(a => { const x = de(a.almacen); x.lib += a.inventario; x.cal += a.calidad; x.blq += a.bloqueado; x.umb = a.umb || x.umb;
+          ['vLib', 'vCal', 'vBlq'].forEach(k => { if (a[k] !== null && a[k] !== undefined) x[k] = (x[k] || 0) + a[k]; }); });
+        else { const x = de(r.alm); x.lib = r.sap.inventario; x.cal = r.sap.calidad; x.blq = r.sap.bloqueado; x.vLib = r.sap.vLib; x.vCal = r.sap.vCal; x.vBlq = r.sap.vBlq; }
+        Object.values(f.alm).forEach(a => { const k = almCorto(a.key) || r.alm; const x = de(k);
+          x.pk += a.picking; x.ae += a.aereo; x.fcal += a.calidad; x.fblq += a.bloqueado; });
+        const ks = Object.keys(porAlm);
+        const princ = porAlm[r.alm] ? r.alm : ks[0];
+        ks.forEach(k => {
+          const x = porAlm[k], rc = f.rc && k === princ ? f.rc.pk - f.picking : 0;   // el reconteo va en el almacén principal
+          const pkFin = x.pk + rc, fis = pkFin + x.ae + x.fcal + x.fblq, sapT = x.lib + x.cal + x.blq, dif = +(fis - sapT).toFixed(3);
+          filasXls.push({ r, x, alm: k, rc: f.rc && k === princ ? f.rc.pk : null, fis, sapT, dif, valDif: r.c === null ? null : dif * r.c });
+        });
       });
-      const blob = await xlsxConEstilo('INVENTARIO', hoja, [12, 46, 12, 12, 12, 13, 12, 11, 11, 13, 12]);
+      filasXls.sort((a, b) => String(a.alm).localeCompare(String(b.alm), 'es', { numeric: true }) || String(a.r.p ? a.r.p.nombre : a.r.cod).localeCompare(String(b.r.p ? b.r.p.nombre : b.r.cod)));
+      // ---- Hoja CONTROL INTERNO ----
+      const cols = ['VALOR FISICO', 'COD NUTRESA', 'COD ATL', 'TEXTO BREVE DE MATERIAL', 'ALMACEN', 'UMB', 'LIBRE UTILIZACIÓN', 'VALOR LIBRE UTILIZACION', 'CALIDAD', 'VALOR CALIDAD',
+        'BLOQUEO', 'VALOR BLOQUEO', 'TOTAL SAP', 'CONTEO 1 (LIBRE)', 'LIBRE UTIL (RECUPERADO)', 'CONTEO 3', 'AEREO', 'BLOQUEO', 'CALIDAD', 'TOTAL FISICO', 'DIFERENCIA', 'VR. DIFERENCIA',
+        'VALOR UNIDAD KILO', 'SUB CATEGORIA', 'ACCIONES', 'OBSERVACION', 'CANTIDAD AJUSTE', 'CRUCE', 'GANANCIA', 'BAJA'];
+      const estTit = i => (i >= 6 && i <= 12 ? 1 : i >= 13 && i <= 19 ? 2 : i >= 20 ? 4 : 4);
+      const fis = filasXls.reduce((a, y) => a + (y.r.c === null ? 0 : y.fis * y.r.c), 0);
+      const vSap = filasXls.reduce((a, y) => a + (y.r.c === null ? 0 : y.sapT * y.r.c), 0);
+      const bajas = filasXls.filter(y => y.r.contado && y.dif < 0), gan = filasXls.filter(y => y.r.contado && y.dif > 0);
+      const sumV = ls => ls.reduce((a, y) => a + (y.valDif || 0), 0);
+      const fila = n => Array(30).fill(null).map((_, i) => (n && n[i]) || null);
+      const enc = [];
+      for (let i = 0; i < 7; i++) enc.push(fila());
+      enc[0][0] = T('ATLANTIC FS S.A.S', 9); enc[0][5] = T('INVENTARIO FISICO', 9);
+      enc[1][5] = T('ATLANTIC FS S.A.S', 10);
+      enc[2][5] = T('FECHA: ' + hoyISO().split('-').reverse().join('.'), 10);
+      enc[3][5] = T('SUCURSAL: ' + [nombreRegional(), nombreSede(ses.sedeId)].filter(Boolean).join(' · ').toUpperCase(), 10);
+      const caja = (r, c, et, v, s) => { enc[r][c] = T(et, 10); enc[r][c + 1] = v === null ? T('', 5) : T(v, s || 11); };
+      caja(1, 23, 'VALOR ALMACENADO', A.hayValores ? Math.round(vSap) : null);
+      caja(2, 23, 'PNC FISICO', A.hayValores ? Math.round(fis) : null);
+      caja(3, 23, 'DIFERENCIA', A.hayValores ? Math.round(fis - vSap) : null, fis - vSap < 0 ? 12 : 13);
+      caja(4, 23, 'VARIACION', vSap ? (fis / vSap) - 1 : null, 14);
+      caja(5, 23, 'SKU SIN MOV', filasXls.filter(y => y.r.contado && !y.dif).length, 6);
+      enc[1][26] = T('MATERIALES', 17); enc[1][27] = T(A.alcance, 19); enc[1][28] = T(A.hayValores ? Math.round(vSap) : '', 18);
+      enc[2][26] = T('BAJA', 17); enc[2][27] = T(bajas.length, 19); enc[2][28] = T(A.hayValores ? Math.round(sumV(bajas)) : '', 12);
+      enc[3][26] = T('GANANCIA', 17); enc[3][27] = T(gan.length, 19); enc[3][28] = T(A.hayValores ? Math.round(sumV(gan)) : '', 13);
+      enc[4][26] = T('CRUCES', 17); enc[4][27] = T(A.cruces.length, 19);
+      enc[5][26] = T('DIFERENCIAS', 17); enc[5][27] = T(bajas.length + gan.length, 19); enc[5][28] = T(A.hayValores ? Math.round(sumV(bajas) + sumV(gan)) : '', 18);
+      enc[6][26] = T('EXACTITUD DEL INV', 17); enc[6][27] = T(A.nContados ? A.sinDif / A.nContados : 0, 14);
+      enc[6][0] = T(A.hayValores ? Math.round(fis) : '', 18);
+      enc[6][6] = T('MATERIALES EN SAP', 1); enc[6][13] = T('CONTEO FISICO', 2);
+      const hoja = enc.concat([cols.map((c, i) => T(c, i === 0 ? 4 : i < 6 ? 4 : estTit(i)))]);
+      filasXls.forEach(y => {
+        const r = y.r, x = y.x, c = r.c, val = q => (c === null ? '' : Math.round(q * c));
+        const acc = !r.contado ? 'PENDIENTE' : y.dif > 0 ? 'GANANCIA' : y.dif < 0 ? 'BAJA' : r.reclas ? 'RECLASIFICAR' : 'SIN ACCIONES';
+        hoja.push([
+          T(c === null ? '' : Math.round(y.fis * c), 11), T(r.p && r.p.codigoNutresa ? codN(r.p.codigoNutresa) : '', 5), T(codN(r.cod), 5), T(r.p ? r.p.nombre : '', 5),
+          T(codN(y.alm), 5), T(x.umb || (r.p ? r.p.unidadMedida || 'UN' : ''), 5),
+          N(x.lib), T(x.vLib !== null ? Math.round(x.vLib) : val(x.lib), 11), N(x.cal), T(x.vCal !== null ? Math.round(x.vCal) : val(x.cal), 11),
+          N(x.blq), T(x.vBlq !== null ? Math.round(x.vBlq) : val(x.blq), 11), N(y.sapT),
+          N(x.pk), y.rc !== null ? N(y.rc) : T('', 5), T('', 5), N(x.ae), N(x.fblq), N(x.fcal), N(y.fis),
+          T(red(y.dif), y.dif < 0 ? 7 : y.dif > 0 ? 8 : 6), T(y.valDif === null ? '' : Math.round(y.valDif), y.valDif < 0 ? 12 : y.valDif > 0 ? 13 : 11),
+          T(c === null ? '' : Math.round(c), 11), T(r.p ? r.p.subcategoria || r.p.categoria || '' : '', 5),
+          T(acc, acc === 'GANANCIA' ? 15 : acc === 'BAJA' ? 16 : 5), T('', 5), r.contado && y.dif ? N(y.dif) : T('', 5), T(r.cruce || '', 5),
+          T(r.contado && y.valDif > 0 ? Math.round(y.valDif) : '', 13), T(r.contado && y.valDif < 0 ? Math.round(y.valDif) : '', 12)]);
+      });
+      const finCI = `AD${hoja.length}`;
+      const anchosCI = [14, 12, 9, 40, 9, 6, 12, 14, 9, 12, 9, 12, 11, 11, 13, 9, 10, 9, 9, 11, 11, 13, 12, 18, 14, 18, 11, 8, 13, 13];
+      // ---- Hoja AJUSTES SAP: solo los contados con diferencia (clase de movimiento por tipo de stock) ----
+      const aj = [[T('Almacén', 4), T('SKU', 4), T('Material', 4), T('UM', 4), T('SAP libre', 1), T('Contado libre', 2), T('Dif. libre', 4), T('SAP calidad', 1), T('Contado calidad', 2), T('Dif. calidad', 4),
+        T('SAP bloqueo', 1), T('Contado bloqueo', 2), T('Dif. bloqueo', 4), T('Valor dif.', 4), T('Mov. libre', 3), T('Mov. calidad', 3), T('Mov. bloqueo', 3), T('Nota', 4)]];
+      filasXls.filter(y => y.r.contado && (y.dif || y.r.reclas)).sort((a, b) => Math.abs(b.valDif || 0) - Math.abs(a.valDif || 0)).forEach(y => {
+        const x = y.x, r = y.r, pkFin = y.fis - x.ae - x.fcal - x.fblq;
+        const dl = +(pkFin + x.ae - x.lib).toFixed(3), dc = +(x.fcal - x.cal).toFixed(3), db = +(x.fblq - x.blq).toFixed(3);
+        const mov = (d, mas, menos) => (d > 0 ? mas : d < 0 ? menos : '');
+        const dif = d => T(d, d < 0 ? 7 : d > 0 ? 8 : 6);
+        aj.push([T(codN(y.alm), 5), T(codN(r.cod), 5), T(r.p ? r.p.nombre : '', 5), T(x.umb || (r.p ? r.p.unidadMedida || 'UN' : ''), 5),
+          N(x.lib), N(pkFin + x.ae), dif(dl), N(x.cal), N(x.fcal), dif(dc), N(x.blq), N(x.fblq), dif(db),
+          T(y.valDif === null ? '' : Math.round(y.valDif), y.valDif < 0 ? 12 : 13), T(mov(dl, 701, 702), 5), T(mov(dc, 703, 704), 5), T(mov(db, 707, 708), 5),
+          T(r.reclas ? 'El total cuadra: reclasificar el tipo de stock' : '', 5)]);
+      });
+      // ---- Hoja RESUMEN ----
+      const res = [[T('RESUMEN DEL CONTEO FÍSICO', 9)], [T([nombreRegional(), nombreSede(ses.sedeId)].filter(Boolean).join(' · ') + ' · ' + fCorta(hoyISO()), 5)], []];
+      const linea = (a, b, s) => res.push([T(a, 10), T(b, s || 6)]);
+      res.push([T('AVANCE', 4)]); linea(A.sinSap ? 'Universo a inventariar (catálogo)' : 'Universo a inventariar (SAP)', A.alcance); linea('Referencias verificadas', A.contados); linea('Por verificar', A.pendientes); linea('Cobertura del inventario', A.alcance ? A.contados / A.alcance : 0, 14);
+      res.push([]); res.push([T('RESULTADO', 4)]); linea('Cuadradas con SAP', A.sinDif); linea('Con novedad por ajustar', A.conDif); linea('Cambio de estado de stock', A.reclas); linea('Halladas fuera del universo', A.sinLinea);
+      res.push([]); res.push([T('GESTIÓN', 4)]); linea('Índice de exactitud (IRA)', A.nContados ? A.sinDif / A.nContados : 0, 14); linea('Reconteo prioritario', A.alta); linea('Posibles cruces entre referencias', A.cruces.length); linea('Referencias en altura', A.conAereo);
+      if (A.hayValores) { res.push([]); res.push([T('IMPACTO ECONÓMICO (solo verificadas)', 4)]); linea('Valor en libros (SAP)', Math.round(A.valSap), 11); linea('Valor físico verificado', Math.round(A.valFis), 11); linea('Excedentes', Math.round(A.sobrantes), 13); linea('Faltantes', Math.round(A.faltantes), 12); linea('Impacto neto', Math.round(A.neta), A.neta < 0 ? 12 : 13); linea('Valor en calidad y bloqueado', Math.round(A.valCalBlq), 11); }
+      res.push([]); res.push([T('AVANCE POR ALMACÉN', 4)]);
+      res.push([T('Almacén', 4), T('Materiales', 4), T('Contados', 4), T('Pendientes', 4), T('% avance', 4), T('Con diferencia', 4), T('Valor dif.', 4)]);
+      A.porAlm.forEach(x => res.push([T(codN(x.alm), 5), T(x.mat, 6), T(x.cont, 6), T(x.mat - x.cont, 6), T(x.mat ? x.cont / x.mat : 0, 14), T(x.dif, 6), T(x.hayVal ? Math.round(x.valDif) : '', x.valDif < 0 ? 12 : 11)]));
+      const blob = await xlsxLibro([
+        { nombre: 'CONTROL INTERNO', celdas: hoja, anchos: anchosCI, fijar: 8, filtro: `A8:${finCI}`, unir: ['A1:D3'], altos: { 7: 34 } },
+        { nombre: 'AJUSTES SAP', celdas: aj, anchos: [9, 9, 40, 6, 11, 12, 10, 11, 12, 10, 11, 12, 10, 13, 10, 11, 11, 36], fijar: 1, filtro: `A1:R${aj.length}`, altos: { 0: 30 } },
+        { nombre: 'RESUMEN', celdas: res, anchos: [36, 14, 12, 12, 12, 14, 14] }]);
       const url = URL.createObjectURL(blob), a = document.createElement('a');
-      a.href = url; a.download = `Inventario ${nombreSede(ses.sedeId)} ${hoyISO()}.xlsx`;
+      a.href = url; a.download = `Control interno ${nombreSede(ses.sedeId)} ${hoyISO()}.xlsx`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
     } catch (e) { toast('No se pudo armar el Excel: ' + e.message, 'error'); }
   }
 
   /* ----- Excel en formato MB52: el almacén de cada producto lo dice la MB52 (no el que escogieron al contar).
-     Solo lee la MB52, lo contado y las reconfirmaciones; no cambia nada guardado. ----- */
+     Solo lee la MB52, lo contado y los reconteos; no cambia nada guardado. ----- */
   function abrirMb52() {
     if (sinPermiso('reportes')) return;
     abrirModal(`<div class="fila-sb"><span class="h2">Descargar en formato MB52</span>${btnCerrar()}</div>
-      <span class="muted small mt8">Escoge la planilla MB52 de SAP. Cada producto sale en el almacén que dice la MB52, con lo que se contó y sus reconfirmaciones.</span>
+      <span class="muted small mt8">Escoge la planilla MB52 de SAP. Cada producto sale en el almacén que dice la MB52, con lo que se contó y sus reconteos.</span>
       <label for="mbArch" class="btn btn-pri btn-xl mt12" role="button" tabindex="0">Escoger planilla MB52</label>
       <input id="mbArch" type="file" accept=".xlsx,.xls" class="oculto">
       <p id="mbEstado" class="muted small" hidden></p>
@@ -4527,7 +4822,7 @@
     $('mbArch').addEventListener('change', ev => { const f = ev.target.files[0]; if (f) llenarMb52(f); });
   }
 
-  // Reconfirmaciones de inventario de este inventario (desde que se cargó SAP), con sus conteos
+  // Reconteos de inventario de este inventario (desde que se cargó SAP), con sus conteos
   async function reconfsInventario() {
     const lista = await llamar('bdCiclicos', ses.sedeId);
     const ini = [invData && invData.carga ? invData.carga.fecha : null, invData && invData.inventario ? invData.inventario.desde : null].filter(Boolean).sort((a, b) => new Date(b) - new Date(a));
@@ -4562,11 +4857,11 @@
       const num = (x, i) => (i >= 0 ? numSap(x[i]) : 0);
       const red = n => +Number(n || 0).toFixed(3);
 
-      aviso('Buscando reconfirmaciones…');
+      aviso('Buscando reconteos…');
       const rcs = await reconfsInventario();
       if (!window.JSZip) await cargarScript(JSZIP_URL);
 
-      // Lo contado (todas las sedes sumadas) y, si tiene, su última reconfirmación con conteo
+      // Lo contado (todas las sedes sumadas) y, si tiene, su último reconteo con conteo
       const datos = {}; datosInventario().forEach(f => (datos[String(f.cod)] = f));
       const valores = k => {
         const f = datos[k];
@@ -4578,7 +4873,7 @@
           const s = { PICKING: null, CALIDAD: null, BLOQUEADO: null };
           cs.forEach(c => { s[c.tipo] = (s[c.tipo] || 0) + c.cantidad; });
           const b = r.ciclico.base && r.ciclico.base[k];
-          if (b) v.ae = Number(b.aereo) || 0;     // el aéreo como estaba cuando se pidió la reconfirmación
+          if (b) v.ae = Number(b.aereo) || 0;     // el aéreo como estaba cuando se pidió el reconteo
           const otrasPk = f ? f.picking - (f.pk[ses.sedeId] || 0) : 0;
           rc = { pk: s.PICKING === null ? v.pk : s.PICKING + otrasPk, ae: f ? f.aereo : 0,
             cal: s.CALIDAD === null ? v.cal : s.CALIDAD, blq: s.BLOQUEADO === null ? v.blq : s.BLOQUEADO };
@@ -4619,17 +4914,17 @@
         });
       }
 
-      // Columnas de lo contado (con reconfirmación solo si alguno de la lista tiene)
+      // Columnas de lo contado (con reconteo solo si alguno de la lista tiene)
       const conRc = salida.some(r => r.val && r.val.rc);
       const C = conRc
-        ? [['PICKING', 'f', r => r.v.pk], ['RECONFIRMACION PICKING', 'r', r => r.rc && r.rc.pk], ['AEREO', 'f', r => r.v.ae], ['RECONFIRMACION AEREO', 'r', r => r.rc && r.rc.ae],
-          ['CALIDAD', 'f', r => r.v.cal], ['RECONFIRMACION CALIDAD', 'r', r => r.rc && r.rc.cal], ['BLOQUEO', 'f', r => r.v.blq], ['RECONFIRMACION BLOQUEO', 'r', r => r.rc && r.rc.blq],
-          ['TOTAL FISICO', 't', r => r.fis], ['TOTAL CON RECONFIRMACION', 't', r => r.conRc], ['DIFERENCIA', 'd', r => r.fis - r.sap], ['DIFERENCIA DE RECONFIRMACION', 'd', r => r.conRc - r.sap]]
+        ? [['PICKING', 'f', r => r.v.pk], ['RECONTEO PICKING', 'r', r => r.rc && r.rc.pk], ['AEREO', 'f', r => r.v.ae], ['RECONTEO AEREO', 'r', r => r.rc && r.rc.ae],
+          ['CALIDAD', 'f', r => r.v.cal], ['RECONTEO CALIDAD', 'r', r => r.rc && r.rc.cal], ['BLOQUEO', 'f', r => r.v.blq], ['RECONTEO BLOQUEO', 'r', r => r.rc && r.rc.blq],
+          ['TOTAL FISICO', 't', r => r.fis], ['TOTAL CON RECONTEO', 't', r => r.conRc], ['DIFERENCIA', 'd', r => r.fis - r.sap], ['DIFERENCIA DE RECONTEO', 'd', r => r.conRc - r.sap]]
         : [['PICKING', 'f', r => r.v.pk], ['AEREO', 'f', r => r.v.ae], ['CALIDAD', 'f', r => r.v.cal], ['BLOQUEO', 'f', r => r.v.blq],
           ['TOTAL FISICO', 't', r => r.fis], ['DIFERENCIA', 'd', r => r.fis - r.sap]];
 
-      // Estilos: 1-4 títulos (SAP azul, contado verde, reconfirmación naranja, totales gris), 5 texto, 6 número, 7 rojo, 8 verde,
-      // 9-10 fila para repartir (amarillo), 11 sección, 12 número de reconfirmación
+      // Estilos: 1-4 títulos (SAP azul, contado verde, reconteo naranja, totales gris), 5 texto, 6 número, 7 rojo, 8 verde,
+      // 9-10 fila para repartir (amarillo), 11 sección, 12 número de reconteo
       const cant = new Set([cLib, cCal, cBlq, cTot].filter(i => i >= 0));   // columnas de cantidad (códigos y almacén van sin decimales)
       const hoja = [];
       hoja.push(titMb.map(h => ({ v: h, s: 1 })).concat(C.map(([h, k]) => ({ v: h, s: k === 'f' ? 2 : k === 'r' ? 3 : 4 }))));
@@ -4649,7 +4944,7 @@
         } else C.forEach(() => fila.push({ v: '', s: secc ? 11 : 5 }));
         hoja.push(fila);
       });
-      const anchos = titMb.map((h, i) => i === cNom ? 46 : i === cCod ? 10 : Math.max(9, String(h).length + 2)).concat(C.map(([h]) => h.includes('RECONFIRMACION') ? 17 : 12));
+      const anchos = titMb.map((h, i) => i === cNom ? 46 : i === cCod ? 10 : Math.max(9, String(h).length + 2)).concat(C.map(([h]) => h.includes('RECONTEO') ? 17 : 12));
       aviso('Armando el Excel…');
       const blob = await xlsxConEstilo('INVENTARIO', hoja, anchos);
       const url = URL.createObjectURL(blob), a = document.createElement('a');
@@ -4787,14 +5082,19 @@
   function pintarSap() {
     const { filas, cab } = sapTmp;
     const tit = filas[cab].map((c, i) => String(c).trim() || `Columna ${i + 1}`);
-    const adiv = re => { const i = tit.findIndex(t => re.test(sinTilde(t))); return i; };
+    const adiv = (re, no) => { const i = tit.findIndex(t => re.test(sinTilde(t)) && !(no && no.test(sinTilde(t)))); return i; };
     const sel = (id, i) => `<select id="${id}" class="campo"><option value="-1">— No viene —</option>${tit.map((t, k) => `<option value="${k}" ${k === i ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
     const g = sapTmp.guia || {
       cod: adiv(/material|codigo|cod\b|sku|referencia/i),
-      inv: adiv(/libre|inventario|stock|existencia|disponible|cantidad|total/i),
-      cal: adiv(/calidad|inspecc/i),
-      blq: adiv(/bloq/i)
+      inv: adiv(/libre|inventario|stock|existencia|disponible|cantidad|total/i, /VALOR|\$/),
+      cal: adiv(/calidad|inspecc/i, /VALOR|\$/),
+      blq: adiv(/bloq/i, /VALOR|\$/)
     };
+    // Valores (precios) y almacén: opcionales. Con ellos el Avance muestra valores y el avance por almacén.
+    if (g.alm === undefined) g.alm = adiv(/^ALMAC/i);
+    if (g.vLib === undefined) g.vLib = adiv(/VALOR.*LIBRE|LIBRE.*VALOR|VALOR LIB/i);
+    if (g.vCal === undefined) g.vCal = adiv(/VALOR.*CALID|VALOR.*INSPEC/i);
+    if (g.vBlq === undefined) g.vBlq = adiv(/VALOR.*BLOQ/i);
     if (g.nom === undefined) g.nom = adiv(/texto|descrip|nombre/i);
     if (g.um === undefined) g.um = adiv(/^umb$|^um$|unidad/i);
     sapTmp.guia = g;
@@ -4805,9 +5105,17 @@
         <div><label class="lbl" for="sapCal">Calidad SAP</label>${sel('sapCal', g.cal)}</div>
         <div><label class="lbl" for="sapBlq">Bloqueado SAP</label>${sel('sapBlq', g.blq)}</div>
       </div>
+      ${sapModo !== 'ciclico' ? `<details class="mt8" ${g.alm >= 0 || g.vLib >= 0 ? 'open' : ''}><summary class="small">Almacén y valores (precios) ${ayudaHtml('Opcional. Con el almacén y los valores de la MB52, el Avance muestra los valores (sobrantes, faltantes y diferencia neta), el avance por almacén, y el Excel sale como el formato de Control Interno.')}</summary>
+        <div class="dos mt8">
+          <div><label class="lbl" for="sapAlm">Almacén</label>${sel('sapAlm', g.alm)}</div>
+          <div><label class="lbl" for="sapVLib">Valor libre utilización</label>${sel('sapVLib', g.vLib)}</div>
+          <div><label class="lbl" for="sapVCal">Valor calidad</label>${sel('sapVCal', g.vCal)}</div>
+          <div><label class="lbl" for="sapVBlq">Valor bloqueo</label>${sel('sapVBlq', g.vBlq)}</div>
+        </div></details>` : ''}
       <div id="sapPrev" class="mt12"></div>`;
-    ['sapCod', 'sapInv', 'sapCal', 'sapBlq'].forEach(id => $(id).addEventListener('change', () => {
+    ['sapCod', 'sapInv', 'sapCal', 'sapBlq', 'sapAlm', 'sapVLib', 'sapVCal', 'sapVBlq'].forEach(id => $(id) && $(id).addEventListener('change', () => {
       sapTmp.guia = Object.assign(sapTmp.guia, { cod: +$('sapCod').value, inv: +$('sapInv').value, cal: +$('sapCal').value, blq: +$('sapBlq').value });
+      if ($('sapAlm')) Object.assign(sapTmp.guia, { alm: +$('sapAlm').value, vLib: +$('sapVLib').value, vCal: +$('sapVCal').value, vBlq: +$('sapVBlq').value });
       prevSap();
     }));
     prevSap();
@@ -4828,7 +5136,10 @@
         if (!nuevos[c]) nuevos[c] = { codigo: c, nombre: g.nom >= 0 ? String(x[g.nom] ?? '').trim() : '', unidad: g.um >= 0 ? String(x[g.um] ?? '').trim() : '' };
         return malos.push(c);
       }
-      ok.push({ codigo: p.id, inventario: val(g.inv), calidad: val(g.cal), bloqueado: val(g.blq) });
+      const vOpc = i => (i >= 0 && String(x[i] ?? '').trim() !== '' ? numSap(x[i]) : null);
+      ok.push({ codigo: p.id, inventario: val(g.inv), calidad: val(g.cal), bloqueado: val(g.blq),
+        almacen: g.alm >= 0 ? String(x[g.alm] ?? '').trim().replace(/\.0+$/, '') : '', umb: g.um >= 0 ? String(x[g.um] ?? '').trim() : '',
+        valorLibre: vOpc(g.vLib), valorCalidad: vOpc(g.vCal), valorBloqueo: vOpc(g.vBlq) });
     });
     return { ok, malos, nuevos: Object.values(nuevos) };
   }
@@ -4907,7 +5218,7 @@
   const cicPuedeContar = c => c && c.estado === 'ABIERTO' && puede('ciclico');
   // Nombre que le pusieron (los viejos, que no tienen, salen con su tipo y fecha)
   const tituloCic = c => !c ? '' : (c.nota || `${nombreCic(c)} del ${fCorta(c.fecha)}`);
-  // ¿Lo que se cuenta en pantalla es de un cíclico/reconfirmación? (en Inventario, solo dentro de sus reconfirmaciones)
+  // ¿Lo que se cuenta en pantalla es de un cíclico/reconteo? (en Inventario, solo dentro de sus reconteos)
   const ctxCic = () => prodTab === 'ciclico' || (prodTab === 'inventario' && invSub === 'reconf');
   const esRcInv = c => esReconf(c) && c.origenTipo !== 'CICLICO';
   // SAP y diferencia: los ve quien pidió el cíclico, o quien tenga el permiso
@@ -4936,7 +5247,7 @@
       if (vista === 'productos' && ctxCic()) pintarApp();
     }).catch(e => { cicLista = []; toast(e.message, 'error'); if (vista === 'productos') pintarApp(); });
   }
-  // Carga la lista si hace falta (Cíclico y Reconfirmaciones de Inventario usan la misma)
+  // Carga la lista si hace falta (Cíclico y Reconteos de Inventario usan la misma)
   function asegurarCiclicos() {
     if (cicLista !== null && cicSede === ses.sedeId) return true;
     if (cicSede !== ses.sedeId) { cicLista = null; cicSel = null; cicData = null; }
@@ -4955,7 +5266,7 @@
     }).catch(e => { toast(e.message, 'error'); cicSel = null; cicData = null; cargarCiclicos(); });
     if (!sinPintar) { pintarApp(); window.scrollTo(0, 0); }
   }
-  // Volver: de una reconfirmación de cíclico, a su cíclico (pestaña Reconfirmaciones); si no, a la lista
+  // Volver: de un reconteo de cíclico, a su cíclico (pestaña Reconteos); si no, a la lista
   function volverCic(c) {
     c = c || cicSel_();
     if (c && esReconf(c) && c.origenTipo === 'CICLICO' && c.origenId && (cicLista || []).some(x => x.id === c.origenId)) {
@@ -4997,7 +5308,7 @@
     return tablaCics(l, 'cicl', () => { if ($('cicLista')) $('cicLista').innerHTML = listaCiclicos(); },
       cicF.ver === 'ABIERTO' ? (puede('ciclico_asignar') ? 'No hay cíclicos abiertos. Crea uno con «+ Nuevo cíclico».' : 'No hay cíclicos abiertos por ahora.') : 'No hay cíclicos aquí.');
   }
-  // Tabla de cíclicos o reconfirmaciones: toca una fila para abrirla
+  // Tabla de cíclicos o reconteos: toca una fila para abrirla
   function tablaCics(l, pk, repintar, vacio) {
     if (!l.length) return `<p class="muted small">${vacio}</p>`;
     const pg = paginar(pk, l, repintar);
@@ -5105,7 +5416,7 @@
     const filas = datosInvRc().filter(f => f.sapTotal || f.plantaRc || f.contado).map(f => {
       const x = { c: f.cod, n: f.p ? f.p.nombre : '', s: red(f.sapTotal), pk: red(f.picking), ae: red(f.aereo), ca: red(f.calidad), bl: red(f.bloqueado),
         t: red(f.plantaRc), d: red(f.difRc), k: f.contado ? 1 : 0, alm: f.almacenes.map(z => almCorto(z.key)).filter(Boolean).join(' / ') };
-      if (f.rc) x.cf = red(f.rc.pk);   // confirmación (picking de la reconfirmación)
+      if (f.rc) x.cf = red(f.rc.pk);   // confirmación (picking del reconteo)
       if (f.sap) x.sap = [red(f.sap.inventario), red(f.sap.calidad), red(f.sap.bloqueado)];
       return x;
     });
@@ -5169,7 +5480,7 @@
     b.disabled = true; b.textContent = 'Cerrando…';
     try {
       invData = await llamar('bdInventarioGeneral', ses.sedeId);
-      try { invRcs = await reconfsInventario(); } catch (e) { invRcs = invRcs || []; }   // la foto va con la reconfirmación
+      try { invRcs = await reconfsInventario(); } catch (e) { invRcs = invRcs || []; }   // la foto va con el reconteo
       const a = invData.inventario || {};
       const cerrar = a.estado !== 'ABIERTO' ? null : a.id ? { id: a.id } : a.virtual && a.primer ? { nombre: a.nombre, fecha: a.fecha, desde: a.primer } : null;
       if (!cerrar) throw new Error('Este inventario no tiene conteos todavía: no hay nada que cerrar.');
@@ -5265,31 +5576,31 @@
     b.disabled = false;
   }
 
-  /* ----- Reconfirmaciones de Inventario (van en la pestaña Inventario, aparte de los cíclicos) ----- */
+  /* ----- Reconteos de Inventario (van en la pestaña Inventario, aparte de los cíclicos) ----- */
   function vistaRcInv() {
-    if (!asegurarCiclicos()) return '<div class="cargando">Cargando reconfirmaciones…</div>';
+    if (!asegurarCiclicos()) return '<div class="cargando">Cargando reconteos…</div>';
     if (cicSel && !esRcInv(cicSel_())) { cicSel = null; cicData = null; }
     if (cicNuevo && !(cicNuevo.tipo === 'RECONFIRMACION' && cicNuevo.origenTipo === 'INVENTARIO')) cicNuevo = null;
     if (cicSel) return detalleCiclico();
     const ab = (cicLista || []).filter(c => esRcInv(c) && c.estado === 'ABIERTO').length;
     return `${cicNuevo ? formNuevoCiclico() : ''}
       <section class="card col gap8">
-        <div class="fila-sb wrap-f gap8"><span class="h3">Reconfirmaciones de inventario <span class="muted small">(${ab} abierta${ab === 1 ? '' : 's'})</span></span>
+        <div class="fila-sb wrap-f gap8"><span class="h3">Reconteos de inventario <span class="muted small">(${ab} abierto${ab === 1 ? '' : 's'})</span></span>
           <span class="fila gap8 wrap-f">
-            ${puede('ciclico_asignar') && !cicNuevo ? '<button class="btn btn-pri btn-mini" onclick="pedirReconfirmacion(\'inv\')">Pedir reconfirmación</button>' : ''}
-            <div class="seg seg-c" role="group" aria-label="Ver reconfirmaciones">${[['ABIERTO', 'Abiertas'], ['CERRADO', 'Cerradas'], ['', 'Todas']].map(([k, t]) =>
+            ${puede('ciclico_asignar') && !cicNuevo ? '<button class="btn btn-pri btn-mini" onclick="pedirReconfirmacion(\'inv\')">Pedir reconteo</button>' : ''}
+            <div class="seg seg-c" role="group" aria-label="Ver reconteos">${[['ABIERTO', 'Abiertos'], ['CERRADO', 'Cerrados'], ['', 'Todos']].map(([k, t]) =>
               `<button class="${cicF.ver === k ? 'on' : ''}" onclick="cicF.ver='${k}'; pagInicio('rci'); pintarApp()">${t}</button>`).join('')}</div></span></div>
-        <span class="muted small">Vuelven a contar los productos que salieron con diferencia contra SAP: el picking y el aéreo estiba por estiba. Toca una para abrirla.</span>
+        <span class="muted small">Vuelven a contar los productos que salieron con diferencia contra SAP: el picking y el aéreo estiba por estiba. Toca uno para abrirlo.</span>
         <div id="rcInvLista">${listaRcInv()}</div>
       </section>`;
   }
   function listaRcInv() {
     const l = (cicLista || []).filter(c => esRcInv(c) && (!cicF.ver || c.estado === cicF.ver));
     return tablaCics(l, 'rci', () => { if ($('rcInvLista')) $('rcInvLista').innerHTML = listaRcInv(); },
-      cicF.ver === 'ABIERTO' ? (puede('ciclico_asignar') ? 'No hay reconfirmaciones abiertas. Pide una con «Pedir reconfirmación».' : 'No hay reconfirmaciones abiertas por ahora.') : 'No hay reconfirmaciones aquí.');
+      cicF.ver === 'ABIERTO' ? (puede('ciclico_asignar') ? 'No hay reconteos abiertos. Pide uno con «Pedir reconteo».' : 'No hay reconteos abiertos por ahora.') : 'No hay reconteos aquí.');
   }
 
-  /* ----- Reconfirmación de inventario: la lista de sus productos para contar (solo el picking).
+  /* ----- Reconteo de inventario: la lista de sus productos para contar (solo el picking).
      Código, producto, almacén, pasillo (donde está su picking en el plano) y, si tiene aéreo, el rack donde está.
      Se filtra por pasillo o por rack (lo que les toque contar). Cada cantidad se guarda sola al pasar al siguiente;
      «Finalizar» guarda lo que falte y dice Listo. ----- */
@@ -5319,7 +5630,7 @@
     }
     return x && x.d ? x.d : null;   // mientras se vuelve a pedir, sirve el que había
   }
-  // Las filas de la reconfirmación en una sede. null mientras se carga lo de esa sede.
+  // Las filas del reconteo en una sede. null mientras se carga lo de esa sede.
   function rcFilas(sid) {
     sid = sid || rcSede();
     const L = asegurarPlanoSede(sid), ubOk = asegurarUbicSede(sid), almOk = asegurarAlmProd();
@@ -5376,7 +5687,7 @@
     if (rcc.pas && rcc.pas !== '-' && !pasillos.includes(rcc.pas)) rcc.pas = '';
     rcc.racks = (rcc.racks || []).filter(r => racks.includes(r));
     return `<section class="card col gap12 rc-contar">
-      <div class="col gap4"><span class="h3">Productos para reconfirmar</span>
+      <div class="col gap4"><span class="h3">Productos para recontar</span>
         <span class="muted small">Escoge la sede y el pasillo o los racks que te tocó contar (puedes marcar varios). Escribe cuánto hay en <b>picking</b> de cada producto: se guarda solo al pasar al siguiente (✓). Cuando termines, toca <b>Finalizar</b>.</span></div>
       <div class="rc-filtros">
         ${selSede}
@@ -5387,7 +5698,7 @@
           <details id="rcRacks" class="rc-racks"><summary class="campo" aria-labelledby="rcRackL">${rcRacksTxt()}</summary>
             <div class="rc-racks-lista">
               ${racks.length ? racks.map(r => `<label class="rc-rack-op"><input type="checkbox" value="${esc(r)}" ${rcc.racks.includes(r) ? 'checked' : ''}> ${esc(r)}</label>`).join('')
-                : '<span class="muted small">No hay racks de aéreo en esta reconfirmación.</span>'}
+                : '<span class="muted small">No hay racks de aéreo en este reconteo.</span>'}
               ${racks.length ? '<button type="button" id="rcRacksTodos" class="btn btn-sec">Ver todos</button>' : ''}
             </div></details></div>
         <div class="inv-buscar"><label class="lbl" for="rcQ">Buscar</label>
@@ -5420,7 +5731,7 @@
         <td class="rc-est">${f.cont !== null ? '<span class="txt-verde" title="Guardado">✓</span>' : ''}</td></tr>`).join('')}
       </tbody></table></div>${pg.barra}`;
   }
-  /* Escanear en la reconfirmación: el rótulo (E000123), el EAN o el código del producto. Solo busca el producto en la lista y
+  /* Escanear en el reconteo: el rótulo (E000123), el EAN o el código del producto. Solo busca el producto en la lista y
      deja el cursor en su cantidad para guardarla enseguida (nada de ubicar ni dar salida). Si el producto no tiene EAN,
      sale «+ Agregar EAN» para escanear el de la caja y guardarlo de una vez. */
   async function rcEscaneado(v, silencio) {
@@ -5436,7 +5747,7 @@
       if (!silencio) toast('No hay un producto con ese código', 'error');
       return;
     }
-    if (!(cpScope().cic.codigos || []).includes(p.id)) return toast(`${p.nombre} no está en esta reconfirmación`, 'error');
+    if (!(cpScope().cic.codigos || []).includes(p.id)) return toast(`${p.nombre} no está en este reconteo`, 'error');
     pitido();
     rcc.q = p.id; rcc.pas = ''; rcc.racks = []; rcc.eanPid = p.codigoBarras ? '' : p.id; pagInicio('rcc');
     pintarApp();
@@ -5498,7 +5809,7 @@
   }
   const rcFaltan = n => `falta${n === 1 ? '' : 'n'} <b class="txt-naranja">${n}</b>`;
   function rcCuenta() {
-    // El avance de arriba (cuántos van reconfirmados) también se pone al día
+    // El avance de arriba (cuántos van recontados) también se pone al día
     const pr = document.querySelector('.cic-progreso');
     if (pr && cicData) { const d = datosCiclico(), h = d.filter(f => f.listo).length, pct = d.length ? Math.round(h * 100 / d.length) : 0;
       const i = pr.querySelector('i'), b = pr.querySelector('b'); if (i) i.style.width = pct + '%'; if (b) b.textContent = `${h} de ${d.length}`; }
@@ -5523,15 +5834,15 @@
     if (b) { b.disabled = false; b.textContent = 'Finalizar'; }
   }
 
-  /* ----- Reconfirmaciones de un cíclico (pestaña dentro del cíclico) ----- */
+  /* ----- Reconteos de un cíclico (pestaña dentro del cíclico) ----- */
   function cicReconfHtml() {
     const c = cicSel_();
     if (cicNuevo && cicNuevo.tipo === 'RECONFIRMACION' && cicNuevo.origenId === c.id) return formNuevoCiclico();
     const jefe = puede('ciclico_asignar') && cicVeSap(c);
     const conDif = jefe ? datosCiclico().filter(f => f.contado && f.dif).length : 0;
     return `<section class="card col gap8">
-      <div class="fila-sb wrap-f gap8"><span class="h3">Reconfirmaciones de este cíclico</span>
-        ${jefe ? `<button id="cicPedirRc" class="btn ${conDif ? 'btn-pri' : 'btn-sec'} btn-mini" onclick="pedirReconfirmacion('cic')">Pedir reconfirmación${conDif ? ` (${conDif})` : ''}</button>` : ''}</div>
+      <div class="fila-sb wrap-f gap8"><span class="h3">Reconteos de este cíclico</span>
+        ${jefe ? `<button id="cicPedirRc" class="btn ${conDif ? 'btn-pri' : 'btn-sec'} btn-mini" onclick="pedirReconfirmacion('cic')">Pedir reconteo${conDif ? ` (${conDif})` : ''}</button>` : ''}</div>
       <span class="muted small">${jefe ? 'Pide que vuelvan a contar los productos que salieron con diferencia. Sus resultados también salen en la tabla del cíclico.' : 'Toca una para contarla.'}</span>
       <div id="cicRcLista">${listaRcCic()}</div>
     </section>`;
@@ -5540,7 +5851,7 @@
     const ids = (cicData.reconfs || []).map(r => r.ciclico.id);
     const l = ids.map(id => (cicLista || []).find(x => x.id === id) || Object.assign({ contados: 0 }, cicData.reconfs.find(r => r.ciclico.id === id).ciclico)).reverse();
     return tablaCics(l, 'rcc', () => { if ($('cicRcLista')) $('cicRcLista').innerHTML = listaRcCic(); },
-      puede('ciclico_asignar') ? 'Todavía no hay reconfirmaciones. Cuando haya productos contados con diferencia, toca «Pedir reconfirmación».' : 'No hay reconfirmaciones por ahora.');
+      puede('ciclico_asignar') ? 'Todavía no hay reconteos. Cuando haya productos contados con diferencia, toca «Pedir reconteo».' : 'No hay reconteos por ahora.');
   }
 
   /* ----- Nuevo cíclico ----- */
@@ -5555,19 +5866,19 @@
     const zonas = sede.zonas.filter(z => sede.racks.some(r => r.zonaId === z.id));
     const conDif = datosInventario().filter(f => f.dif && (f.sap || f.planta)).length;
     const rc = n.tipo === 'RECONFIRMACION';
-    return `<section class="card col gap12 cic-nuevo" aria-label="${rc ? 'Nueva reconfirmación' : 'Nuevo cíclico'}">
-      <div class="col gap4"><span class="h3">${rc ? (n.origenTipo === 'CICLICO' ? 'Nueva reconfirmación de cíclico' : 'Nueva reconfirmación de inventario') : 'Nuevo cíclico'}</span>
+    return `<section class="card col gap12 cic-nuevo" aria-label="${rc ? 'Nuevo reconteo' : 'Nuevo cíclico'}">
+      <div class="col gap4"><span class="h3">${rc ? (n.origenTipo === 'CICLICO' ? 'Nuevo reconteo de cíclico' : 'Nuevo reconteo de inventario') : 'Nuevo cíclico'}</span>
         ${rc ? `<span class="muted small">Sale de: <b>${esc(n.origen)}</b>. Quien la haga vuelve a contar picking, calidad y bloqueado, y revisa el aéreo estiba por estiba en el plano.</span>` : ''}</div>
       <div class="cic-grid">
         <div class="col gap8">
-          <label class="lbl" for="cnNombre">1. Nombre ${rc ? 'de la reconfirmación' : 'del cíclico'}</label>
-          <input id="cnNombre" class="campo" placeholder="${rc ? 'Ej. Reconfirmación galletas' : 'Ej. Cíclico galletas semana 46'}" autocomplete="off" maxlength="80" value="${esc(n.nombre)}" oninput="cicNuevo.nombre=this.value">
+          <label class="lbl" for="cnNombre">1. Nombre ${rc ? 'del reconteo' : 'del cíclico'}</label>
+          <input id="cnNombre" class="campo" placeholder="${rc ? 'Ej. Reconteo galletas' : 'Ej. Cíclico galletas semana 46'}" autocomplete="off" maxlength="80" value="${esc(n.nombre)}" oninput="cicNuevo.nombre=this.value">
           <span class="muted small">Con este nombre lo encuentran en la lista. Quien tenga permiso de contar lo ve y lo puede contar.</span>
           <div><label class="lbl" for="cnFecha">Fecha</label><input id="cnFecha" class="campo" type="date" value="${esc(n.fecha)}" onchange="cicNuevo.fecha=this.value"></div>
-          ${ini.sedes.length > 1 ? `<div><span class="lbl">Sedes donde se cuenta ${ayudaHtml('Marca las sedes que van a contar este ' + (rc ? 'reconfirmación' : 'cíclico') + '. Lo que se cuente en cada una y su aéreo se suman contra el mismo SAP. Lo ven en la lista de cíclicos de cada sede marcada.')}</span>
+          ${ini.sedes.length > 1 ? `<div><span class="lbl">Sedes donde se cuenta ${ayudaHtml('Marca las sedes que van a contar este ' + (rc ? 'reconteo' : 'cíclico') + '. Lo que se cuente en cada una y su aéreo se suman contra el mismo SAP. Lo ven en la lista de cíclicos de cada sede marcada.')}</span>
             ${sedesCheckHtml('cnSede', n.sedes || [ses.sedeId], ses.sedeId, 'cicNuevo.sedes')}</div>` : ''}
         </div>
-        ${rc ? `<div class="col gap8"><span class="lbl">2. ¿Qué productos va a reconfirmar?</span>
+        ${rc ? `<div class="col gap8"><span class="lbl">2. ¿Qué productos va a recontar?</span>
           <div class="dos"><button class="btn btn-sec cn-pegar" onclick="rcCargarArchivo()">📄 Cargar Excel con los productos</button>
             <button class="btn btn-sec cn-pegar" onclick="cnPegarLista()">📋 Pegar lista de códigos</button></div>
           <div id="cnCand">${cnCandHtml()}</div></div>` : `<div class="col gap8">
@@ -5591,7 +5902,7 @@
       <p id="cnErr" class="error" hidden></p>
       <div class="fila gap8 wrap-f" style="justify-content:flex-end">
         <button class="btn btn-sec" onclick="cicNuevo=null; pintarApp()">Cancelar</button>
-        <button id="cnOk" class="btn btn-pri" onclick="guardarCiclico()">${rc ? 'Crear reconfirmación' : 'Crear cíclico'}</button></div>
+        <button id="cnOk" class="btn btn-pri" onclick="guardarCiclico()">${rc ? 'Crear reconteo' : 'Crear cíclico'}</button></div>
     </section>`;
   }
 
@@ -5725,7 +6036,7 @@
     const c = cicSel_();
     if (!c || sinPermiso('ciclico_asignar')) return;
     abrirModal(`<div class="fila-sb"><span class="h3">Sedes donde se cuenta</span><button class="btn btn-sec btn-x" aria-label="Cerrar" onclick="cerrarModal()">✕</button></div>
-      <p class="muted small mt8">${esc(tituloCic(c))}. Marca las sedes que cuentan: lo contado en cada una y su aéreo se suman. ${esReconf(c) ? '' : 'Sus reconfirmaciones abiertas también cambian.'}</p>
+      <p class="muted small mt8">${esc(tituloCic(c))}. Marca las sedes que cuentan: lo contado en cada una y su aéreo se suman. ${esReconf(c) ? '' : 'Sus reconteos abiertos también cambian.'}</p>
       <div class="mt8">${sedesCheckHtml('esSede', c.sedes || [c.sedeId], c.sedeId, 'window._esSedes')}</div>
       <p id="esErr" class="error" hidden></p>
       <div class="fila gap8 mt12" style="justify-content:flex-end"><button class="btn btn-sec" onclick="cerrarModal()">Cancelar</button>
@@ -5748,7 +6059,7 @@
     const n = cicNuevo, err = m => { const e = $('cnErr'); e.textContent = m; e.hidden = false; };
     $('cnErr').hidden = true;
     n.nombre = String(n.nombre || '').trim();
-    if (!n.nombre) { $('cnNombre').focus(); return err(n.tipo === 'RECONFIRMACION' ? 'Escribe el nombre de la reconfirmación.' : 'Escribe el nombre del cíclico.'); }
+    if (!n.nombre) { $('cnNombre').focus(); return err(n.tipo === 'RECONFIRMACION' ? 'Escribe el nombre del reconteo.' : 'Escribe el nombre del cíclico.'); }
     if (!n.codigos.length) return err(n.tipo === 'RECONFIRMACION' ? 'Marca al menos un producto.' : 'Agrega al menos un producto.');
     const b = $('cnOk'); b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdCrearCiclico', { sedeId: ses.sedeId, fecha: $('cnFecha').value || hoyISO(), nota: n.nombre, asignados: [], codigos: n.codigos,
@@ -5760,14 +6071,14 @@
         pitido(); toast(`${tituloCic(c)}: cread${esReconf(c) ? 'a' : 'o'} con ${c.codigos.length} producto${c.codigos.length === 1 ? '' : 's'}`, 'ok');
         abrirCiclico(c.id);
       })
-      .catch(e => { err(e.message); b.disabled = false; b.textContent = n.tipo === 'RECONFIRMACION' ? 'Crear reconfirmación' : 'Crear cíclico'; });
+      .catch(e => { err(e.message); b.disabled = false; b.textContent = n.tipo === 'RECONFIRMACION' ? 'Crear reconteo' : 'Crear cíclico'; });
   }
 
-  /* ----- Reconfirmación: volver a contar lo que tiene diferencia (picking + aéreo estiba por estiba) ----- */
+  /* ----- Reconteo: volver a contar lo que tiene diferencia (picking + aéreo estiba por estiba) ----- */
   const esReconf = c => !!c && c.tipo === 'RECONFIRMACION';
-  const nombreCic = c => !esReconf(c) ? 'Cíclico' : c.origenTipo === 'CICLICO' ? 'Reconfirmación de cíclico' : 'Reconfirmación de inventario';
+  const nombreCic = c => !esReconf(c) ? 'Cíclico' : c.origenTipo === 'CICLICO' ? 'Reconteo de cíclico' : 'Reconteo de inventario';
 
-  // Desde Inventario ('inv') o desde el cíclico abierto ('cic'): arma la reconfirmación con los productos que tienen diferencia
+  // Desde Inventario ('inv') o desde el cíclico abierto ('cic'): armal reconteo con los productos que tienen diferencia
   function pedirReconfirmacion(fuente) {
     if (sinPermiso('ciclico_asignar')) return;
     let filas, origen, origenTipo, origenId = null;
@@ -5779,7 +6090,7 @@
       filas = datosCiclico().filter(f => f.contado && f.dif);
       origen = tituloCic(c); origenTipo = 'CICLICO'; origenId = c.id;
     }
-    // Sin diferencias igual se abre: puede cargar o pegar los productos que quiere reconfirmar
+    // Sin diferencias igual se abre: puede cargar o pegar los productos que quiere recontar
     const sap = {}, base = {};
     filas.forEach(f => {
       if (f.sap) sap[f.cod] = { inventario: f.sap.inventario, calidad: f.sap.calidad, bloqueado: f.sap.bloqueado };
@@ -5787,7 +6098,7 @@
     });
     cicNuevo = { tipo: 'RECONFIRMACION', fuente, origen, origenTipo, origenId, base, codigos: filas.map(f => f.cod), sap, archivo: null, fecha: hoyISO(),
       sedes: fuente === 'cic' && cicData && cicData.ciclico.sedes ? cicData.ciclico.sedes.slice() : [ses.sedeId],   // la de un cíclico se cuenta en sus mismas sedes
-      nombre: fuente === 'inv' ? 'Reconfirmación de inventario ' + fCorta(hoyISO()) : 'Reconfirmación de ' + origen,
+      nombre: fuente === 'inv' ? 'Reconteo de inventario ' + fCorta(hoyISO()) : 'Reconteo de ' + origen,
       candidatos: filas.map(f => ({ cod: f.cod, sapTotal: f.sapTotal, planta: f.planta, dif: f.dif })) };
     if (fuente === 'inv') { cicSel = null; cicData = null; prodTab = 'inventario'; invSub = 'reconf'; }
     else cicSub = 'reconf';
@@ -5797,7 +6108,7 @@
 
   function cnCandHtml() {
     const n = cicNuevo, sel = new Set(n.codigos);
-    if (!n.candidatos.length) return '<p class="muted small">Carga o pega los códigos de los productos que quieres reconfirmar.</p>';
+    if (!n.candidatos.length) return '<p class="muted small">Carga o pega los códigos de los productos que quieres recontar.</p>';
     const difCls = d => !d ? 'dif-ok' : d < 0 ? 'dif-falta' : 'dif-sobra';
     return `<div class="fila-sb"><span class="muted small"><b>${sel.size}</b> de ${n.candidatos.length} marcados</span>
         <span class="fila gap12"><button class="link small" onclick="cnCandTodos(true)">Todos</button><button class="link small" onclick="cnCandTodos(false)">Ninguno</button></span></div>
@@ -5870,7 +6181,7 @@
   }
   function cnCandTodos(on) { cicNuevo.codigos = on ? cicNuevo.candidatos.map(c => c.cod) : []; $('cnCand').innerHTML = cnCandHtml(); }
 
-  // Estibas del aéreo de los productos de la reconfirmación, con su última revisión
+  // Estibas del aéreo de los productos del reconteo, con su última revisión
   let aereoKeys = [];
   function aereoCiclico() {
     const c = cicSel_(), codes = new Set(cicData.ciclico.codigos);
@@ -6021,11 +6332,11 @@
     const pct = d.length ? Math.round(hechos * 100 / d.length) : 0;
     const nRc = (cicData.reconfs || []).length;
     const jefeC = puede('ciclico_asignar') || cicVeSap(c);
-    const volver = rc ? (c.origenTipo === 'CICLICO' && c.origenId && (cicLista || []).some(x => x.id === c.origenId) ? 'Volver al cíclico' : 'Todas las reconfirmaciones') : 'Todos los cíclicos';
+    const volver = rc ? (c.origenTipo === 'CICLICO' && c.origenId && (cicLista || []).some(x => x.id === c.origenId) ? 'Volver al cíclico' : 'Todos los reconteos') : 'Todos los cíclicos';
     const cab = rc ? (c.origenTipo === 'CICLICO' ? 'cic-cab-rcc' : 'cic-cab-rc') : '';
-    const cerrado = `<div class="alerta-fefo">Est${rc ? 'a reconfirmación' : 'e cíclico'} está cerrad${rc ? 'a' : 'o'}. Para seguir contando, el encargado l${rc ? 'a' : 'o'} tiene que volver a abrir.</div>`;
-    // Pestañas: las reconfirmaciones de un cíclico van dentro de él
-    const tabRc = !rc && (jefeC || nRc) ? [['reconf', `Reconfirmaciones${nRc ? ` (${nRc})` : ''}`]] : [];
+    const cerrado = `<div class="alerta-fefo">Est${rc ? 'a reconteo' : 'e cíclico'} está cerrad${rc ? 'a' : 'o'}. Para seguir contando, el encargado l${rc ? 'a' : 'o'} tiene que volver a abrir.</div>`;
+    // Pestañas: los reconteos de un cíclico van dentro de él
+    const tabRc = !rc && (jefeC || nRc) ? [['reconf', `Reconteos${nRc ? ` (${nRc})` : ''}`]] : [];
     if (!jefeC) {   // quien cuenta: solo el título, el avance y sus pestañas
       const tabs = [['ingresar', rcI ? 'Contar' : 'Ingresar'], ['confirmar', 'Consultar']].concat(tabRc);
       if (!tabs.some(t => t[0] === cicSub)) cicSub = 'ingresar';
@@ -6034,7 +6345,7 @@
         <div class="fila-sb wrap-f gap8"><span class="col gap4"><span class="h3">${esc(tituloCic(c))}</span>
             <span class="muted small">${rc ? nombreCic(c) + ' · ' : ''}${fCorta(c.fecha)}${sedesCicTxt(c) ? ' · se cuenta en ' + esc(sedesCicTxt(c)) : ''}</span></span>
           <button class="btn btn-sec btn-mini" onclick="historialCiclico()">Historial</button></div>
-        <div class="cic-progreso"><span class="us-barra-p"><i style="width:${pct}%"></i></span><b>${hechos} de ${d.length}</b> ${rc ? 'reconfirmados' : 'contados'}</div>
+        <div class="cic-progreso"><span class="us-barra-p"><i style="width:${pct}%"></i></span><b>${hechos} de ${d.length}</b> ${rc ? 'recontados' : 'contados'}</div>
       </section>
       ${subTabsHtml(cicSub, tabs, 'cicSub')}
       ${cicSub === 'reconf' ? cicReconfHtml() : !cicPuedeContar(c) ? cerrado : cicSub === 'confirmar' ? cpConfirmarHtml() : rcI ? rcContarHtml() : cpIngresarHtml()}`;
@@ -6052,11 +6363,11 @@
             ${puede('ciclico_asignar') && ini.sedes.length > 1 && c.estado === 'ABIERTO' ? '<button class="btn btn-sec btn-mini" onclick="editarSedesCiclico()">Sedes</button>' : ''}
             ${puede('ciclico_asignar') && cicVeSap(c) && c.estado === 'ABIERTO' && !rc ? `<button class="btn btn-sec btn-mini" onclick="abrirCargaSap('ciclicoAct')" title="Si te equivocaste de Excel, sube el correcto">${c.archivo ? 'Volver a cargar el Excel' : 'Cargar Excel de SAP'}</button>` : ''}
             ${puede('reportes') && cicVeSap(c) ? '<button class="btn btn-sec btn-mini" onclick="descargarCiclico()">Descargar Excel</button>' : ''}
-            ${puede('ciclico_asignar') ? (c.estado === 'ABIERTO' ? `<button class="btn btn-sec btn-mini" onclick="estadoCiclico('CERRADO')">Cerrar ${rc ? 'reconfirmación' : 'cíclico'}</button>`
+            ${puede('ciclico_asignar') ? (c.estado === 'ABIERTO' ? `<button class="btn btn-sec btn-mini" onclick="estadoCiclico('CERRADO')">Cerrar ${rc ? 'reconteo' : 'cíclico'}</button>`
               : '<button class="btn btn-sec btn-mini" onclick="estadoCiclico(\'ABIERTO\')">Volver a abrir</button>') + '<button class="btn btn-sal btn-mini" onclick="borrarCiclico()">Eliminar</button>' : ''}
             </span>
         </div>
-        <div class="cic-progreso"><span class="us-barra-p"><i style="width:${pct}%"></i></span><b>${hechos} de ${d.length}</b> ${rc ? (rcI ? 'reconfirmados' : 'reconfirmados (picking + aéreo)') : 'contados'}</div>
+        <div class="cic-progreso"><span class="us-barra-p"><i style="width:${pct}%"></i></span><b>${hechos} de ${d.length}</b> ${rc ? (rcI ? 'recontados' : 'recontados (picking + aéreo)') : 'contados'}</div>
       </section>
       ${(() => {
         const tabs = [];
@@ -6069,7 +6380,7 @@
       })()}
       ${cicSub !== 'tabla' ? '' : `<div id="cpAvance">${cpAvanceHtml()}</div>
       ${c.estado === 'CERRADO'
-        ? `<div class="alerta-fefo">Est${rc ? 'a reconfirmación' : 'e cíclico'} está cerrad${rc ? 'a' : 'o'}. Para seguir contando, el encargado l${rc ? 'a' : 'o'} tiene que volver a abrir.</div>` : ''}
+        ? `<div class="alerta-fefo">Est${rc ? 'a reconteo' : 'e cíclico'} está cerrad${rc ? 'a' : 'o'}. Para seguir contando, el encargado l${rc ? 'a' : 'o'} tiene que volver a abrir.</div>` : ''}
       ${rc ? `<section class="card col gap8" aria-label="Aéreo">
         <div class="col gap4"><span class="h3">${cicPuedeContar(c) ? '2. ' : ''}Aéreo: revisa cada estiba en el plano</span>
           <span class="muted small">Ve a cada lugar y mira la estiba. Si coincide, <b>Está bien</b>. Si el rótulo tiene la cantidad o el vencimiento mal, <b>Corregir</b> (se arregla el rótulo y el plano, y queda guardado). Si no está, <b>No está</b>.</span></div>
@@ -6117,7 +6428,7 @@
     }
     return null;
   }
-  // Lo que se guarda al cerrar un cíclico o una reconfirmación
+  // Lo que se guarda al cerrar un cíclico o un reconteo
   function fotoCierreCiclico() {
     const aereo = {}, tot = {}, ok = {}, sap = {};
     datosCiclico().forEach(f => {
@@ -6154,16 +6465,16 @@
       f.planta = f.picking + f.aereo + f.calidad + f.bloqueado;
       f.dif = +(f.planta - f.sapTotal).toFixed(3);
       if (rc && ci && ci.tot && ci.tot[cod] !== undefined) { f.aereoTot = ci.tot[cod]; f.aereoOk = ci.ok[cod]; }
-      else if (rc) {   // en reconfirmación también tiene que estar revisado todo su aéreo
+      else if (rc) {   // en reconteo también tiene que estar revisado todo su aéreo
         const ls = sede.lineas.filter(l => l.productoId === cod && sede.espPorId[l.ubicacionId] && sede.espPorId[l.ubicacionId].nivel !== 0);
         f.aereoTot = ls.length;
         f.aereoOk = ls.filter(l => val.has(`${l.ubicacionId}|${l.productoId}|${l.lote}`)).length;
       }
       f.listo = f.contado && (!rc || !esRcInv(cicData.ciclico) && f.aereoOk === f.aereoTot || esRcInv(cicData.ciclico));
-      // En la reconfirmación: cómo estaba cuando se pidió
+      // En el reconteo: cómo estaba cuando se pidió
       const b = rc && cicData.ciclico.base ? cicData.ciclico.base[cod] : null;
       if (b) { f.antes = Number(b.planta) || 0; f.difAntes = +(f.planta - f.antes).toFixed(3); }
-      // En el cíclico: lo que salió en su última reconfirmación de este producto
+      // En el cíclico: lo que salió en su último reconteo de este producto
       const r = [...(cicData.reconfs || [])].reverse().find(x => x.ciclico.codigos.includes(cod));
       if (r) {
         const cs = r.conteos.filter(x => x.codigo === cod);
@@ -6190,12 +6501,12 @@
     const rc = esReconf(c);
     const difCls = d => !d ? 'dif-ok' : d < 0 ? 'dif-falta' : 'dif-sobra';
     const difH = d => `<span class="dif ${difCls(d)}">${d > 0 ? '+' : ''}${nInv(d)}</span>`;
-    const conRc = veSap && !rc && (cicData.reconfs || []).length;          // columnas de reconfirmación en el cíclico
-    const conAntes = veSap && rc && !!cicData.ciclico.base;                // en la reconfirmación: contra lo que había
+    const conRc = veSap && !rc && (cicData.reconfs || []).length;          // columnas de reconteo en el cíclico
+    const conAntes = veSap && rc && !!cicData.ciclico.base;                // en el reconteo: contra lo que había
     const pg = paginar('cic', lo, pintarCicTabla);
     const clic = f => contar && (!f.contado || !veSap) ? `cicContar('${esc(f.cod)}')` : veSap ? `historialInventario('${esc(f.cod)}')` : '';
     const filas = pg.filas.map(f => `<tr onclick="${clic(f)}" class="${f.listo ? '' : 'cic-pend'}">
-        <td>${f.listo ? `<span class="tag ok">${rc ? 'Reconfirmado' : 'Contado'}</span>` : '<span class="tag amar">Pendiente</span>'}</td>
+        <td>${f.listo ? `<span class="tag ok">${rc ? 'Recontado' : 'Contado'}</span>` : '<span class="tag amar">Pendiente</span>'}</td>
         <td>${esc(f.p ? f.p.codigoNutresa || '—' : '—')}</td>
         <td>${esc(f.cod)}</td>
         <td class="inv-prod">${esc(f.p ? f.p.nombre : 'Producto no está en el catálogo')}</td>
@@ -6215,31 +6526,31 @@
             <td class="small g-rc">${esc(f.rc.ult.usuario || '—')}<span class="muted"> · ${fechaHora(f.rc.ult.fecha)}</span></td>`
           : f.rc ? '<td class="g-rc small muted" colspan="4">Pendiente</td>' : '<td class="g-rc" colspan="4"></td>') : ''}
         <td class="small">${f.ult ? `${esc(f.ult.usuario || '—')}<span class="muted"> · ${fechaHora(f.ult.fecha)}</span>` : '—'}</td>
-        ${contar ? `<td class="ec-td">${f.contado ? btnEditarConteo(f) : ''}</td>` : ''}
+        ${contar ? `<td class="ec-td">${f.contado ? `<span class="fila gap4">${btnDetalleConteo(f)}${btnEditarConteo(f)}</span>` : ''}</td>` : ''}
       </tr>`).join('');
     const hechos = todos.filter(f => f.listo).length, conDif = todos.filter(f => f.contado && f.dif).length;
     const cols = (veSap ? 16 : 11) + (conRc ? 4 : 0) + (conAntes ? 2 : 0) + (contar ? 1 : 0);
-    return `<div class="muted small">${l.length} de ${todos.length} productos · <b>${hechos}</b> ${rc ? 'reconfirmados' : 'contados'} · <b class="${todos.length - hechos ? 'txt-naranja' : ''}">${todos.length - hechos}</b> pendientes${veSap ? ` · <b class="${conDif ? 'txt-rojo' : ''}">${conDif}</b> con diferencia` : ''}</div>
+    return `<div class="muted small">${l.length} de ${todos.length} productos · <b>${hechos}</b> ${rc ? 'recontados' : 'contados'} · <b class="${todos.length - hechos ? 'txt-naranja' : ''}">${todos.length - hechos}</b> pendientes${veSap ? ` · <b class="${conDif ? 'txt-rojo' : ''}">${conDif}</b> con diferencia` : ''}</div>
       <div class="tabla-wrap mt8"><table class="tabla inv-tabla">
         <thead>
-          <tr class="inv-grupos"><th colspan="5"></th>${veSap ? '<th colspan="4" class="g-sap">SAP' + (c && c.archivo ? ' (Excel del cíclico)' : '') + '</th>' : ''}<th colspan="5">${veSap ? (rc ? 'Planta (lo reconfirmado + plano)' : 'Planta (conteo del cíclico + plano)') : 'Lo contado'}</th>${veSap ? '<th></th>' : ''}${conAntes ? '<th colspan="2" class="g-rc">Contra lo que había</th>' : ''}${conRc ? '<th colspan="4" class="g-rc">Reconfirmación</th>' : ''}<th></th>${contar ? '<th></th>' : ''}</tr>
+          <tr class="inv-grupos"><th colspan="5"></th>${veSap ? '<th colspan="4" class="g-sap">SAP' + (c && c.archivo ? ' (Excel del cíclico)' : '') + '</th>' : ''}<th colspan="5">${veSap ? (rc ? 'Planta (lo recontado + plano)' : 'Planta (conteo del cíclico + plano)') : 'Lo contado'}</th>${veSap ? '<th></th>' : ''}${conAntes ? '<th colspan="2" class="g-rc">Contra lo que había</th>' : ''}${conRc ? '<th colspan="4" class="g-rc">Reconteo</th>' : ''}<th></th>${contar ? '<th></th>' : ''}</tr>
           <tr>${thO('cic', 'estado', 'Estado')}${thO('cic', 'nutresa', 'Cód. Nutresa')}${thO('cic', 'cod', 'Cód. Atlantic')}${thO('cic', 'prod', 'Producto')}${thO('cic', 'und', 'Unidad')}
             ${veSap ? thO('cic', 'sapInv', 'Inventario', 'num g-sap') + thO('cic', 'sapCal', 'Calidad', 'num g-sap') + thO('cic', 'sapBlq', 'Bloqueado', 'num g-sap') + thO('cic', 'sapTot', 'Total', 'num g-sap') : ''}
             ${thO('cic', 'pk', 'Picking', 'num')}${thO('cic', 'ae', 'Aéreo', 'num')}${thO('cic', 'cal', 'Calidad', 'num')}${thO('cic', 'blq', 'Bloqueado', 'num')}${thO('cic', 'planta', 'Total', 'num')}
             ${veSap ? thO('cic', 'dif', 'Diferencia', 'num') : ''}
             ${conAntes ? thO('cic', 'antes', 'Había (conteo anterior)', 'num g-rc') + thO('cic', 'difAntes', 'Dif. vs anterior', 'num g-rc') : ''}
-            ${conRc ? thO('cic', 'rcTot', 'Reconfirmado', 'num g-rc') + thO('cic', 'rcSap', 'Dif. reconf. vs SAP', 'num g-rc') + thO('cic', 'rcCont', 'Dif. reconf. vs conteo', 'num g-rc') + thO('cic', 'rcQuien', 'Reconfirmó', 'g-rc') : ''}
+            ${conRc ? thO('cic', 'rcTot', 'Recontado', 'num g-rc') + thO('cic', 'rcSap', 'Dif. reconteo vs SAP', 'num g-rc') + thO('cic', 'rcCont', 'Dif. reconteo vs conteo', 'num g-rc') + thO('cic', 'rcQuien', 'Recontó', 'g-rc') : ''}
             ${thO('cic', 'conto', 'Contó')}${contar ? '<th><span class="sr">Corregir</span></th>' : ''}</tr>
         </thead>
         <tbody>${filas || `<tr><td colspan="${cols}" class="muted">No hay productos con ese filtro.</td></tr>`}</tbody></table></div>${pg.barra}`;
   }
   function pintarCicTabla() { if ($('cicTabla')) $('cicTabla').innerHTML = tablaCiclico(); botonPedirRc(); }
-  // El botón de pedir reconfirmación muestra cuántos tienen diferencia (se actualiza al contar)
+  // El botón de pedir reconteo muestra cuántos tienen diferencia (se actualiza al contar)
   function botonPedirRc() {
     const b = $('cicPedirRc');
     if (!b || !cicData) return;
     const n = datosCiclico().filter(f => f.contado && f.dif).length;
-    b.textContent = 'Pedir reconfirmación' + (n ? ` (${n})` : '');
+    b.textContent = 'Pedir reconteo' + (n ? ` (${n})` : '');
     b.classList.toggle('btn-pri', !!n); b.classList.toggle('btn-sec', !n);
   }
 
@@ -7014,7 +7325,7 @@
     }
 
     const b = $('cpOk' + i); b.disabled = true; b.textContent = '…';
-    const pend = [];   // aquí solo se confirma el picking (el aéreo se revisa en la reconfirmación)
+    const pend = [];   // aquí solo se confirma el picking (el aéreo se revisa en el reconteo)
     llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: f.ubic, codigo: f.cod, cantidades, usuario: ses.nombre, ciclicoId: S.id })
       .then(lista => {
         const rem = (arr, c) => arr.filter(x => !(x.codigo === c.codigo && x.ubicacion === c.ubicacion && x.tipo === c.tipo)).concat([c]);
@@ -7121,7 +7432,7 @@
   let cpContadores = null;   // { inv (los datos con que se pidió), l: [{ nombre, conteos, ultimo }] }
   function cpTableroInvHtml() {
     const d = datosInventario();
-    const lista = new Set(ini.productos.filter(p => p.activo !== false).map(p => p.id)), N = lista.size;
+    const lista = new Set(ini.productos.filter(p => p.activo !== false && prodDeMiRegional(p)).map(p => p.id)), N = lista.size;
     const enLista = d.filter(f => lista.has(f.cod));
     const contados = enLista.filter(f => f.contado).length;
     const sapCods = new Set(((invData && invData.sap) || []).map(x => x.codigo)), M = sapCods.size;
@@ -7141,32 +7452,278 @@
     // Total contado en este inventario: productos con cualquier conteo registrado
     const total = enLista.filter(f => f.contado || f.hayCal || f.hayBlo).length;
     const celda = n => `<td>${n} de ${N} ${cpBarra(n, N)}</td>`;
-    return `<div class="cp-kpis">
-        <div class="cp-kpi"><span class="muted small">Contados</span><b>${contados} de ${N}</b>${cpBarra(contados, N)}</div>
-        <div class="cp-kpi"><span class="muted small">Faltan</span><b class="${N - contados ? 'txt-naranja' : 'txt-verde'}">${N - contados}</b><span class="muted small">${cpPct(contados, N)}% contado</span></div>
-        <div class="cp-kpi"><span class="muted small">Contados del SAP</span>${M ? `<b>${contSap} de ${M}</b>${cpBarra(contSap, M)}` : '<b class="muted">—</b><span class="muted small">Sin Excel de SAP</span>'}</div>
-      </div>
-      <div class="cp-dos">
-        <section class="card col gap8">
+    return `${resumenConteoHtml()}
+      ${porSede.length > 1 ? `<section class="card col gap8">
           <span class="h3">Sedes</span>
           <div class="tabla-wrap"><table class="tabla cp-sedes"><thead><tr><th>Sede</th><th>Picking</th><th>Aéreo</th></tr></thead>
             <tbody>${porSede.map(x => `<tr><td><b>${esc(x.nombre)}</b></td>${celda(x.pk)}${celda(x.ae)}</tr>`).join('')}
-            ${porSede.length > 1 ? `<tr class="cp-sedes-tot"><td><b>Total</b></td>${celda(pkTodas)}${celda(aeTodas)}</tr>` : ''}</tbody></table></div>
-        </section>
-        <section class="card col gap8">
-          <span class="h3">Almacenes</span>
-          ${listaAlm.length ? `<div class="tabla-wrap"><table class="tabla cp-sedes"><thead><tr><th>Almacén</th><th>Contados</th></tr></thead>
-            <tbody>${listaAlm.map(([k, set]) => `<tr><td><b>${esc(k)}</b></td>${celda(set.size)}</tr>`).join('')}</tbody></table></div>`
-            : '<p class="muted small">Todavía no hay nada contado.</p>'}
-          <div class="cp-dona">${donaHtml(total, N)}
-            <div class="col gap4"><span class="muted small">Total contado</span><b>${total} de ${N}</b><span class="muted small">${N - total} por contar</span></div></div>
-        </section>
-      </div>
+            <tr class="cp-sedes-tot"><td><b>Total</b></td>${celda(pkTodas)}${celda(aeTodas)}</tr></tbody></table></div>
+        </section>` : ''}
       <section class="card col gap8">
         <span class="h3">Contadores</span>
         <div id="cpContadores">${cpContadoresHtml()}</div>
       </section>`;
   }
+  /* ================= Resumen del conteo (Avance y SAP) y Excel de Control Interno =================
+     Todo sale de lo mismo que la tabla de abajo (SAP + plano + conteos + reconteos). Los valores salen del
+     Excel de SAP (valor libre, calidad y bloqueo); sin valores, se ven las cantidades y los valores quedan en —. */
+  const TOL_DEF = { pct: 300, valor: 2000000 };
+  const tolRecontar = () => Object.assign({}, TOL_DEF, leerLS('tolRecontar') || {});
+  const plata = v => (v === null || v === undefined || isNaN(v) ? '—' : (v < 0 ? '-$' : '$') + Math.round(Math.abs(v)).toLocaleString('es-CO'));
+  const pctTxt = (n, d) => (d ? (n * 100 / d).toLocaleString('es-CO', { maximumFractionDigits: 1, minimumFractionDigits: 1 }) + '%' : '—');
+  // Costo por unidad (o kilo) del producto según los valores de SAP
+  function costoUnit(f) {
+    const x = f.sap;
+    if (!x) return null;
+    const val = [x.vLib, x.vCal, x.vBlq].filter(v => v !== null && v !== undefined);
+    if (!val.length) return null;
+    const q = x.inventario + x.calidad + x.bloqueado;
+    if (q > 0) return val.reduce((a, v) => a + v, 0) / q;
+    return x.inventario > 0 && x.vLib ? x.vLib / x.inventario : null;
+  }
+  let anMemo = null;
+  function analisisInv() {
+    const d = datosInvRc();
+    if (anMemo && anMemo.d === d && anMemo.t === JSON.stringify(tolRecontar())) return anMemo.v;
+    const tol = tolRecontar();
+    const sapAlm = {};   // código → [{ almacen, inventario, calidad, bloqueado, vLib, vCal, vBlq }]
+    ((invData && invData.sapAlm) || []).forEach(x => { (sapAlm[x.codigo] = sapAlm[x.codigo] || []).push(x); });
+    const hayValores = d.some(f => costoUnit(f) !== null);
+    // Universo: lo que se subió de SAP; si todavía no hay SAP, todos los productos activos del catálogo de la regional
+    const sinSap = !((invData && invData.sap) || []).length;
+    const enCat = f => !!(f.p && f.p.activo !== false && prodDeMiRegional(f.p));
+    const filas = d.filter(f => f.sapTotal || f.plantaRc || f.contado || f.hayCal || f.hayBlo || (sinSap && enCat(f))).map(f => {
+      const c = costoUnit(f), pk = f.rc ? f.rc.pk : f.picking;
+      const contado = !!(f.contado || f.hayCal || f.hayBlo);
+      const x = f.sap || { inventario: 0, calidad: 0, bloqueado: 0 };
+      // Reclasificar: el total cuadra pero no el tipo (libre, calidad, bloqueo)
+      const reclas = contado && f.sap && !f.difRc && (Math.abs(f.calidad - x.calidad) > 0.0005 || Math.abs(f.bloqueado - x.bloqueado) > 0.0005);
+      const valDif = c === null ? null : f.difRc * c;
+      const pctDif = f.sapTotal ? Math.abs(f.difRc) * 100 / f.sapTotal : (f.difRc ? Infinity : 0);
+      const almSap = (sapAlm[f.cod] || []).filter(a => a.inventario || a.calidad || a.bloqueado);
+      const almCont = f.almacenes.map(a => almCorto(a.key)).filter(Boolean);
+      const alm = (almSap.sort((a, b) => (b.inventario + b.calidad + b.bloqueado) - (a.inventario + a.calidad + a.bloqueado))[0] || {}).almacen || almCont[0] || ((prodAlm && prodAlm[f.cod]) || [])[0] || '';
+      return { f, cod: f.cod, p: f.p, c, pk, ae: f.aereo, cal: f.calidad, blq: f.bloqueado, fis: f.plantaRc, sap: x, sapTot: f.sapTotal, dif: f.difRc,
+        contado, enSap: !!f.sap && f.sapTotal > 0, enAlc: sinSap ? enCat(f) : !!f.sap && f.sapTotal > 0, algo: !!(f.sapTotal || f.plantaRc || contado), reclas, valDif, valSap: c === null ? null : f.sapTotal * c, valFis: c === null ? null : f.plantaRc * c,
+        alta: contado && !!f.difRc && (pctDif >= tol.pct || (valDif !== null && Math.abs(valDif) >= tol.valor)), alm, almSap };
+    });
+    const suma = (l, k) => l.reduce((a, r) => a + (r[k] || 0), 0);
+    const alcance = filas.filter(r => r.enAlc), contados = filas.filter(r => r.contado), contAlc = alcance.filter(r => r.contado);
+    const conDif = contados.filter(r => r.dif && !r.reclas), sinDif = contados.filter(r => !r.dif && !r.reclas);
+    // Cruces sugeridos: en la misma subcategoría, un sobrante y un faltante de valor parecido (±25%)
+    const cruces = [];
+    const porSub = {};
+    conDif.filter(r => r.valDif).forEach(r => { const k = (r.p && (r.p.subcategoria || r.p.categoria)) || ''; if (k) (porSub[k] = porSub[k] || []).push(r); });
+    Object.values(porSub).forEach(l => {
+      const mas = l.filter(r => r.valDif > 0).sort((a, b) => b.valDif - a.valDif), menos = l.filter(r => r.valDif < 0).sort((a, b) => a.valDif - b.valDif);
+      mas.forEach(m => { const i = menos.findIndex(n => Math.abs(m.valDif + n.valDif) <= 0.25 * Math.max(m.valDif, -n.valDif)); if (i >= 0) { cruces.push([m, menos[i]]); menos.splice(i, 1); } });
+    });
+    cruces.forEach(([a, b], i) => { a.cruce = b.cruce = 'C' + (i + 1); });
+    // Por almacén: materiales de SAP en ese almacén (o donde se contó)
+    const alms = {};
+    filas.forEach(r => {
+      const lista = r.almSap.length ? r.almSap.map(a => a.almacen) : [r.alm];
+      lista.forEach(k => {
+        const a = alms[k || '—'] = alms[k || '—'] || { alm: k || '—', mat: 0, cont: 0, dif: 0, valDif: 0, hayVal: false };
+        if (r.enAlc) { a.mat++; if (r.contado) a.cont++; }
+        if (r.contado && r.dif && !r.reclas) { a.dif++; if (r.valDif !== null) { a.valDif += r.valDif / lista.length; a.hayVal = true; } }
+      });
+    });
+    const porAlm = Object.values(alms).filter(a => a.mat).sort((a, b) => String(a.alm).localeCompare(String(b.alm), 'es', { numeric: true }));
+    // SAP contra físico por tipo de stock (la diferencia, solo de los contados)
+    const val = (l, k) => (hayValores ? l.reduce((a, r) => a + (r.c === null ? 0 : (r[k] || 0) * r.c), 0) : null);
+    const sapV = (l, k, vk) => (hayValores ? l.reduce((a, r) => a + (r.sap[vk] !== null && r.sap[vk] !== undefined ? r.sap[vk] : (r.c === null ? 0 : (r.sap[k] || 0) * r.c)), 0) : null);
+    const tipo = (nom, qs, qf, vs, vf) => ({ nom, qs, qf, vs, vf });
+    const libreSap = l => l.reduce((a, r) => a + r.sap.inventario, 0), libreFis = l => l.reduce((a, r) => a + r.pk + r.ae, 0);
+    const tipos = [
+      Object.assign(tipo('Libre · piso', null, suma(filas, 'pk'), null, val(filas, 'pk')), { sub: true }),
+      Object.assign(tipo('Libre · aéreo', null, suma(filas, 'ae'), null, val(filas, 'ae')), { sub: true }),
+      Object.assign(tipo('Libre total', libreSap(filas), libreFis(filas), sapV(filas, 'inventario', 'vLib'), hayValores ? val(filas, 'pk') + val(filas, 'ae') : null),
+        { dq: libreFis(contados) - libreSap(contados), dv: hayValores ? (val(contados, 'pk') + val(contados, 'ae')) - sapV(contados, 'inventario', 'vLib') : null }),
+      Object.assign(tipo('Calidad', filas.reduce((a, r) => a + r.sap.calidad, 0), suma(filas, 'cal'), sapV(filas, 'calidad', 'vCal'), val(filas, 'cal')),
+        { dq: suma(contados, 'cal') - contados.reduce((a, r) => a + r.sap.calidad, 0), dv: hayValores ? val(contados, 'cal') - sapV(contados, 'calidad', 'vCal') : null }),
+      Object.assign(tipo('Bloqueo', filas.reduce((a, r) => a + r.sap.bloqueado, 0), suma(filas, 'blq'), sapV(filas, 'bloqueado', 'vBlq'), val(filas, 'blq')),
+        { dq: suma(contados, 'blq') - contados.reduce((a, r) => a + r.sap.bloqueado, 0), dv: hayValores ? val(contados, 'blq') - sapV(contados, 'bloqueado', 'vBlq') : null })];
+    const tot = tipos.slice(2);
+    tipos.push(Object.assign(tipo('Total', tot.reduce((a, t) => a + t.qs, 0), tot.reduce((a, t) => a + t.qf, 0), hayValores ? tot.reduce((a, t) => a + t.vs, 0) : null, hayValores ? tot.reduce((a, t) => a + t.vf, 0) : null),
+      { dq: tot.reduce((a, t) => a + t.dq, 0), dv: hayValores ? tot.reduce((a, t) => a + t.dv, 0) : null, total: true }));
+    const valSapCont = hayValores ? suma(contados.filter(r => r.valSap !== null), 'valSap') : null;
+    const v = {
+      filas, hayValores, sinSap, alcance: alcance.length, almacenes: new Set(alcance.map(r => r.alm).filter(Boolean)).size || porAlm.length,
+      contados: contAlc.length, pendientes: alcance.length - contAlc.length,
+      sapSinVerificar: hayValores ? suma(alcance.filter(r => !r.contado && r.valSap !== null), 'valSap') : null,
+      sinDif: sinDif.length, conDif: conDif.length, reclas: contados.filter(r => r.reclas).length, sinLinea: contados.filter(r => !r.enAlc).length, fuera: contados.filter(r => !r.enAlc),
+      nContados: contados.length, alta: contados.filter(r => r.alta).length, cruces, conAereo: filas.filter(r => r.ae > 0).length, aereo: suma(filas, 'ae'),
+      valSap: valSapCont, valFis: hayValores ? suma(contados.filter(r => r.valFis !== null), 'valFis') : null,
+      sobrantes: hayValores ? contados.reduce((a, r) => a + (r.valDif > 0 ? r.valDif : 0), 0) : null,
+      faltantes: hayValores ? contados.reduce((a, r) => a + (r.valDif < 0 ? r.valDif : 0), 0) : null,
+      porAlm, tipos, tol,
+      // Lo que está en calidad o bloqueado (físico), en cantidad y en valor
+      calBlq: suma(contados, 'cal') + suma(contados, 'blq'), valCalBlq: hayValores ? val(contados, 'cal') + val(contados, 'blq') : null,
+      mayores: contados.filter(r => r.dif && r.valDif !== null).sort((a, b) => Math.abs(b.valDif) - Math.abs(a.valDif)).slice(0, 15)
+    };
+    v.neta = hayValores ? v.sobrantes + v.faltantes : null;
+    anMemo = { d, t: JSON.stringify(tol), v };
+    return v;
+  }
+  function cambiarTolerancia() {
+    const t = tolRecontar();
+    abrirModal(`<div class="fila-sb"><span class="h2">Cuándo recontar (prioridad alta)</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Un producto contado va «a recontar» si su diferencia es igual o mayor a este porcentaje de lo que dice SAP, o si la diferencia vale igual o más que este valor.</span>
+      <div class="dos mt12"><div><label class="lbl" for="tolPct">Porcentaje (%)</label><input id="tolPct" class="campo" type="number" min="0" value="${t.pct}"></div>
+        <div><label class="lbl" for="tolVal">Valor ($)</label><input id="tolVal" class="campo" type="number" min="0" value="${t.valor}"></div></div>
+      <button class="btn btn-pri btn-xl mt16" onclick="guardarLS('tolRecontar', { pct: Number($('tolPct').value) || ${TOL_DEF.pct}, valor: Number($('tolVal').value) || ${TOL_DEF.valor} }); cerrarModal(); pintarApp()">Guardar</button>`);
+  }
+  /* ===== Tablero del conteo físico (Avance y SAP): indicadores y gráficos =====
+     Todo sale de analisisInv() (lo mismo que la tabla de abajo). Los gráficos son HTML/SVG simples (sirven en Chrome 88). */
+  function tbAnillo(n, d, tono, sub) {
+    const p = d ? Math.max(0, Math.min(1, n / d)) : 0, r = 50, L = 2 * Math.PI * r;
+    return `<svg class="tb-anillo" viewBox="0 0 120 120" role="img" aria-label="${pctTxt(n, d)}">
+      <circle cx="60" cy="60" r="${r}" class="tb-anillo-f"/>
+      <circle cx="60" cy="60" r="${r}" class="tb-anillo-v tb-s-${tono}" stroke-dasharray="${(p * L).toFixed(2)} ${L.toFixed(2)}" transform="rotate(-90 60 60)"/>
+      <text x="60" y="${sub ? 60 : 66}" text-anchor="middle" class="tb-anillo-n">${pctTxt(n, d)}</text>
+      ${sub ? `<text x="60" y="80" text-anchor="middle" class="tb-anillo-s">${esc(sub)}</text>` : ''}</svg>`;
+  }
+  // Barra apilada: [{ n, tono, nom }]
+  function tbApilada(partes, total) {
+    const T = total || partes.reduce((a, x) => a + x.n, 0);
+    if (!T) return '<div class="tb-apil tb-apil-vacia"></div>';
+    return `<div class="tb-apil" role="img" aria-label="${partes.map(x => `${x.nom}: ${x.n}`).join(', ')}">
+      ${partes.filter(x => x.n > 0).map(x => `<i class="tb-b-${x.tono}" style="width:${(x.n * 100 / T).toFixed(2)}%" title="${esc(x.nom)}: ${x.n}"></i>`).join('')}</div>`;
+  }
+  function tbLeyenda(partes, total) {
+    return `<div class="tb-ley">${partes.map(x => `<span><i class="tb-b-${x.tono}"></i>${esc(x.nom)} <b>${x.n.toLocaleString('es-CO')}</b>${total ? ` <span class="muted">(${pctTxt(x.n, total)})</span>` : ''}</span>`).join('')}</div>`;
+  }
+  function resumenConteoHtml() {
+    const a = analisisInv();
+    const kpi = (t, v, sub, tono, ayuda) => `<div class="tb-kpi ${tono ? 'tb-t-' + tono : ''}">
+      <span class="tb-kpi-t">${t}${ayuda ? ayudaHtml(ayuda) : ''}</span><b>${v}</b>${sub ? `<span class="tb-kpi-s">${sub}</span>` : ''}</div>`;
+    const uni = a.sinSap ? 'catálogo de la regional' : 'Excel de SAP';
+    const NC = a.nContados;
+    const comp = [
+      { n: a.sinDif, tono: 'verde', nom: 'Cuadradas con SAP' },
+      { n: a.conDif, tono: 'rojo', nom: 'Con novedad' },
+      { n: a.reclas, tono: 'violeta', nom: 'Cambio de estado' },
+      { n: a.sinLinea, tono: 'amar', nom: 'Fuera del universo' }];
+    // ---- Cobertura ----
+    const hero = `<section class="card tb-hero">
+      <div class="tb-hero-g">${tbAnillo(a.contados, a.alcance, 'azul', 'cobertura')}</div>
+      <div class="col gap12 tb-min0">
+        <div class="fila-sb wrap-f gap8"><span class="h3">Cobertura del inventario ${ayudaHtml(`Cuántas referencias del universo ya se verificaron físicamente. El universo sale del ${uni}${a.sinSap ? '; cuando cargues el Excel de SAP se toma el de SAP' : ''}.`)}</span>
+          <span class="tb-chip">Universo: ${esc(uni)}</span></div>
+        <div class="tb-kpis3">
+          ${kpi('Universo a inventariar', a.alcance.toLocaleString('es-CO'), `en ${a.almacenes} ${a.almacenes === 1 ? 'almacén' : 'almacenes'}`, '', 'Total de referencias que se deben contar en este inventario.')}
+          ${kpi('Referencias verificadas', a.contados.toLocaleString('es-CO'), 'ya tienen conteo', 'verde', 'Referencias del universo que ya tienen al menos un conteo registrado.')}
+          ${kpi('Por verificar', a.pendientes.toLocaleString('es-CO'), a.hayValores ? `${plata(a.sapSinVerificar)} sin verificar` : 'faltan por contar', a.pendientes ? 'naranja' : '', 'Referencias del universo que todavía nadie ha contado. Con valores de SAP se muestra cuánta plata falta por verificar.')}
+        </div>
+        ${tbApilada([{ n: a.contados, tono: 'azul', nom: 'Verificadas' }, { n: a.pendientes, tono: 'gris', nom: 'Por verificar' }], a.alcance)}
+        ${tbLeyenda([{ n: a.contados, tono: 'azul', nom: 'Verificadas' }, { n: a.pendientes, tono: 'gris', nom: 'Por verificar' }], a.alcance)}
+      </div></section>`;
+    // ---- Calidad del conteo ----
+    const calidad = `<section class="card col gap12">
+      <span class="h3">Calidad del conteo ${ayudaHtml('Cómo quedaron las referencias verificadas frente a SAP.')}</span>
+      ${a.sinSap ? `<p class="muted small">Sin el Excel de SAP no hay con qué comparar lo contado. Cárgalo para ver la exactitud, las novedades y los reconteos.</p>` : ''}
+      <div class="tb-cal" ${a.sinSap ? 'hidden' : ''}>
+        <div class="tb-cal-g">${tbAnillo(a.sinDif, NC, 'verde', 'exactitud')}
+          <span class="small muted tb-centro">Índice de exactitud (IRA) ${ayudaHtml('Referencias verificadas que cuadran con SAP, sobre el total de verificadas. Entre más alto, más confiable es el inventario.')}</span></div>
+        <div class="col gap12 tb-min0">
+          <span class="small muted">Composición de las ${NC.toLocaleString('es-CO')} referencias verificadas</span>
+          ${tbApilada(comp, NC)}${tbLeyenda(comp, NC)}
+          <div class="tb-acc">
+            ${kpi('Reconteo prioritario', a.alta, `más de ${a.tol.pct}% o ${plata(a.tol.valor)} · <button class="link small" onclick="cambiarTolerancia()">ajustar</button>`, a.alta ? 'rojo' : '', 'Novedades tan grandes (en porcentaje o en plata) que conviene volver a contarlas antes de ajustar.')}
+            ${kpi('Posibles cruces', a.cruces.length, a.cruces.length ? '<button class="link small" onclick="verCruces()">ver parejas</button>' : 'sin parejas por ahora', a.cruces.length ? 'violeta' : '', 'Referencias parecidas (misma subcategoría) donde a una le sobra y a otra le falta casi lo mismo en plata: puede que se contó una por la otra.')}
+            ${kpi('Fuera del universo', a.sinLinea, a.sinLinea ? '<button class="link small" onclick="verFueraAlcance()">ver cuáles</button>' : 'todo dentro', a.sinLinea ? 'naranja' : '', 'Referencias que se contaron pero no estaban en lo que se subió a contar. Revisa el código o el almacén.')}
+            ${kpi('Referencias en altura', a.conAereo, `${nInv(a.aereo)} unidades en aéreo`, '', 'Referencias que tienen producto ubicado en el aéreo (nivel 1 hacia arriba).')}
+          </div>
+        </div>
+      </div></section>`;
+    // ---- Impacto económico ----
+    let plataHtml;
+    if (a.hayValores) {
+      const mx = Math.max(Math.abs(a.faltantes || 0), a.sobrantes || 0) || 1;
+      plataHtml = `<div class="tb-kpis3">
+          ${kpi('Valor en libros', plata(a.valSap), 'SAP de lo verificado', '', 'Lo que vale en SAP lo que ya se contó.')}
+          ${kpi('Valor físico verificado', plata(a.valFis), 'lo que se encontró', '', 'Lo que vale lo que se encontró al contar.')}
+          ${kpi('Impacto neto', plata(a.neta), a.valSap ? `${pctTxt(a.neta, a.valSap)} del valor en libros` : '', a.neta < 0 ? 'rojo' : a.neta > 0 ? 'verde' : '', 'Excedentes menos faltantes: lo que cambiaría el inventario si se ajusta hoy.')}
+        </div>
+        <div class="tb-bal" role="img" aria-label="Faltantes ${plata(a.faltantes)}, excedentes ${plata(a.sobrantes)}">
+          <div class="tb-bal-l"><span class="small">Faltantes ${ayudaHtml('Lo que falta frente a SAP (incluye calidad y bloqueado). Se ajusta como baja.')}</span><div class="tb-bal-x izq"><i class="tb-b-rojo" style="width:${(Math.abs(a.faltantes || 0) * 100 / mx).toFixed(1)}%"></i></div><b class="txt-rojo">${plata(a.faltantes)}</b></div>
+          <div class="tb-bal-l"><span class="small">Excedentes ${ayudaHtml('Lo que sobra frente a SAP. Se ajusta como entrada.')}</span><div class="tb-bal-x"><i class="tb-b-verde" style="width:${((a.sobrantes || 0) * 100 / mx).toFixed(1)}%"></i></div><b class="txt-verde">${plata(a.sobrantes)}</b></div>
+        </div>
+        <span class="small muted">En calidad y bloqueado (físico): <b>${plata(a.valCalBlq)}</b> · ${nInv(a.calBlq)} unidades</span>`;
+    } else {
+      plataHtml = `<p class="muted small">Para ver la plata, carga el Excel de SAP y escoge las columnas de valor (libre, calidad y bloqueo). Si vienen como en la MB52, se escogen solas.</p>
+        <span class="small muted">En calidad y bloqueado (físico): <b>${nInv(a.calBlq)}</b> unidades</span>`;
+    }
+    const valor = `<section class="card col gap12"><span class="h3">Impacto económico ${ayudaHtml('Solo de las referencias verificadas, con los valores del Excel de SAP.')}</span>${plataHtml}</section>`;
+    // ---- Por almacén ----
+    const alm = `<section class="card col gap8">
+      <span class="h3">Cobertura por almacén</span>
+      ${a.porAlm.length ? `<div class="tabla-wrap"><table class="tabla av-tabla tb-alm"><thead><tr><th>Almacén</th><th>Cobertura</th><th class="num">Verificadas</th><th class="num">Por verificar</th><th class="num">Novedades</th><th class="num">Valor novedades</th></tr></thead><tbody>
+        ${a.porAlm.map(x => `<tr><td><b>${esc(x.alm)}</b></td>
+          <td><div class="tb-fila-b"><div class="tb-pista"><i class="tb-b-azul" style="width:${x.mat ? (x.cont * 100 / x.mat).toFixed(1) : 0}%"></i></div><span class="small nowrap">${pctTxt(x.cont, x.mat)}</span></div></td>
+          <td class="num">${x.cont} / ${x.mat}</td><td class="num ${x.mat - x.cont ? 'av-pend' : ''}">${x.mat - x.cont}</td>
+          <td class="num ${x.dif ? 'av-dif' : ''}">${x.dif}</td><td class="num ${x.valDif < 0 ? 'txt-rojo' : ''}">${x.hayVal ? plata(x.valDif) : '—'}</td></tr>`).join('')}
+        <tr class="av-total"><td><b>Total</b></td><td><div class="tb-fila-b"><div class="tb-pista"><i class="tb-b-azul" style="width:${a.alcance ? (a.contados * 100 / a.alcance).toFixed(1) : 0}%"></i></div><span class="small nowrap">${pctTxt(a.contados, a.alcance)}</span></div></td>
+          <td class="num">${a.contados} / ${a.alcance}</td><td class="num">${a.pendientes}</td><td class="num">${a.conDif}</td><td class="num ${a.neta < 0 ? 'txt-rojo' : ''}">${a.hayValores ? plata(a.neta) : '—'}</td></tr>
+      </tbody></table></div>` : '<p class="muted small">Todavía no hay referencias por almacén.</p>'}
+    </section>`;
+    // ---- Conciliación por estado de stock ----
+    const est = a.tipos.filter(t => !t.sub && !t.total);
+    const nomEst = { 'Libre total': 'Disponible', Calidad: 'En calidad', Bloqueo: 'Bloqueado' };
+    const enPlata = a.hayValores;
+    const mxE = Math.max(1, ...est.map(t => Math.max(Math.abs(enPlata ? t.vs || 0 : t.qs || 0), Math.abs(enPlata ? t.vf || 0 : t.qf || 0))));
+    const barE = (v, tono) => `<div class="tb-pista"><i class="tb-b-${tono}" style="width:${(Math.abs(v || 0) * 100 / mxE).toFixed(1)}%"></i></div>`;
+    const fmtE = v => (enPlata ? plata(v) : nInv(v || 0));
+    const nomT = t => ({ 'Libre · piso': 'Disponible en piso (picking)', 'Libre · aéreo': 'Disponible en altura (aéreo)', 'Libre total': 'Disponible', Calidad: 'En calidad', Bloqueo: 'Bloqueado', Total: 'Total' })[t.nom] || t.nom;
+    const conc = `<section class="card col gap12">
+      <span class="h3">Conciliación SAP vs. físico ${ayudaHtml('Compara lo que dice SAP con lo que se encontró, por estado del stock: disponible, en calidad y bloqueado.')}</span>
+      <div class="tb-ley"><span><i class="tb-b-gris"></i>SAP</span><span><i class="tb-b-azul"></i>Físico</span><span class="muted">${enPlata ? 'en pesos' : 'en unidades'}</span></div>
+      <div class="tb-est">${est.map(t => `<div class="tb-est-f"><b class="small">${esc(nomEst[t.nom] || t.nom)}</b>
+          <div class="tb-fila-b">${barE(enPlata ? t.vs : t.qs, 'gris')}<span class="small nowrap">${fmtE(enPlata ? t.vs : t.qs)}</span></div>
+          <div class="tb-fila-b">${barE(enPlata ? t.vf : t.qf, 'azul')}<span class="small nowrap">${fmtE(enPlata ? t.vf : t.qf)}</span></div></div>`).join('')}</div>
+      <details class="tb-det"><summary class="small">Ver la tabla completa</summary>
+        <div class="tabla-wrap mt8"><table class="tabla av-tabla"><thead><tr><th>Estado del stock</th><th class="num">SAP (cant.)</th><th class="num">Físico (cant.)</th><th class="num">Variación *</th><th class="num">SAP ($)</th><th class="num">Físico ($)</th><th class="num">Variación $ *</th></tr></thead><tbody>
+          ${a.tipos.map(t => `<tr class="${t.sub ? 'av-sub' : ''} ${t.total ? 'av-total' : ''}"><td>${t.sub ? '↳ ' : ''}${esc(nomT(t))}</td><td class="num">${t.qs === null ? '' : nInv(t.qs)}</td><td class="num">${nInv(t.qf)}</td>
+            <td class="num ${t.dq < 0 ? 'txt-rojo' : t.dq > 0 ? 'txt-verde' : ''}">${t.dq === undefined ? '' : nInv(+t.dq.toFixed(3))}</td><td class="num">${t.vs === null ? (t.sub ? '' : '—') : plata(t.vs)}</td>
+            <td class="num">${t.vf === null ? '—' : plata(t.vf)}</td><td class="num ${t.dv < 0 ? 'txt-rojo' : t.dv > 0 ? 'txt-verde' : ''}">${t.dv === undefined ? '' : plata(t.dv)}</td></tr>`).join('')}
+        </tbody></table></div>
+        <span class="muted small">* Variación solo de las referencias verificadas. El aéreo ya va sumado en «Disponible».</span></details>
+    </section>`;
+    // ---- Mayores variaciones (barras a lado y lado) ----
+    const mxV = Math.max(1, ...a.mayores.map(r => Math.abs(r.valDif)));
+    const top = `<section class="card col gap8">
+      <span class="h3">Mayores variaciones en valor ${ayudaHtml('Las 15 referencias verificadas con más plata de diferencia. Toca una para ver su historial.')}</span>
+      ${a.mayores.length ? `<div class="tb-ley"><span><i class="tb-b-rojo"></i>Falta</span><span><i class="tb-b-verde"></i>Sobra</span></div>
+        <div class="tb-div">${a.mayores.map(r => { const w = (Math.abs(r.valDif) * 50 / mxV).toFixed(1), neg = r.valDif < 0;
+          return `<button type="button" class="tb-div-f" onclick="historialInventario('${esc(r.cod)}')">
+            <span class="tb-div-n"><b>${esc(r.cod)}</b> <span class="muted">${esc(r.p ? r.p.nombre : '')}</span></span>
+            <span class="tb-div-x"><i class="tb-b-${neg ? 'rojo' : 'verde'}" style="${neg ? `right:50%` : `left:50%`};width:${w}%"></i></span>
+            <span class="tb-div-v ${neg ? 'txt-rojo' : 'txt-verde'}">${plata(r.valDif)}<span class="muted"> · ${nInv(r.dif)} und · ${esc(r.alm || '—')}</span></span></button>`; }).join('')}</div>`
+        : `<p class="muted small">${a.hayValores ? 'Todavía no hay variaciones en lo verificado.' : 'Carga el Excel de SAP con los valores para ver las mayores variaciones en plata.'}</p>`}
+    </section>`;
+    return `<div class="col gap12 tb">${hero}<div class="av-dos">${calidad}${valor}</div>${alm}<div class="av-dos">${conc}${top}</div></div>`;
+  }
+  function verCruces() {
+    const a = analisisInv();
+    abrirModal(`<div class="fila-sb"><span class="h2">Posibles cruces entre referencias</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Referencias de la misma subcategoría donde a una le sobra y a otra le falta casi lo mismo en plata: puede que se contó una por la otra. Revísalas antes de ajustar.</span>
+      <div class="tabla-wrap mt12"><table class="tabla"><thead><tr><th>Pareja</th><th>Sobra</th><th class="num">Valor</th><th>Falta</th><th class="num">Valor</th></tr></thead><tbody>
+        ${a.cruces.map(([m, n], i) => `<tr><td><b>C${i + 1}</b></td><td class="small">${esc(m.cod)} · ${esc(m.p ? m.p.nombre : '')}</td><td class="num txt-verde">${plata(m.valDif)}</td>
+          <td class="small">${esc(n.cod)} · ${esc(n.p ? n.p.nombre : '')}</td><td class="num txt-rojo">${plata(n.valDif)}</td></tr>`).join('')}
+      </tbody></table></div>`, 'modal-ancho');
+  }
+  // Referencias contadas que no estaban en lo que se subió a contar
+  function verFueraAlcance() {
+    const a = analisisInv();
+    const pg = paginar('fua', a.fuera, verFueraAlcance);
+    abrirModal(`<div class="fila-sb"><span class="h2">Contadas fuera del universo</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Se contaron pero no estaban en ${a.sinSap ? 'el catálogo de la regional' : 'el Excel de SAP'}. Revisa si el código o el almacén están bien.</span>
+      <div class="tabla-wrap mt12"><table class="tabla"><thead><tr><th>Código</th><th>Producto</th><th class="num">Físico</th><th>Almacén</th></tr></thead><tbody>
+        ${pg.filas.map(r => `<tr onclick="cerrarModal(); historialInventario('${esc(r.cod)}')"><td><b>${esc(r.cod)}</b></td><td class="small">${esc(r.p ? r.p.nombre : 'No está en el catálogo')}</td><td class="num">${nInv(r.fis)}</td><td>${esc(r.alm || '—')}</td></tr>`).join('')}
+      </tbody></table></div>${pg.barra}`, 'modal-ancho');
+  }
+
   function donaHtml(n, N) {
     const p = N ? Math.min(1, n / N) : 0, r = 42, L = 2 * Math.PI * r;
     return `<svg class="dona" viewBox="0 0 100 100" role="img" aria-label="${cpPct(n, N)}% contado">
@@ -7308,9 +7865,9 @@
       ${!ing.alm ? '' : `
       <div><label class="lbl" for="ingCod">2. Código del producto</label>
         <div class="fila gap8"><span class="campo-x" style="flex:1;min-width:0">
-          <input id="ingCod" class="campo" list="${S.cic ? 'dlIng' : 'dlProductos'}" autocomplete="off" spellcheck="false" placeholder="Escanea o escribe el código" value="${p ? esc(p.id + ' · ' + p.nombre) : ''}">
+          <input id="ingCod" class="campo" autocomplete="off" spellcheck="false" placeholder="Código Atlantic, Nutresa, EAN o nombre" value="${p ? esc(p.id + ' · ' + p.nombre) : ''}" aria-controls="ingSug">
           <button type="button" class="campo-x-btn" onclick="ingLimpiar()" aria-label="Borrar el código" title="Borrar todo">✕</button></span>${botonCamara('ingCod', 'btn btn-sec btn-cam2')}</div>
-        ${S.cic ? `<datalist id="dlIng">${S.cic.codigos.map(k => { const x = prodDe(k); return x ? `<option value="${esc(x.id + ' · ' + x.nombre)}">` : ''; }).join('')}</datalist>` : ''}</div>
+        <div id="ingSug" class="ing-sug" role="listbox" aria-label="Productos que coinciden" hidden></div></div>
       ${p ? `<div class="info"><span class="fuerte">${esc(p.nombre)}</span>
           <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · Atlantic ${esc(p.id)} · ${kg ? 'peso variable (kg)' : `${p.undPorCaja || 1} und por caja`}</span>
           ${ingCbHtml(S, p, kg)}
@@ -7333,7 +7890,7 @@
             <span class="small muted" id="ingBloTot"></span></div></div>
         <p id="fErr" class="error" hidden></p>
         <button id="ingOk" class="btn btn-ent-solido btn-xl" onclick="ingGuardar()">Guardar</button>` : ''}
-      ${prog ? `<div class="cp-prog small">${cpBarra(prog.l, prog.t)} <span><b>${prog.l} de ${prog.t}</b> productos ${esReconf(S.cic) ? 'de la reconfirmación' : 'del cíclico'} contados · ${prog.t - prog.l
+      ${prog ? `<div class="cp-prog small">${cpBarra(prog.l, prog.t)} <span><b>${prog.l} de ${prog.t}</b> productos ${esReconf(S.cic) ? 'del reconteo' : 'del cíclico'} contados · ${prog.t - prog.l
           ? `<button type="button" class="link ing-faltan" onclick="ingVerFaltan()">faltan <b>${prog.t - prog.l}</b> · ver cuáles</button>` : '<b class="txt-verde">todos contados</b>'}</span></div>` : ''}`}
     </section>
     ${ing.alm ? ingRecientesHtml(S) : ''}</div>`;
@@ -7560,8 +8117,9 @@
     return `<div class="ing-lado"><section class="card col gap12 ing">
       <div><label class="lbl" for="ingCod">1. Código del producto</label>
         <div class="fila gap8"><span class="campo-x" style="flex:1;min-width:0">
-          <input id="ingCod" class="campo" list="dlProductos" autocomplete="off" spellcheck="false" placeholder="Escanea o escribe el código" value="${p ? esc(p.id + ' · ' + p.nombre) : ''}">
-          <button type="button" class="campo-x-btn" onclick="ingLimpiar()" aria-label="Borrar el código" title="Borrar todo">✕</button></span>${botonCamara('ingCod', 'btn btn-sec btn-cam2')}</div></div>
+          <input id="ingCod" class="campo" autocomplete="off" spellcheck="false" placeholder="Código Atlantic, Nutresa, EAN o nombre" value="${p ? esc(p.id + ' · ' + p.nombre) : ''}" aria-controls="ingSug">
+          <button type="button" class="campo-x-btn" onclick="ingLimpiar()" aria-label="Borrar el código" title="Borrar todo">✕</button></span>${botonCamara('ingCod', 'btn btn-sec btn-cam2')}</div>
+        <div id="ingSug" class="ing-sug" role="listbox" aria-label="Productos que coinciden" hidden></div></div>
       ${!p ? '' : `<div class="info"><span class="fuerte">${esc(p.nombre)}</span>
           <span class="muted small">Nutresa ${esc(p.codigoNutresa || '—')} · Atlantic ${esc(p.id)} · ${kg ? 'peso variable (kg)' : `${p.undPorCaja || 1} und por caja`}</span>
           ${ingCbHtml(S, p, kg)}</div>
@@ -7669,7 +8227,7 @@
     const S = cpScope(), c = S.cic;
     if (!c) return;
     window._agrCic = despues;
-    abrirModal(`<span class="h3">${esc(p.nombre)} no está en ${esReconf(c) ? 'esta reconfirmación' : 'este cíclico'}</span>
+    abrirModal(`<span class="h3">${esc(p.nombre)} no está en ${esReconf(c) ? 'este reconteo' : 'este cíclico'}</span>
       <p class="mt8">Atlantic ${esc(p.id)}${p.codigoNutresa ? ' · Nutresa ' + esc(p.codigoNutresa) : ''}. ¿Lo agregas para contarlo?</p>
       <p id="acErr" class="error" hidden></p>
       <div class="col gap8 mt12">
@@ -7799,15 +8357,57 @@
     try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {}
     ingCalc();
   }
+  /* Buscar productos por código Atlantic, código Nutresa, EAN (del producto o de la caja) o nombre.
+     Primero los que coinciden exacto con un código, después los que empiezan así y luego por nombre. */
+  function buscarProductos(txt, max, dentro, todo) {
+    const t = sinTilde(String(txt || '').trim()), pal = t.split(/\s+/).filter(Boolean);
+    if (!pal.length) return [];
+    // Primero en la lista de la regional; si ahí no está, en todo el catálogo (a veces el producto no viene en la lista)
+    const base = dentro ? dentro.map(prodDe).filter(Boolean) : ini.productos.filter(p => p.activo !== false && (todo || prodDeMiRegional(p)));
+    const cods = p => [p.id, p.codigoNutresa, p.codigoBarras, p.ean2, p.ean14].filter(Boolean).map(x => sinTilde(String(x)));
+    const res = [];
+    base.forEach(p => {
+      const cs = cods(p), nom = sinTilde(p.nombre || '');
+      let r = -1;
+      if (cs.some(c => c === t)) r = 0;
+      else if (pal.length === 1 && cs.some(c => c.startsWith(t))) r = 1;
+      else if (pal.every(w => nom.includes(w) || cs.some(c => c.includes(w)))) r = nom.startsWith(pal[0]) ? 2 : 3;
+      if (r >= 0) res.push([r, p]);
+    });
+    res.sort((a, b) => a[0] - b[0] || a[1].nombre.localeCompare(b[1].nombre));
+    if (!res.length && !dentro && !todo && ini.prodReg) return buscarProductos(txt, max, null, true);
+    return res.slice(0, max || 8).map(x => x[1]);
+  }
+  // Lista de coincidencias debajo del código (se toca la que es)
+  function ingSugerir(txt) {
+    const caja = $('ingSug');
+    if (!caja) return;
+    const S = cpScope(), t = String(txt || '').trim();
+    const l = t.length < 2 || buscarProducto(t.split(' · ')[0]) ? [] : buscarProductos(t, 8, S.cic ? S.cic.codigos : null);
+    if (!l.length) { caja.hidden = true; caja.innerHTML = ''; return; }
+    caja.innerHTML = l.map(p => `<button type="button" class="ing-sug-op" role="option" data-id="${esc(p.id)}">
+        <b>${esc(p.nombre)}</b><span class="muted small">Atlantic ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')}${p.codigoBarras ? ' · EAN ' + esc(p.codigoBarras) : ''}${prodDeMiRegional(p) ? '' : ' · <b class="txt-naranja">fuera de la lista de la regional</b>'}</span></button>`).join('');
+    caja.hidden = false;
+    caja.querySelectorAll('.ing-sug-op').forEach(b => {
+      b.addEventListener('mousedown', ev => ev.preventDefault());
+      b.addEventListener('click', () => { caja.hidden = true; ingProducto(b.getAttribute('data-id'), true); });
+    });
+  }
   function ingProducto(txt, enter) {
     const p = buscarProducto(String(txt || '').split(' · ')[0]) || buscarProducto(txt);
     const S = cpScope();
     if (!p) {
       const t = String(txt || '').replace(/\s+/g, '');
-      if (pareceEan(t)) return eanNuevoEn(t, 'ing');   // EAN que no está: ponérselo a un producto
-      if (enter && t) toast('No hay un producto con ese código', 'error');
+      if (pareceEan(t) && !buscarProductos(txt, 1).length) return eanNuevoEn(t, 'ing');   // EAN que no está: ponérselo a un producto
+      if (enter && String(txt || '').trim()) {
+        const l = buscarProductos(txt, 8, S.cic ? S.cic.codigos : null);
+        if (l.length === 1) return ingProducto(l[0].id, true);   // una sola coincidencia: esa es
+        if (l.length) { ingSugerir(txt); toast('Escoge el producto de la lista'); return; }
+        toast('No hay un producto con ese código o nombre', 'error');
+      }
       return;
     }
+    if ($('ingSug')) $('ingSug').hidden = true;
     if (S.cic && !S.cic.codigos.includes(p.id)) { $('ingCod').value = ''; return preguntarAgregarCic(p, () => ingProducto(p.id)); }
     if (ing.cod !== p.id) { ing.partes = []; ing.ultimo = null; }
     ing.cod = p.id;
@@ -7860,7 +8460,9 @@
   function enlazarIngresar() {
     const c = $('ingCod');
     if (!c) return;
-    c.addEventListener('change', () => ingProducto(c.value));
+    c.addEventListener('change', () => { if (buscarProducto(c.value.split(' · ')[0]) || buscarProducto(c.value)) ingProducto(c.value); });
+    c.addEventListener('input', () => ingSugerir(c.value));
+    c.addEventListener('blur', () => setTimeout(() => { if ($('ingSug')) $('ingSug').hidden = true; }, 200));
     c.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); ingProducto(c.value, true); } });
     ['ingCal', 'ingBlo'].forEach(id => { if ($(id)) $(id).addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); ingGuardar(); } }); });
     document.querySelectorAll('.ing-teclado .ing-tecla').forEach(b => {
@@ -8012,13 +8614,63 @@
           <td class="mono-c" data-l="Atlantic">${esc(x.cod)}</td><td class="cp-prod" data-l="Producto"><b>${esc(x.p ? x.p.nombre : x.cod)}</b></td>
           <td class="num fuerte" data-l="Picking">${nInv(x.PICKING)}</td><td class="num" data-l="Calidad">${nInv(x.CALIDAD)}</td><td class="num" data-l="Bloqueado">${nInv(x.BLOQUEADO)}</td>
           <td class="small" data-l="Contó">${esc(x.usuario || '—')}<span class="muted"> · ${fechaHora(x.fecha)}</span></td>
-          <td class="ec-td" data-l="">${S.abierto ? btnEditarConteo({ cod: x.cod, p: x.p }) : ''}</td></tr>`).join('')}
+          <td class="ec-td" data-l=""><span class="fila gap4">${btnDetalleConteo({ cod: x.cod, p: x.p })}${S.abierto ? btnEditarConteo({ cod: x.cod, p: x.p }) : ''}</span></td></tr>`).join('')}
       </tbody></table></div>${pg.barra}`;
   }
   function enlazarConfirmar() {
     const q = $('cfQ');
     if (!q) return;
     q.addEventListener('input', () => { cf.q = q.value; pagInicio('cf'); $('cfTabla').innerHTML = cfTablaHtml(); });
+  }
+
+  /* ----- Detalle de quién contó un producto: cada vez que alguien guardó, cuánto sumó, dónde y cuándo.
+     Lo guardado es el total del lugar; aquí se muestra por partes (lo que sumó cada vez). Solo lee. ----- */
+  const btnDetalleConteo = f => `<button class="ec-btn" onclick="event.stopPropagation(); verDetalleConteo('${esc(f.cod)}')" title="Ver quién lo contó" aria-label="Ver quién contó ${esc(f.p ? f.p.nombre : f.cod)}">👥</button>`;
+  function verDetalleConteo(cod) {
+    const p = prodDe(cod), enCic = ctxCic() && cicData ? cicData.ciclico : null;
+    abrirModal(`<div class="fila-sb"><span class="h2">Quién lo contó</span>${btnCerrar()}</div>
+      <div class="info mt8"><span class="fuerte">${esc(p ? p.nombre : cod)}</span>
+        <span class="muted small">Nutresa ${esc(p ? p.codigoNutresa || '—' : '—')} · Atlantic ${esc(cod)}${enCic ? ` · ${esc(nombreCic(enCic))}` : ' · Inventario en curso'} · ${esc(nombreSede(ses.sedeId))}</span></div>
+      <div id="dcCaja" class="mt12"><div class="cargando">Cargando…</div></div>`, 'modal-ancho');
+    const pedir = enCic ? llamar('bdHistorialCiclico', enCic.id).then(h => h.conteos.filter(c => c.codigo === cod && c.sedeId === ses.sedeId))
+      : llamar('bdHistorialConteos', { sedeId: ses.sedeId, codigo: cod });
+    pedir.then(l => { if ($('dcCaja')) $('dcCaja').innerHTML = detalleConteoHtml(l, p); })
+      .catch(e => { if ($('dcCaja')) $('dcCaja').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
+  }
+  function detalleConteoHtml(lista, p) {
+    const u = ingEsKg(p) ? 'kg' : 'und';
+    const almDe = x => String(x || '').startsWith('PICKING-') ? String(x).slice(8) : ((pasilloDe(x) || {}).key || '');
+    // Por lugar y tipo, en orden de fecha: cada registro trae el total; la parte es lo que cambió desde el anterior.
+    // Lo eliminado va aparte (cada eliminación es su propia serie).
+    const grupos = {};
+    lista.slice().sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))).forEach(c => {
+      const k = `${c.ubicacion}|${c.tipo}|${c.anulado ? 'X' + (c.anuladoEn || '') : ''}`;
+      (grupos[k] = grupos[k] || []).push(c);
+    });
+    const filas = [];
+    Object.values(grupos).forEach(g => {
+      let antes = 0;
+      g.forEach((c, i) => {
+        const parte = +(c.cantidad - antes).toFixed(3);
+        antes = c.cantidad;
+        if (c.tipo !== 'PICKING' && !parte) return;          // calidad y bloqueado solo cuando cambian
+        if (c.tipo === 'PICKING' && !parte && i > 0) return;   // se volvió a guardar igual
+        filas.push(Object.assign({}, c, { parte }));
+      });
+    });
+    filas.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+    if (!filas.length) return '<p class="muted">Todavía nadie ha contado este producto aquí.</p>';
+    const porPersona = {};
+    filas.filter(f => !f.anulado && f.tipo === 'PICKING').forEach(f => { porPersona[f.usuario || '—'] = +((porPersona[f.usuario || '—'] || 0) + f.parte).toFixed(3); });
+    const tipoTxt = { PICKING: 'Picking', CALIDAD: 'Calidad', BLOQUEADO: 'Bloqueado' };
+    return `${Object.keys(porPersona).length ? `<div class="dc-personas">${Object.entries(porPersona).sort((a, b) => b[1] - a[1]).map(([n, c]) =>
+        `<span class="dc-persona"><b>${esc(n)}</b> ${nInv(c)} ${u}</span>`).join('')}</div>` : ''}
+      <div class="tabla-wrap mt8"><table class="tabla"><thead><tr><th>Fecha y hora</th><th>Quién</th><th>Almacén</th><th>Tipo</th><th class="num">Contó</th><th class="num">Total en ese lugar</th></tr></thead><tbody>
+        ${filas.map(f => `<tr class="${f.anulado ? 'dc-anulado' : ''}"><td data-l="Fecha">${fechaHora(f.fecha)}</td><td data-l="Quién">${esc(f.usuario || '—')}</td>
+          <td data-l="Almacén">${esc(almCorto(almDe(f.ubicacion)) || '—')}</td><td data-l="Tipo">${tipoTxt[f.tipo] || esc(f.tipo)}${tagAnulado(f)}</td>
+          <td class="num fuerte" data-l="Contó">${f.parte > 0 ? '+' : ''}${nInv(f.parte)} ${u}</td><td class="num" data-l="Total">${nInv(f.cantidad)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <span class="muted small">«Contó» es lo que sumó esa persona cada vez que guardó (si es negativo, fue una corrección). Lo eliminado sale tachado.</span>`;
   }
 
   /* ----- Corregir lo contado (Inventario o cíclico): cantidades, otro producto o eliminar ----- */
@@ -8107,35 +8759,60 @@
   }
 
   function editarConteos(cod) { ec = { cod, conf: -1, otro: -1 }; pintarEc(); }
+  // Almacén de un lugar contado (la clave de codGen)
+  const ecAlmDe = u => { u = String(u || ''); return u.startsWith('PICKING-') ? u.slice(8) : ((pasilloDe(u) || {}).key || ''); };
   function pintarEc() {
     const { enCic } = ecFuente(), p = prodDe(ec.cod), ls = ecLugares();
     if (!ls.length) { cerrarModal(); ec = null; return; }
-    const lugarTxt = id => { const e = sede.espPorId[id]; const r = e && sede.rackPorId[e.rackId]; return e ? `${esc(etiqueta(e))} · ${esc(r ? r.nombre : '')} P${e.posicion}` : esc(id); };
+    const alms = ingAlmacenes();
     abrirModal(`<div class="fila-sb"><span class="h2">Corregir lo contado</span>${btnCerrar()}</div>
       <div class="info mt8"><span class="fuerte">${esc(p ? p.nombre : ec.cod)}</span>
         <span class="muted small">Nutresa ${esc(p ? p.codigoNutresa || '—' : '—')} · Atlantic ${esc(ec.cod)}${enCic ? ` · ${esc(nombreCic(enCic))} del ${fCorta(enCic.fecha)}` : ' · Inventario'}</span></div>
-      <span class="muted small mt8">Cambia las cantidades y toca <b>Guardar</b>. Si se contó un producto que no era, toca <b>Era otro producto</b>.
-        Si fue una prueba o un error, <b>Eliminar</b>. Todo queda en el historial con tu nombre.</span>
-      ${ls.map((l, i) => `<div class="ec-lugar mt12">
-        <div class="fila-sb wrap-f gap8"><span class="fuerte">${lugarTxt(l.ubic)} <span class="muted small mono-c">${esc(l.ubic)}</span></span>
+      <span class="muted small mt8">Cambia lo que esté mal —el producto, el almacén o la cantidad— y toca <b>Guardar cambios</b>. Todo queda en el historial con tu nombre.</span>
+      ${ls.map((l, i) => { const almAct = ecAlmDe(l.ubic); return `<div class="ec-lugar mt12">
+        <div class="fila-sb wrap-f gap8"><span class="fuerte">Almacén ${esc(almCorto(almAct) || '—')}</span>
           <span class="muted small">Contó ${esc(l.usuario || '—')} · ${fechaHora(l.fecha)}</span></div>
-        <span class="small">Sede <b>${esc(nombreSede(ses.sedeId))}</b>${almDeUbic(l.ubic) ? ` · Almacén <b>${esc(almDeUbic(l.ubic))}</b>` : ''}</span>
-        <div class="inv-grid3 mt8">${TIPOS_CONTEO.map(([k, t]) => `<div><label class="lbl" for="ec${k}${i}">${t}</label>
-          <input id="ec${k}${i}" class="campo" type="number" inputmode="decimal" min="0" step="any" value="${l[k]}"></div>`).join('')}</div>
-        ${ec.otro === i ? `<div class="ec-otro mt8"><label class="lbl" for="ecProd${i}">¿Cuál producto era? Se pasan estas cantidades a ese producto, en el mismo lugar.</label>
-            ${campoConCamara(`<input id="ecProd${i}" class="campo" list="dlProductos" autocomplete="off" spellcheck="false" placeholder="Escanea, escribe o elige">`, 'ecProd' + i)}
-            <div class="fila gap8 mt8 wrap-f"><button class="btn btn-sec" onclick="ec.otro=-1; pintarEc()">Cancelar</button>
-              <button class="btn btn-pri" onclick="ecCambiarProducto(${i}, this)">Pasar a ese producto</button></div></div>`
-        : ec.conf === i ? `<div class="fila gap8 mt8 wrap-f ec-conf"><span class="small fuerte">¿Eliminar lo contado aquí (picking, calidad y bloqueado)?</span>
+        <div class="ec-form mt8">
+          <div class="ec-prod"><label class="lbl" for="ecProd${i}">Producto</label>
+            ${campoConCamara(`<input id="ecProd${i}" class="campo" autocomplete="off" spellcheck="false" value="${esc(ec.cod + ' · ' + (p ? p.nombre : ''))}" placeholder="Código Atlantic, Nutresa, EAN o nombre">`, 'ecProd' + i)}
+            <div id="ecSug${i}" class="ing-sug" role="listbox" hidden></div></div>
+          <div><label class="lbl" for="ecAlm${i}">Almacén</label>
+            <select id="ecAlm${i}" class="campo">${alms.some(a => a.key === almAct) ? '' : `<option value="${esc(almAct)}" selected>${esc(almCorto(almAct) || 'Sin almacén')}</option>`}
+              ${alms.map(a => `<option value="${esc(a.key)}" ${a.key === almAct ? 'selected' : ''}>${esc(a.nombre)}</option>`).join('')}</select></div>
+          <div><label class="lbl" for="ecPICKING${i}">Cantidad (picking)</label>
+            <input id="ecPICKING${i}" class="campo" type="number" inputmode="decimal" min="0" step="any" value="${l.PICKING}"></div>
+        </div>
+        <details class="ec-mas mt8" ${l.CALIDAD || l.BLOQUEADO ? 'open' : ''}><summary class="small">Calidad y bloqueado</summary>
+          <div class="dos mt8">${TIPOS_CONTEO.filter(([k]) => k !== 'PICKING').map(([k, t]) => `<div><label class="lbl" for="ec${k}${i}">${t}</label>
+            <input id="ec${k}${i}" class="campo" type="number" inputmode="decimal" min="0" step="any" value="${l[k]}"></div>`).join('')}</div></details>
+        ${ec.conf === i ? `<div class="fila gap8 mt8 wrap-f ec-conf"><span class="small fuerte">¿Eliminar lo contado aquí (picking, calidad y bloqueado)?</span>
             <button class="btn btn-sec btn-mini" onclick="ec.conf=-1; pintarEc()">No</button>
             <button class="btn btn-sal btn-mini" onclick="ecEliminar(${i}, this)">Sí, eliminar</button></div>`
-        : `<div class="fila gap8 mt8 wrap-f"><button class="btn btn-pri btn-mini" onclick="ecGuardar(${i}, this)">Guardar</button>
-            <button class="btn btn-sec btn-mini" onclick="ec.otro=${i}; ec.conf=-1; pintarEc(); setTimeout(() => $('ecProd${i}') && $('ecProd${i}').focus(), 50)">Era otro producto</button>
-            <button class="btn btn-sal btn-mini" onclick="ec.conf=${i}; ec.otro=-1; pintarEc()">Eliminar</button></div>`}
-      </div>`).join('')}
-      ${!enCic && puedePasarSede() ? `<div class="mt12"><div id="ecPasar"></div>
-        <button class="btn btn-sec btn-mini" onclick="pasarSedeAbrir(ecLugares().map(l => ({ codigo: ec.cod, ubicacion: l.ubic })), 'ecPasar', () => ecRefrescar())">Se registró en otro almacén${ini.sedes.length > 1 ? ' o sede' : ''}: cambiar</button></div>` : ''}
+        : `<div class="fila gap8 mt8 wrap-f"><button class="btn btn-pri" onclick="ecGuardarTodo(${i}, this)">Guardar cambios</button>
+            <button class="btn btn-sal btn-mini" onclick="ec.conf=${i}; pintarEc()">Eliminar</button></div>`}
+      </div>`; }).join('')}
+      ${!enCic && puedePasarSede() && ini.sedes.length > 1 ? `<div class="mt12"><div id="ecPasar"></div>
+        <button class="btn btn-sec btn-mini" onclick="pasarSedeAbrir(ecLugares().map(l => ({ codigo: ec.cod, ubicacion: l.ubic })), 'ecPasar', () => ecRefrescar())">Se registró en otra sede: cambiar</button></div>` : ''}
       <p id="fErr" class="error" hidden></p>`, 'modal-ancho');
+    ls.forEach((l, i) => enlazarSugProd($('ecProd' + i), $('ecSug' + i), enCic ? enCic.codigos : null));
+  }
+  // Lista de coincidencias para un campo de producto (código Atlantic, Nutresa, EAN o nombre)
+  function enlazarSugProd(input, caja, dentro, alElegir) {
+    if (!input || !caja) return;
+    const pintar = () => {
+      const t = input.value.trim();
+      const l = t.length < 2 || buscarProducto(t.split(' · ')[0]) ? [] : buscarProductos(t, 8, dentro);
+      caja.hidden = !l.length;
+      caja.innerHTML = l.map(p => `<button type="button" class="ing-sug-op" role="option" data-id="${esc(p.id)}">
+        <b>${esc(p.nombre)}</b><span class="muted small">Atlantic ${esc(p.id)} · Nutresa ${esc(p.codigoNutresa || '—')}</span></button>`).join('');
+      caja.querySelectorAll('.ing-sug-op').forEach(b => {
+        b.addEventListener('mousedown', ev => ev.preventDefault());
+        b.addEventListener('click', () => { const p = prodDe(b.getAttribute('data-id')); input.value = p.id + ' · ' + p.nombre; caja.hidden = true; if (alElegir) alElegir(p); });
+      });
+    };
+    input.addEventListener('input', pintar);
+    input.addEventListener('focus', () => input.select());
+    input.addEventListener('blur', () => setTimeout(() => { caja.hidden = true; }, 200));
   }
   function ecCantidades(i) {
     const c = {};
@@ -8156,6 +8833,43 @@
       : llamar('bdInventarioGeneral', ses.sedeId).then(d => { invData = d; if ($('invTabla')) pintarInvTabla(); });
     return p.then(() => { if ($('cfTabla')) $('cfTabla').innerHTML = cfTablaHtml(); if (ec) { ec.conf = -1; ec.otro = -1; pintarEc(); } });
   }
+  // Guarda de una vez lo que cambió: producto, almacén y/o cantidades.
+  // Si cambia el producto o el almacén, se pasa a ese producto y almacén (si allí ya había conteo, se suma) y lo de aquí queda eliminado.
+  function ecGuardarTodo(i, b) {
+    const l = ecLugares()[i], c = ecCantidades(i);
+    if (!l || !c) return;
+    const txt = $('ecProd' + i).value;
+    let p2 = buscarProducto(txt.split(' · ')[0]) || buscarProducto(txt);
+    if (!p2) { const l2 = buscarProductos(txt, 2); if (l2.length === 1) p2 = l2[0]; }
+    if (!p2) { $('ecProd' + i).focus(); return errForm('Escoge el producto correcto de la lista.'); }
+    const almAct = ecAlmDe(l.ubic), alm = $('ecAlm' + i).value;
+    const mismoProd = p2.id === ec.cod, mismoAlm = !alm || alm === almAct;
+    const { enCic, conteos } = ecFuente();
+    if (mismoProd && mismoAlm) {
+      if (TIPOS_CONTEO.every(([k]) => c[k] === l[k])) return errForm('No cambiaste nada.');
+      b.disabled = true; b.textContent = 'Guardando…';
+      return llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: l.ubic, codigo: ec.cod, cantidades: c, usuario: ses.nombre, ciclicoId: enCic ? enCic.id : null })
+        .then(() => { toast('Conteo corregido', 'ok'); return ecRefrescar(); })
+        .catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Guardar cambios'; });
+    }
+    if (enCic && !enCic.codigos.includes(p2.id)) return errForm(`${p2.nombre} no está en ${esReconf(enCic) ? 'este reconteo' : 'este cíclico'}. Pídele al encargado que lo agregue.`);
+    const dest = mismoAlm ? l.ubic : 'PICKING-' + alm;
+    // Lo que ya había de ese producto en ese lugar se suma
+    const ya = {};
+    conteos.filter(x => x.codigo === p2.id && x.ubicacion === dest).forEach(x => { ya[x.tipo] = x.cantidad; });
+    const hay = Object.keys(ya).length > 0;
+    const cants = {};
+    TIPOS_CONTEO.forEach(([k]) => { cants[k] = +((ya[k] || 0) + c[k]).toFixed(3); });
+    b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: dest, codigo: p2.id, cantidades: cants, usuario: ses.nombre, ciclicoId: enCic ? enCic.id : null })
+      .then(() => llamar('bdAnularConteos', { sedeId: ses.sedeId, codigo: ec.cod, ubicacionId: l.ubic, ciclicoId: enCic ? enCic.id : null, usuario: ses.nombre }))
+      .then(() => {
+        toast(`Listo: quedó en ${p2.nombre}${mismoAlm ? '' : ', almacén ' + almCorto(alm)}${hay ? ' (sumado a lo que ya había)' : ''}`, 'ok');
+        if (!mismoProd) ec.cod = p2.id;   // se sigue viendo el producto correcto
+        return ecRefrescar();
+      })
+      .catch(e => { errForm(e.message); b.disabled = false; b.textContent = 'Guardar cambios'; });
+  }
   function ecGuardar(i, b) {
     const l = ecLugares()[i], c = ecCantidades(i);
     if (!l || !c) return;
@@ -8173,7 +8887,7 @@
     if (!p2) return errForm('Escribe o escanea el producto correcto.');
     if (p2.id === ec.cod) return errForm('Es el mismo producto. Si solo cambian las cantidades, usa Guardar.');
     const { enCic } = ecFuente();
-    if (enCic && !enCic.codigos.includes(p2.id)) return errForm(`${p2.nombre} no está en ${esReconf(enCic) ? 'esta reconfirmación' : 'este cíclico'}. Pídele al encargado que lo incluya en uno nuevo.`);
+    if (enCic && !enCic.codigos.includes(p2.id)) return errForm(`${p2.nombre} no está en ${esReconf(enCic) ? 'este reconteo' : 'este cíclico'}. Pídele al encargado que lo incluya en uno nuevo.`);
     b.disabled = true; b.textContent = 'Guardando…';
     llamar('bdGuardarConteo', { sedeId: ses.sedeId, ubicacionId: l.ubic, codigo: p2.id, cantidades: c, usuario: ses.nombre, ciclicoId: enCic ? enCic.id : null })
       .then(() => llamar('bdAnularConteos', { sedeId: ses.sedeId, codigo: ec.cod, ubicacionId: l.ubic, ciclicoId: enCic ? enCic.id : null, usuario: ses.nombre }))
@@ -8196,7 +8910,7 @@
   function historialConteosInv() {
     hcF.quien = ''; hcF.q = '';
     abrirModal(`<div class="fila-sb"><span class="h2">Historial de conteos · Inventario</span>${btnCerrar()}</div>
-      <span class="muted small mt8">Quién contó qué, dónde y cuándo. Lo más nuevo primero. Los conteos de cíclicos y reconfirmaciones no salen aquí.</span>
+      <span class="muted small mt8">Quién contó qué, dónde y cuándo. Lo más nuevo primero. Los conteos de cíclicos y reconteos no salen aquí.</span>
       <div class="pi-filtros mt12"><select id="hcQuien" class="campo" aria-label="Persona"><option value="">Todas las personas</option></select>
         <input id="hcQ" class="campo" placeholder="Buscar producto o lugar" autocomplete="off"></div>
       <div id="hcPasar" class="mt8"></div>
@@ -8249,11 +8963,11 @@
       : '<p class="muted">No hay conteos con ese filtro.</p>';
   }
 
-  // Historial del cíclico o reconfirmación abierto: todos los conteos y revisiones, con quién
+  // Historial del cíclico o reconteo abierto: todos los conteos y revisiones, con quién
   function historialCiclico() {
     const c = cicSel_();
     abrirModal(`<div class="fila-sb"><span class="h2">Historial · ${esc(tituloCic(c))}</span>${btnCerrar()}</div>
-      <span class="muted small mt8">Todo lo que se contó en ${esReconf(c) ? 'esta reconfirmación' : 'este cíclico'}, con quién y cuándo (también lo que se volvió a contar). Lo más nuevo primero.</span>
+      <span class="muted small mt8">Todo lo que se contó en ${esReconf(c) ? 'este reconteo' : 'este cíclico'}, con quién y cuándo (también lo que se volvió a contar). Lo más nuevo primero.</span>
       <div id="hcCaja" class="mt12"><div class="cargando">Cargando…</div></div>`, 'modal-ancho');
     pagInicio('hcc');
     llamar('bdHistorialCiclico', c.id).then(h => {
@@ -8288,7 +9002,7 @@
 
   function borrarCiclico() {
     const c = cicLista.find(x => x.id === cicSel), rc = esReconf(c);
-    abrirModal(`<div class="fila-sb"><span class="h2">¿Eliminar est${rc ? 'a reconfirmación' : 'e cíclico'}?</span>${btnCerrar()}</div>
+    abrirModal(`<div class="fila-sb"><span class="h2">¿Eliminar est${rc ? 'a reconteo' : 'e cíclico'}?</span>${btnCerrar()}</div>
       <span class="mt12"><b>${esc(tituloCic(c))}</b> (${fCorta(c.fecha)}). Los conteos que ya hicieron se quedan en el historial.</span>
       <p id="fErr" class="error" hidden></p>
       <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">No</button>
@@ -8299,7 +9013,7 @@
     llamar('bdBorrarCiclico', id).then(() => {
       const c = cicLista.find(x => x.id === id);
       cicLista = cicLista.filter(x => x.id !== id);
-      cerrarModal(); toast(esReconf(c) ? 'Reconfirmación eliminada' : 'Cíclico eliminado', 'ok');
+      cerrarModal(); toast(esReconf(c) ? 'Reconteo eliminado' : 'Cíclico eliminado', 'ok');
       cicData = null; volverCic(c);
     }).catch(e => { errForm(e.message); b.disabled = false; });
   }
@@ -8894,7 +9608,7 @@
 
   function vistaRotulo() {
     if (rtVista === 'conteo') return vistaConteoRot();
-    const responsables = ini.operarios.map(o => o.nombre);
+    const responsables = ini.operarios.filter(o => !o.regionales || o.regionales.indexOf(regionalAct()) >= 0).map(o => o.nombre);
     const ultResp = leerLS('ultResp');
     return `<div class="col gap12">${avisoCola()}${rotTabsHtml()}
       <div class="col gap4"><span class="h2">Rotular</span>
@@ -9853,6 +10567,153 @@
     toast(`Hay ${l.length} rótulos de ese producto. Toca el que vas a poner.`, 'ok');
   }
 
+  /* ----- Cargar el aéreo con un Excel (para las regionales que no alcanzan a ubicar estiba por estiba) -----
+     El Excel trae el código de la ubicación (ej. 2000-01-02-01), el producto y la cantidad. Cada fila queda como
+     un rótulo ubicado. Se escoge si solo se llenan los espacios vacíos o si se reemplaza lo que hay en esos espacios,
+     y se confirma dos veces. El picking (nivel 0) no se carga aquí: se cuenta en Ingresar. */
+  const puedeCargarAereo = () => puedeAlguno(['carga_manual', 'inv_sap']);
+  let ca = null;   // { archivo, filas: [{ fila, ubic, espacioId, codigo, cantidad, undXCaja, vencimiento, lote, error }], modo, paso, sim }
+  function abrirCargaAereo() {
+    if (!puedeCargarAereo()) return toast('No tienes permiso para cargar el aéreo', 'error');
+    if (!sede) return toast('Abre primero la sede', 'error');
+    ca = { paso: 'archivo', modo: 'VACIOS' };
+    abrirModal(`<div class="fila-sb"><span class="h2">Cargar aéreo con Excel</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Para registrar de una vez lo que hay en el aéreo de <b>${esc(nombreSede(ses.sedeId))}</b>. Llena la plantilla:
+        una fila por estiba con el <b>código de la ubicación</b> (ej. 2000-01-02-01), el <b>código del producto</b> y la <b>cantidad</b>.
+        Vencimiento, lote y unidades por caja son opcionales. El picking no va aquí: se cuenta en Ingresar.</span>
+      <div class="fila gap8 wrap-f mt12"><button class="btn btn-sec" onclick="descargarPlantillaAereo()">Descargar plantilla</button>
+        <label for="caArch" class="btn btn-pri" role="button" tabindex="0">Escoger Excel</label></div>
+      <input id="caArch" type="file" accept=".xlsx,.xls,.csv" class="oculto">
+      <div id="caCaja" class="mt12"></div>
+      <p id="fErr" class="error" hidden></p>`, 'modal-ancho');
+    $('caArch').addEventListener('change', ev => { const f = ev.target.files[0]; if (f) leerAereo(f); });
+  }
+  function descargarPlantillaAereo() {
+    if (!window.XLSX) return toast('No se pudo abrir el lector de Excel (revisa la señal).', 'error');
+    const wb = XLSX.utils.book_new();
+    const h = XLSX.utils.aoa_to_sheet([['UBICACION', 'CODIGO PRODUCTO', 'CANTIDAD', 'UND POR CAJA', 'VENCIMIENTO', 'LOTE']]);
+    h['!cols'] = [{ wch: 16 }, { wch: 18 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, h, 'AEREO');
+    const ins = XLSX.utils.aoa_to_sheet([
+      ['Cómo llenar la hoja AEREO'],
+      ['UBICACION', 'Obligatorio. El código de la ubicación del plano, como sale en el rótulo de la estantería (ej. 2000-01-02-01).'],
+      ['CODIGO PRODUCTO', 'Obligatorio. El código Atlantic del producto (también sirve el código Nutresa o el EAN).'],
+      ['CANTIDAD', 'Obligatorio. La cantidad total de la estiba: unidades, o kilos si el producto es de peso variable.'],
+      ['UND POR CAJA', 'Opcional. Si no se llena, se usan las del producto.'],
+      ['VENCIMIENTO', 'Opcional. Fecha de vencimiento (día/mes/año).'],
+      ['LOTE', 'Opcional. El lote del producto.'],
+      [''],
+      ['Una fila por estiba. Si en un mismo espacio hay dos productos, van en dos filas con la misma ubicación.'],
+      ['El picking (nivel 01 en el código nuevo) no se carga aquí: se cuenta en Ingresar.']]);
+    ins['!cols'] = [{ wch: 18 }, { wch: 100 }];
+    XLSX.utils.book_append_sheet(wb, ins, 'INSTRUCCIONES');
+    XLSX.writeFile(wb, 'Plantilla cargar aereo.xlsx');
+  }
+  // Fecha del Excel → 'aaaa-mm-dd' (número de Excel, dd/mm/aaaa o aaaa-mm-dd)
+  function fechaExcel(v) {
+    if (v === '' || v === null || v === undefined) return '';
+    if (typeof v === 'number' && v > 20000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 86400000)); return d.toISOString().slice(0, 10); }
+    const t = String(v).trim();
+    let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+    m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+    if (m) return `${m[3].length === 2 ? '20' + m[3] : m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
+    return null;
+  }
+  function leerAereo(f) {
+    $('caCaja').innerHTML = '<div class="cargando">Leyendo…</div>';
+    const lec = new FileReader();
+    lec.onload = () => {
+      try {
+        const wb = XLSX.read(new Uint8Array(lec.result), { type: 'array' });
+        const hoja = wb.Sheets[wb.SheetNames.find(n => /AEREO/i.test(n)) || wb.SheetNames[0]];
+        const filas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: true, defval: '' }).filter(x => x.some(c => String(c).trim() !== ''));
+        const cab = Math.max(0, filas.findIndex(x => x.some(c => /UBICA/i.test(sinTilde(c)))));
+        const tit = filas[cab].map(c => sinTilde(c));
+        const col = re => tit.findIndex(t => re.test(t));
+        const cU = col(/UBICA/), cP = col(/PRODUCTO|MATERIAL|COD.*AT/), cC = col(/CANTIDAD|TOTAL/), cX = col(/POR CAJA|UND.*CAJA/), cV = col(/VENC/), cL = col(/LOTE/);
+        if (cU < 0 || cP < 0 || cC < 0) throw new Error('No encontré las columnas UBICACION, CODIGO PRODUCTO y CANTIDAD. Usa la plantilla.');
+        // Código de ubicación → espacio de esta sede (sirve el código nuevo o el interno)
+        const porCod = {};
+        sede.espacios.forEach(e => { porCod[sinTilde(e.id)] = e; const c = cuNuevo(e.id); if (c) porCod[sinTilde(c)] = e; });
+        const l = filas.slice(cab + 1).map((x, i) => {
+          const r = { fila: cab + i + 2, ubic: String(x[cU] ?? '').trim(), codigo: String(x[cP] ?? '').trim().replace(/\.0+$/, ''), cantidad: numSap(x[cC]),
+            undXCaja: cX >= 0 && String(x[cX]).trim() !== '' ? numSap(x[cX]) : null, vencimiento: cV >= 0 ? fechaExcel(x[cV]) : '', lote: cL >= 0 ? String(x[cL] ?? '').trim() : '' };
+          const e = porCod[sinTilde(r.ubic)], p = buscarProducto(r.codigo);
+          if (!r.ubic) r.error = 'Falta la ubicación';
+          else if (!e) r.error = `La ubicación ${r.ubic} no existe en ${nombreSede(ses.sedeId)}`;
+          else if (e.nivel === 0) r.error = 'Es picking: el picking se cuenta en Ingresar';
+          else if (!p) r.error = `El producto ${r.codigo || '(vacío)'} no está en el catálogo`;
+          else if (!(r.cantidad > 0)) r.error = 'Falta la cantidad';
+          else if (r.vencimiento === null) r.error = 'La fecha de vencimiento no se entiende (usa día/mes/año)';
+          if (e) r.espacioId = e.id;
+          if (p) { r.codigo = p.id; r.nombre = p.nombre; }
+          return r;
+        });
+        ca = Object.assign(ca, { archivo: f.name, filas: l, paso: 'revisar', sim: null });
+        simularAereo();
+      } catch (e) { $('caCaja').innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+    };
+    lec.readAsArrayBuffer(f);
+  }
+  const caBuenas = () => ca.filas.filter(r => !r.error);
+  const caEnviar = r => ({ fila: r.fila, espacioId: r.espacioId, codigo: r.codigo, cantidad: r.cantidad, undXCaja: r.undXCaja, vencimiento: r.vencimiento || '', lote: r.lote });
+  // Lo que haría con cada forma (sin guardar nada)
+  function simularAereo() {
+    $('caCaja').innerHTML = '<div class="cargando">Revisando los espacios…</div>';
+    const pedir = modo => llamar('bdCargarAereo', { token: ses.token, sedeId: ses.sedeId, modo, simular: true, usuario: ses.nombre, filas: caBuenas().map(caEnviar) });
+    Promise.all([pedir('VACIOS'), pedir('REEMPLAZAR')])
+      .then(([v, r]) => { ca.sim = { VACIOS: v, REEMPLAZAR: r }; pintarCargaAereo(); })
+      .catch(e => { $('caCaja').innerHTML = `<p class="error">${esc(e.message)}</p>`; });
+  }
+  function pintarCargaAereo() {
+    const malas = ca.filas.filter(r => r.error), sv = ca.sim.VACIOS, sr = ca.sim.REEMPLAZAR;
+    const errSrv = sv.errores || [];
+    const listaErr = malas.map(r => `Fila ${r.fila}: ${esc(r.error)}`).concat(errSrv.map(x => `Fila ${esc(x.fila)}: ${esc(x.error)}`));
+    if (ca.paso === 'confirmar') {
+      const s = ca.sim[ca.modo];
+      $('caCaja').innerHTML = `<div class="alerta-fefo"><b>${ca.modo === 'REEMPLAZAR' ? '¿Seguro que quieres reemplazar?' : '¿Cargar el aéreo?'}</b>
+          <ul class="mt8">
+            <li>Se van a cargar <b>${s.validas}</b> estiba${s.validas === 1 ? '' : 's'} en ${esc(nombreSede(ses.sedeId))}.</li>
+            ${ca.modo === 'REEMPLAZAR' ? `<li>En <b>${s.ocupados}</b> espacio${s.ocupados === 1 ? '' : 's'} que ya tienen producto se quita${s.reemplazar === 1 ? '' : 'n'} <b>${s.reemplazar}</b> estiba${s.reemplazar === 1 ? '' : 's'} y queda lo del Excel. Queda en el historial como ajuste.</li>`
+              : sv.saltadas.length ? `<li>Las <b>${sv.saltadas.length}</b> fila${sv.saltadas.length === 1 ? '' : 's'} que caen en espacios que ya tienen producto no se cargan.</li>` : ''}
+          </ul>
+          <span class="small">Cada estiba queda como un rótulo ubicado (aparece en «Rótulos sin imprimir»).</span></div>
+        <div class="dos mt12"><button class="btn btn-sec btn-xl" onclick="ca.paso='revisar'; pintarCargaAereo()">Volver</button>
+          <button id="caOk" class="btn ${ca.modo === 'REEMPLAZAR' ? 'btn-sal' : 'btn-pri'} btn-xl" onclick="guardarCargaAereo(this)">${ca.modo === 'REEMPLAZAR' ? 'Sí, reemplazar y cargar' : 'Sí, cargar'}</button></div>`;
+      return;
+    }
+    $('caCaja').innerHTML = `<span class="muted small">Archivo: <b>${esc(ca.archivo)}</b> · ${ca.filas.length} filas</span>
+      <div class="inv-res mt8">
+        <div><span class="muted small">Filas listas</span><b class="txt-verde">${sr.validas}</b></div>
+        <div><span class="muted small">Caen en espacios vacíos</span><b>${sv.validas}</b></div>
+        <div><span class="muted small">Caen en espacios con producto</span><b class="${sr.ocupados ? 'txt-naranja' : ''}">${sr.validas - sv.validas}</b></div>
+        <div><span class="muted small">Con error</span><b class="${listaErr.length ? 'txt-rojo' : ''}">${listaErr.length}</b></div></div>
+      ${listaErr.length ? `<details class="mt8" ${listaErr.length <= 8 ? 'open' : ''}><summary class="small">Filas con error (no se cargan)</summary><div class="alerta-fefo small mt8">${listaErr.slice(0, 60).join('<br>')}${listaErr.length > 60 ? '<br>…' : ''}</div></details>` : ''}
+      ${sr.validas && !sr.ocupados ? `<button class="btn btn-pri btn-xl mt12" onclick="ca.modo='VACIOS'; ca.paso='confirmar'; pintarCargaAereo()">Continuar</button>` : sr.validas ? `<span class="lbl mt12">¿Qué hago con los espacios que ya tienen producto?</span>
+      <label class="perm-fila"><span class="col gap4"><b>Solo llenar los espacios vacíos</b><span class="muted small">Lo que ya está en el plano no se toca. Las filas que caen en espacios con producto no se cargan.</span></span>
+        <input type="radio" name="caModo" ${ca.modo === 'VACIOS' ? 'checked' : ''} onchange="ca.modo='VACIOS'"></label>
+      <label class="perm-fila"><span class="col gap4"><b>Reemplazar lo que hay en esos espacios</b><span class="muted small">En los ${sr.ocupados} espacios del Excel que ya tienen producto se quita lo que hay (${sr.reemplazar} estiba${sr.reemplazar === 1 ? '' : 's'}) y queda lo del Excel.</span></span>
+        <input type="radio" name="caModo" ${ca.modo === 'REEMPLAZAR' ? 'checked' : ''} onchange="ca.modo='REEMPLAZAR'"></label>
+      <button class="btn btn-pri btn-xl mt12" onclick="ca.paso='confirmar'; pintarCargaAereo()">Continuar</button>` : '<p class="muted mt12">No hay filas para cargar.</p>'}`;
+  }
+  function guardarCargaAereo(b) {
+    b.disabled = true; b.textContent = 'Cargando…';
+    llamar('bdCargarAereo', { token: ses.token, sedeId: ses.sedeId, modo: ca.modo, simular: false, usuario: ses.nombre, filas: caBuenas().map(caEnviar) })
+      .then(r => {
+        const errs = (r.errores || []).concat(r.saltadas || []);
+        $('caCaja').innerHTML = `<div class="inv-res"><div><span class="muted small">Cargadas</span><b class="txt-verde">${r.cargadas}</b></div>
+            ${ca.modo === 'REEMPLAZAR' ? `<div><span class="muted small">Estibas reemplazadas</span><b>${r.reemplazados}</b></div>` : ''}
+            <div><span class="muted small">No se cargaron</span><b class="${errs.length ? 'txt-rojo' : ''}">${errs.length}</b></div></div>
+          ${errs.length ? `<div class="alerta-fefo small mt8">${errs.slice(0, 60).map(x => `Fila ${esc(x.fila)}: ${esc(x.error)}`).join('<br>')}</div>` : ''}
+          <button class="btn btn-pri btn-xl mt12" onclick="cerrarModal()">Listo</button>`;
+        toast(`Aéreo cargado: ${r.cargadas} estibas`, 'ok');
+        invData = null;
+        llamar('bdSede', ses.sedeId).then(d => { setSede(d); if ($('modal').hidden) pintarApp(); }).catch(() => {});
+      })
+      .catch(e => { errForm(e.message); b.disabled = false; b.textContent = ca.modo === 'REEMPLAZAR' ? 'Sí, reemplazar y cargar' : 'Sí, cargar'; });
+  }
+
   /* ----- Cargar sin código de barras: mercancía que ya está en la bodega con rótulo viejo ----- */
   let cm = { tipo: 'NORMAL' };
 
@@ -9862,6 +10723,8 @@
     if (!esp) return toast('Toca primero el espacio (por ejemplo 2A)', 'error');
     if (espacioLleno(esp.id)) return;
     const ultResp = leerLS('ultResp') || ses.nombre;
+    // Vencimiento, recibo y lote: opcionales solo para quien tiene ese permiso
+    const opc = puede('cm_sin_datos') ? ' <span class="muted small">(opcional)</span>' : '';
     abrirModal(`<div class="fila-sb"><span class="h2">Cargar en ${esc(etiqueta(esp))}</span>${btnCerrar()}</div>
       <span class="muted small">${esc(esp.id)} · Sin código de barras: la app le crea su identificador y queda en <b>Pendientes por imprimir</b> para pegarle el rótulo después.</span>
       <label class="lbl" for="cmProd">Producto (código AFS, Nutresa o nombre)</label>
@@ -9875,11 +10738,11 @@
       <div id="cmCant"></div>
       <div id="cmTotal" class="total-op" aria-live="polite"></div>
       <div class="dos">
-        <div><label class="lbl" for="cmVen">Fecha de vencimiento <span class="muted small">(opcional)</span></label><input id="cmVen" class="campo" type="date"></div>
-        <div><label class="lbl" for="cmRec">Fecha de recibo <span class="muted small">(opcional)</span></label><input id="cmRec" class="campo" type="date" value="${esc(leerLS('ultRecibo') || hoyISO())}"></div>
+        <div><label class="lbl" for="cmVen">Fecha de vencimiento${opc}</label><input id="cmVen" class="campo" type="date"></div>
+        <div><label class="lbl" for="cmRec">Fecha de recibo${opc}</label><input id="cmRec" class="campo" type="date" value="${esc(leerLS('ultRecibo') || hoyISO())}"></div>
       </div>
       <div class="dos">
-        <div><label class="lbl" for="cmLote">Lote o rótulo viejo <span class="muted small">(opcional)</span></label><input id="cmLote" class="campo" autocomplete="off"></div>
+        <div><label class="lbl" for="cmLote">Lote${opc}</label><input id="cmLote" class="campo" autocomplete="off"></div>
         <div class="resp-fijo"><span class="lbl">Responsable</span><span class="resp-nom">${esc(ses.nombre)}</span></div>
       </div>
       <p id="fErr" class="error" hidden></p>
@@ -9949,7 +10812,13 @@
     if (!p) return errForm('Elige el producto de la lista.');
     const d = { codigo: p.id, tipo: cm.tipo, vencimiento: $('cmVen').value, recibo: $('cmRec').value, responsable: ses.nombre,
       loteOrigen: $('cmLote').value.trim(), ubicacionId: esp.id, sedeId: ses.sedeId, usuario: ses.nombre };
-    // Solo son obligatorias las unidades por caja y la cantidad (cajas o total). Lo demás es opcional.
+    // Vencimiento, recibo y lote: obligatorios, salvo para quien tiene el permiso «Cargar sin vencimiento, recibo ni lote»
+    if (!puede('cm_sin_datos')) {
+      if (!d.vencimiento) { $('cmVen').focus(); return errForm('Escribe la fecha de vencimiento.'); }
+      if (!d.recibo) { $('cmRec').focus(); return errForm('Escribe la fecha de recibo.'); }
+      if (!d.loteOrigen) { $('cmLote').focus(); return errForm('Escribe el lote.'); }
+    }
+    // Cantidad: unidades por caja y número de cajas (o la cantidad total)
     if (cm.tipo === 'NORMAL') {
       const c = num($('cmCajas').value), u = num($('cmUnd').value), tot = num($('cmTot').value);
       if (!(u > 0)) { $('cmUnd').focus(); return errForm('Escribe las unidades por caja.'); }
@@ -10384,7 +11253,7 @@
     else if ($('raTxt')) camDestino = 'raTxt';
     else if (flujo && flujo.paso === 'lugar') camDestino = 'flujoLugar';
     else if (flujo && flujo.paso === 'origen') camDestino = 'flujoOrigen';
-    else if ($('rcQ') && $('rcTabla')) camDestino = 'rcQ';   // reconfirmación: solo busca el producto para contarlo
+    else if ($('rcQ') && $('rcTabla')) camDestino = 'rcQ';   // reconteo: solo busca el producto para contarlo
     else {
       const id = CAMPOS_COD.find(k => $(k) && $(k).offsetParent !== null);
       if (!id || id === 'scan') { cerrarModal(); camDestino = 'scan'; }
@@ -11397,7 +12266,7 @@
       <div class="fila-sb gap12"><label class="h3" for="ajPas">Usar el pasillo cargado</label>
         <span class="switch"><input type="checkbox" id="ajPas" role="switch" ${usarPasCargado() ? 'checked' : ''} onchange="guardarAjustePasillo(this)"><span></span></span></div>
       <span class="muted small"><b>Encendido:</b> el pasillo de cada producto es el que se cargó en Inventario con «Actualizar almacenes y pasillos» (si un producto no tiene, se usa el del plano).
-        <b>Apagado:</b> siempre se usa el pasillo del plano. Aplica al filtro de pasillo de las reconfirmaciones, a «Pasillos» del inventario y a Productos totales.</span>
+        <b>Apagado:</b> siempre se usa el pasillo del plano. Aplica al filtro de pasillo de los reconteos, a «Pasillos» del inventario y a Productos totales.</span>
     </div>
     <div class="card col gap8 mt12" style="max-width:520px">
       <div class="fila-sb gap12"><label class="h3" for="ajSon">Sonido</label>
@@ -12022,15 +12891,195 @@
   }
 
   /* ----- Sedes ----- */
-  function vistaSedes() {
+  /* ----- Regionales (solo el superadministrador) ----- */
+  let regCfg = null, regCargando = false;
+  function cargarRegCfg() {
+    if (regCargando) return;
+    regCargando = true;
+    llamar('bdRegionalesConfig', ses.token).then(l => { regCfg = l || []; }).catch(e => { regCfg = { error: e.message }; })
+      .finally(() => { regCargando = false; if (vista === 'config' || !ses.sedeId) pintarApp(); });
+  }
+  function vistaRegionales() {
+    if (!puede('superadmin') || !hayRegionales()) return '';
+    if (!regCfg) { cargarRegCfg(); return '<section class="card"><div class="cargando">Cargando regionales…</div></section>'; }
+    if (regCfg.error) return `<section class="card col gap8"><span class="h3">Regionales</span><p class="error">${esc(regCfg.error)}</p></section>`;
     return `<section class="card col gap12">
-      <div class="col gap4"><span class="h3">Sedes</span>
+      <div class="col gap4"><span class="h3">Regionales ${ayudaHtml('Solo tú (superadministrador) ves esto. Una regional nueva aparece en la lista de «Regional» al entrar. Para crearle sedes, sal y entra escogiendo esa regional. Solo se elimina una regional sin sedes ni personas.')}</span>
+        <span class="muted small">Ciudades donde trabaja la empresa. Cada una tiene sus sedes, su gente y los productos que maneja. El código es el de la regional en SAP (ej. 1200).</span></div>
+      ${regCfg.map(r => `<div class="fila gap8 wrap-f sede-fila">
+        <input class="campo" id="rgN-${esc(r.id)}" value="${esc(r.nombre)}" aria-label="Nombre de la regional ${esc(r.nombre)}" style="flex:2 1 180px">
+        <input class="campo" id="rgC-${esc(r.id)}" value="${esc(r.codigo || '')}" placeholder="Código" aria-label="Código SAP de ${esc(r.nombre)}" style="flex:0 1 110px" inputmode="numeric">
+        <span class="muted small">${r.sedes} sede${r.sedes === 1 ? '' : 's'} · ${r.personas} persona${r.personas === 1 ? '' : 's'} · ${r.productos ? r.productos + (r.productos === 1 ? ' producto' : ' productos') : 'todos los productos'}</span>
+        <button class="btn btn-sec" onclick="guardarRegional('${esc(r.id)}', this)">Guardar</button>
+        <button class="btn btn-sec" onclick="abrirProdRegional('${esc(r.id)}')">Productos</button>
+        ${r.id === regionalAct() ? '<span class="tag ok">Aquí estás</span>' : !r.sedes && !r.personas ? `<button class="btn btn-sec txt-rojo" onclick="borrarRegional('${esc(r.id)}')">Eliminar</button>` : ''}
+      </div>`).join('')}
+      <div class="fila gap8 wrap-f mt8"><input class="campo" id="rgNueva" placeholder="Nombre de la regional nueva (ej. Cali)" style="flex:1 1 220px">
+        <button class="btn btn-pri" onclick="guardarRegional(null, this)">+ Crear regional</button></div>
+    </section>`;
+  }
+  function guardarRegional(id, b) {
+    const nombre = (id ? $('rgN-' + id) : $('rgNueva')).value.trim();
+    if (!nombre) return toast('Escribe el nombre de la regional', 'error');
+    const r = id && (regCfg || []).find(x => x.id === id);
+    const cod = id ? $('rgC-' + id).value.trim() : '';
+    b.disabled = true;
+    const pasos = !id || nombre !== r.nombre ? llamar('bdGuardarRegional', { token: ses.token, id, nombre }) : Promise.resolve(regCfg);
+    pasos.then(l => (id && cod !== (r.codigo || '') ? llamar('bdCodigoRegional', { token: ses.token, id, codigo: cod }) : l)).then(l => {
+      regCfg = l;
+      llamar('bdInicio').then(d => { ini.regionales = d.regionales || ini.regionales; pintarApp(); }).catch(() => {});
+      toast(id ? 'Regional guardada' : `Regional ${nombre} creada. Para crearle sedes, sal y entra escogiendo ${nombre}.`, 'ok');
+      pintarApp();
+    }).catch(e => { toast(e.message, 'error'); b.disabled = false; });
+  }
+  function borrarRegional(id, ok) {
+    const r = (regCfg || []).find(x => x.id === id);
+    if (!r) return;
+    if (ok !== true) return abrirModal(`<div class="fila-sb"><span class="h2">¿Eliminar la regional ${esc(r.nombre)}?</span>${btnCerrar()}</div>
+      <p class="mt12">No tiene sedes ni personas. Si la creaste por error, se elimina.</p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-pri btn-xl" onclick="cerrarModal(); borrarRegional('${esc(id)}', true)">Sí, eliminar</button></div>`);
+    llamar('bdBorrarRegional', { token: ses.token, id }).then(l => {
+      regCfg = l;
+      llamar('bdInicio').then(d => { ini.regionales = d.regionales || ini.regionales; }).catch(() => {});
+      toast('Regional eliminada', 'ok'); pintarApp();
+    }).catch(e => toast(e.message, 'error'));
+  }
+
+  /* ----- Productos que maneja cada regional -----
+     Si una regional tiene su lista, en el inventario, en la búsqueda y en Ingresar solo salen esos productos
+     (los que tengan SAP, conteo o estén en el plano salen igual). Sin lista, se ven todos. */
+  function cargarProdRegional() {
+    if (!hayRegionales()) { ini.prodReg = null; return Promise.resolve(); }
+    return llamar('bdProductosRegional', regionalAct()).then(l => {
+      ini.prodReg = l && l.length ? new Set(l) : null;
+      diMemo = null;
+      if ($('dlProductos')) $('dlProductos').innerHTML = ini.productos.filter(prodDeMiRegional).map(p => `<option value="${esc(p.id + ' · ' + p.nombre)}">`).join('');
+    }).catch(() => {});
+  }
+  const prodDeMiRegional = p => !ini.prodReg || ini.prodReg.has(p.id);
+  let prc = null;   // { regId, codigos, malos, archivo, filas, cab, colCod, colReg, confirmar }
+  function vistaProdRegionalCard() {
+    if (!hayRegionales() || puede('superadmin') || !puede('productos')) return '';
+    const n = ini.prodReg ? ini.prodReg.size : 0;
+    return `<section class="card col gap8">
+      <div class="fila-sb wrap-f gap8"><span class="h3">Productos que maneja ${esc(nombreRegional())} ${ayudaHtml('Con la lista cargada, en el inventario, en la búsqueda y en Ingresar solo salen los productos de tu regional. Sin lista se ven todos.')}</span>
+        <button class="btn btn-sec" onclick="abrirProdRegional('${esc(regionalAct())}')">Cargar lista</button></div>
+      <span class="muted small">${n ? `${n} productos en la lista.` : 'Todavía no hay lista: se ven todos los productos.'}</span></section>`;
+  }
+  function abrirProdRegional(regId) {
+    if (!window.XLSX) return toast('No se pudo abrir el lector de Excel (revisa la señal) e inténtalo otra vez.', 'error');
+    const r = (ini.regionales || []).find(x => x.id === regId) || { id: regId, nombre: regId };
+    prc = { regId, reg: r };
+    abrirModal(`<div class="fila-sb"><span class="h2">Productos de ${esc(r.nombre)}</span>${btnCerrar()}</div>
+      <span class="muted small mt8">Sube el Excel con los productos que maneja ${esc(r.nombre)}: una columna con el código Atlantic del producto.
+        Si el Excel trae varias regionales, escoge también la columna del código de la regional${r.codigo ? ` (se toman solo las filas con <b>${esc(r.codigo)}</b>)` : ''}.</span>
+      <label for="prcArch" class="btn btn-pri btn-xl mt12" role="button" tabindex="0">Escoger Excel</label>
+      <input id="prcArch" type="file" accept=".xlsx,.xls,.csv" class="oculto">
+      <div id="prcCaja" class="mt12"></div>
+      <p id="fErr" class="error" hidden></p>`);
+    $('prcArch').addEventListener('change', ev => {
+      const f = ev.target.files[0];
+      if (!f) return;
+      const lec = new FileReader();
+      lec.onload = () => {
+        try {
+          const wb = XLSX.read(new Uint8Array(lec.result), { type: 'array' });
+          const filas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' }).filter(x => x.some(c => String(c).trim() !== ''));
+          const cab = Math.max(0, filas.findIndex(x => x.filter(c => String(c).trim() && isNaN(Number(c))).length >= 1));
+          const tit = filas[cab].map(c => sinTilde(String(c)));
+          const busca = re => tit.findIndex(t => re.test(t));
+          prc = Object.assign(prc, { archivo: f.name, filas, cab, colCod: [/COD.*ATL|ATLANTIC|^MATERIAL$/, /MATERIAL|^COD|CODIGO|SKU/].map(busca).find(i => i >= 0), colReg: busca(/CENTRO|REGIONAL|PLANTA|CEN\b/), confirmar: false });
+          if (!(prc.colCod >= 0)) prc.colCod = 0;
+          pintarProdRegional();
+        } catch (e) { errForm('No se pudo leer el archivo: ' + e.message); }
+      };
+      lec.readAsArrayBuffer(f);
+    });
+  }
+  function prcCodigos() {
+    const { filas, cab, colCod, colReg, reg } = prc;
+    const codReg = String(reg.codigo || '').trim();
+    const cods = new Set(), malos = new Set();
+    filas.slice(cab + 1).forEach(x => {
+      if (colReg >= 0 && codReg && String(x[colReg] ?? '').trim().replace(/\.0+$/, '') !== codReg) return;
+      const c = String(x[colCod] ?? '').trim().replace(/\.0+$/, '').replace(/^0+(?=\d)/, '');
+      if (!c) return;
+      const p = buscarProducto(c);
+      if (p) cods.add(p.id); else malos.add(c);
+    });
+    return { cods: [...cods], malos: [...malos] };
+  }
+  function pintarProdRegional() {
+    const { filas, cab, colCod, colReg, reg } = prc;
+    const tit = filas[cab].map((c, i) => String(c).trim() || `Columna ${i + 1}`);
+    const sel = (id, k, i, vacio) => `<select id="${id}" class="campo" onchange="prc.${k}=+this.value; prc.confirmar=false; pintarProdRegional()">${vacio ? '<option value="-1">— No viene —</option>' : ''}${tit.map((t, j) => `<option value="${j}" ${j === i ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+    const { cods, malos } = prcCodigos();
+    $('prcCaja').innerHTML = `<span class="muted small">Archivo: <b>${esc(prc.archivo)}</b> · ${filas.length - cab - 1} filas</span>
+      <div class="dos mt8"><div><label class="lbl" for="prcCod">Código del producto</label>${sel('prcCod', 'colCod', colCod)}</div>
+        <div><label class="lbl" for="prcReg">Código de la regional (opcional)</label>${sel('prcReg', 'colReg', colReg, true)}</div></div>
+      ${colReg >= 0 && !reg.codigo ? '<p class="small txt-naranja mt8">Esta regional no tiene código: ponle el código en la lista de Regionales para tomar solo sus filas. Por ahora se toman todas.</p>' : ''}
+      <div class="inv-res mt12"><div><span class="muted small">Productos encontrados</span><b class="txt-verde">${cods.length}</b></div>
+        <div><span class="muted small">No están en el catálogo</span><b class="${malos.length ? 'txt-naranja' : ''}">${malos.length}</b></div></div>
+      ${malos.length ? `<span class="muted small mt8">No están en el catálogo (no se guardan): ${esc(malos.slice(0, 15).join(', '))}${malos.length > 15 ? '…' : ''}</span>` : ''}
+      ${prc.confirmar ? `<div class="alerta-fefo mt12"><b>¿Reemplazar la lista?</b> La lista de ${esc(reg.nombre)} quedará solo con estos ${cods.length} productos; los demás salen de la lista (no se borran del catálogo).
+          <div class="fila gap8 mt8 wrap-f"><button class="btn btn-sec" onclick="prc.confirmar=false; pintarProdRegional()">No</button>
+          <button class="btn btn-sal" onclick="guardarProdRegional('REEMPLAZAR', this)">Sí, reemplazar</button></div></div>`
+        : `<div class="fila gap8 mt12 wrap-f"><button class="btn btn-pri" ${cods.length ? '' : 'disabled'} onclick="guardarProdRegional('AGREGAR', this)">Agregar a la lista</button>
+          <button class="btn btn-sec" ${cods.length ? '' : 'disabled'} onclick="prc.confirmar=true; pintarProdRegional()">Reemplazar la lista</button></div>
+          <span class="muted small">«Agregar» suma estos productos a los que ya tiene. «Reemplazar» deja solo estos.</span>`}`;
+  }
+  function guardarProdRegional(modo, b) {
+    const { cods } = prcCodigos();
+    b.disabled = true; b.textContent = 'Guardando…';
+    llamar('bdCargarProductosRegional', { token: ses.token, regionalId: prc.regId, codigos: cods, modo }).then(r => {
+      cerrarModal();
+      toast(`Listo: ${r.total} productos en la lista de ${prc.reg.nombre}${r.quitados ? ` (${r.quitados} salieron)` : ''}`, 'ok');
+      regCfg = null;
+      const p = prc.regId === regionalAct() ? cargarProdRegional() : Promise.resolve();
+      p.then(() => pintarApp());
+    }).catch(e => { errForm(e.message); b.disabled = false; b.textContent = modo === 'REEMPLAZAR' ? 'Sí, reemplazar' : 'Agregar a la lista'; });
+  }
+
+  /* ----- Sedes ----- */
+  // Una sede se puede eliminar si se creó por error y está vacía (lo revisa el servidor).
+  // Las dos primeras sedes tienen el plano dibujado de las bodegas y no se eliminan.
+  const sedeBorrable = s => hayRegionales() && s.id !== ses.sedeId && (ini.sedesTodas || ini.sedes).slice(0, 2).every(x => x.id !== s.id);
+  function borrarSede(id, ok) {
+    const s = ini.sedes.find(x => x.id === id);
+    if (!s) return;
+    if (ok !== true) return abrirModal(`<div class="fila-sb"><span class="h2">¿Eliminar la sede ${esc(s.nombre)}?</span>${btnCerrar()}</div>
+      <p class="mt12">Solo se elimina si está <b>vacía</b>: sin rótulos, conteos, recibos, códigos de ubicación ni producto en su plano. Si tiene algo, la app no la deja y te dice qué tiene.</p>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-pri btn-xl" onclick="cerrarModal(); borrarSede('${esc(id)}', true)">Sí, eliminar</button></div>`);
+    llamar('bdBorrarSede', { token: ses.token, id }).then(sedes => {
+      ini.sedesTodas = sedes; aplicarRegional(); regCfg = null;
+      toast(`Sede ${s.nombre} eliminada`, 'ok'); pintarApp();
+    }).catch(e => toast(e.message, 'error'));
+  }
+  // Regional sin sedes todavía
+  function vistaSinSedes() {
+    const reg = esc(nombreRegional() || 'Esta regional');
+    if (puede('config')) {
+      cfgTab = 'sedes';
+      return `<div class="col gap12"><div class="card col gap4"><span class="h2">${reg} todavía no tiene sedes</span>
+        <span class="muted">Crea la primera sede aquí abajo. Después la abres y dibujas su plano en «Configuración».</span></div>${vistaSedes()}</div>`;
+    }
+    return `<div class="card col gap8"><span class="h2">${reg} todavía no tiene sedes</span>
+      <span class="muted">Pídele al administrador que cree las sedes de esta regional en «Configuración → Sedes».</span></div>`;
+  }
+
+  function vistaSedes() {
+    return `${vistaRegionales()}${vistaProdRegionalCard()}<section class="card col gap12">
+      <div class="col gap4"><span class="h3">Sedes${nombreRegional() ? ' de ' + esc(nombreRegional()) : ''}</span>
         <span class="muted small">Cámbiale el nombre a una sede o crea una nueva. Para dibujar el plano de una sede, ábrela (arriba, en el nombre de la sede) y usa el «Editor del plano».</span></div>
       ${ini.sedes.map(s => `<div class="fila gap8 wrap-f sede-fila">
         <input class="campo" id="sdN-${esc(s.id)}" value="${esc(s.nombre)}" aria-label="Nombre de la sede ${esc(s.nombre)}" style="flex:1 1 220px">
         <button class="btn btn-sec" onclick="guardarSede('${esc(s.id)}', this)">Guardar nombre</button>
         ${s.id === ses.sedeId ? '<span class="tag ok">Abierta</span>' : `<button class="btn btn-sec" onclick="lg.sedeId='${esc(s.id)}'; guardarLS('sesion', { perfil: lg.perfil, nombre: lg.nombre, sedeId: lg.sedeId }); ed = null; verSede('${esc(s.id)}')">Abrir</button>`}
+        ${sedeBorrable(s) ? `<button class="btn btn-sec txt-rojo" onclick="borrarSede('${esc(s.id)}')">Eliminar</button>` : ''}
       </div>`).join('')}
+      ${hayRegionales() ? '<span class="muted small">Para eliminar la sede que tienes abierta, primero abre otra. Las sedes con datos no se eliminan.</span>' : ''}
       <div class="fila gap8 wrap-f mt8"><input class="campo" id="sdNueva" placeholder="Nombre de la sede nueva" style="flex:1 1 220px">
         <button class="btn btn-pri" onclick="guardarSede(null, this)">+ Crear sede</button></div>
     </section>`;
@@ -12039,7 +13088,8 @@
     const nombre = (id ? $('sdN-' + id) : $('sdNueva')).value;
     b.disabled = true;
     llamar('bdGuardarSede', { id, nombre }).then(sedes => {
-      ini.sedes = sedes;
+      ini.sedesTodas = sedes; aplicarRegional(); regCfg = null;
+      if (!ses.sedeId && ini.sedes[0]) { lg.sedeId = ini.sedes[0].id; ses.sedeId = lg.sedeId; guardarLS('sesion', { perfil: lg.perfil, nombre: lg.nombre, sedeId: lg.sedeId }); return verSede(lg.sedeId); }
       toast(id ? 'Nombre guardado' : `Sede ${nombre.trim()} creada. Ábrela para dibujar su plano.`, 'ok');
       pintarApp();
     }).catch(e => { toast(e.message, 'error'); b.disabled = false; });
