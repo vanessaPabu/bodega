@@ -257,6 +257,22 @@
   let form = null;
   let lg = Object.assign({ perfil: 'OPERARIO', nombre: '', sedeId: '' }, leerLS('sesion') || {});
   const esJefe = () => ses && ses.perfil === 'JEFE';
+  // Cómo se llama cada tipo en pantalla (por dentro siguen siendo JEFE y OPERARIO)
+  const nombreRol = r => (r === 'JEFE' ? 'Admin' : 'Usuario');
+  // Lo que sale arriba al lado del nombre: el perfil con el que entró la persona
+  function perfilTxt() {
+    if (!ses) return '';
+    if (ses.perfilNombre) return ses.perfilNombre;
+    if (ses.perfilNombre === null) return puede('superadmin') ? 'Superadministrador' : 'Personalizado';
+    return '';
+  }
+  function cargarMiPerfil() {
+    if (!ses || !ses.token) return;
+    llamar('bdMiPerfil', ses.token).then(r => {
+      const n = (r && r.nombre) || null;
+      if (ses && ses.perfilNombre !== n) { ses.perfilNombre = n; if (pantalla === 'app') pintarApp(); }
+    }).catch(() => {});
+  }
   // Permisos de la persona que entró (los da el administrador en "Usuarios")
   const puede = k => !!(ses && (ses.permisos || []).includes(k));
   // Permisos por módulo y por acción (el administrador los marca uno por uno en "Usuarios")
@@ -734,6 +750,7 @@
     guardarLS('token', r.token);
     aplicarRegional();
     ses = { nombre: r.nombre, perfil: r.rol, sedeId: lg.sedeId, permisos: r.permisos || [], token: r.token, id: r.id, regionalId: regionalAct() };
+    cargarMiPerfil();   // el nombre del perfil, para mostrarlo arriba
     lg.perfil = r.rol; lg.nombre = r.nombre;
     guardarLS('sesion', { perfil: lg.perfil, nombre: lg.nombre, sedeId: lg.sedeId });
     posSel = null; espSel = null; busqueda = ''; vista = 'mapa';
@@ -762,6 +779,7 @@
       if (!r || !r.ok) { toast((r && r.error) || 'Tu sesión terminó. Vuelve a entrar con tu PIN.', 'error'); return salir(); }
       const antes = (ses.permisos || []).join();
       ses.permisos = r.permisos || []; ses.perfil = r.rol; ses.nombre = r.nombre;
+      cargarMiPerfil();
       if (antes !== ses.permisos.join() && $('modal').hidden) pintarApp();
     }).catch(() => {});
   }
@@ -790,7 +808,7 @@
       <div class="col flex1">${ini.sedes.length > 1
           ? `<button class="t1 sede-top" onclick="elegirSede()" aria-label="Cambiar de sede">${esc(nombreSede(ses.sedeId))} <span aria-hidden="true">▾</span></button>`
           : `<span class="t1">${ses.sedeId ? esc(nombreSede(ses.sedeId)) : 'Sin sedes'}</span>`}
-        <span class="t2">${esc(ses.nombre)} · ${esJefe() ? 'Jefe' : 'Operario'}${nombreRegional() ? ' · ' + esc(nombreRegional()) : ''}</span></div>
+        <span class="t2">${esc(ses.nombre)}${perfilTxt() ? ' · ' + esc(perfilTxt()) : ''}${nombreRegional() ? ' · ' + esc(nombreRegional()) : ''}</span></div>
       <nav class="nav" aria-label="Secciones">
         <button class="${vista === 'mapa' ? 'on' : ''}" onclick="irVista('mapa')">Plano</button>
         <button class="${vista === 'productos' ? 'on' : ''}" onclick="irVista('productos')">Productos</button>
@@ -3004,7 +3022,7 @@
     const pg = paginar('us', l, usFiltrado2);
     const estado = u => !u.activo ? '<span class="tag">Desactivado</span>' : u.bloqueado ? '<span class="tag venc">Bloqueado</span>' : '<span class="tag ok">Activo</span>';
     const pin = u => u.tienePin ? '<span class="us-pin ok">Asignado</span>' : '<span class="us-pin no">Sin PIN</span>';
-    const perfilTxt = u => { const p = perfilDe(u.perfilId); return p ? esc(p.nombre) : pfFalta ? (u.rol === 'JEFE' ? 'Jefe' : 'Operario') : '<span class="muted">Personalizado</span>'; };
+    const perfilTxt = u => { const p = perfilDe(u.perfilId); return p ? esc(p.nombre) : pfFalta ? nombreRol(u.rol) : '<span class="muted">Personalizado</span>'; };
     const todosMarcados = l.length && l.every(u => usSel.has(u.id));
     const sel = [...usSel].filter(id => usLista.some(u => u.id === id));
     const bulk = sel.length && !pfFalta ? `<div class="us-bulk" role="region" aria-label="Seleccionados">
@@ -3064,7 +3082,7 @@
           <td><span class="col gap4"><b>${esc(p.nombre)}${p.id === miPerfilId() ? ' <span class="muted small">(el tuyo)</span>' : ''}</b>
             ${p.descripcion ? `<span class="muted small">${esc(p.descripcion)}</span>` : ''}
             <span class="us-movil muted small">${nPermisos(p)}/${PERMISOS.length} permisos · ${p.usuarios} persona${p.usuarios === 1 ? '' : 's'}</span></span></td>
-          <td>${p.rol === 'JEFE' ? 'Jefe' : 'Operario'}</td>
+          <td>${nombreRol(p.rol)}</td>
           <td>${barraPermisos(nPermisos(p))}</td>
           <td><button class="link" onclick="event.stopPropagation(); usTab='usuarios'; usFiltro.perfil='${esc(p.id)}'; usFiltro.estado='activos'; pagInicio('us'); pintarApp()">${p.usuarios} persona${p.usuarios === 1 ? '' : 's'}</button></td>
           <td class="us-acc"><button class="btn btn-sec btn-mini" onclick="event.stopPropagation(); editarPerfil('${esc(p.id)}')">Editar</button></td>
@@ -3096,9 +3114,9 @@
             <input id="pfDesc" class="campo" value="${esc(p.descripcion)}" autocomplete="off" oninput="pfEdit.descripcion=this.value" placeholder="Ej. Ubica y mueve estibas"></div>
           <div><span class="lbl">Tipo</span>
             <div class="seg" role="group" aria-label="Tipo">
-              <button class="${p.rol === 'OPERARIO' ? 'on' : ''}" onclick="pfEdit.rol='OPERARIO'; pintarApp()">Operario</button>
-              <button class="${p.rol === 'JEFE' ? 'on' : ''}" onclick="pfEdit.rol='JEFE'; pintarApp()">Jefe</button></div>
-            <span class="muted small">El tipo Jefe ve el resumen con indicadores en Inicio.</span></div>
+              <button class="${p.rol === 'OPERARIO' ? 'on' : ''}" onclick="pfEdit.rol='OPERARIO'; pintarApp()">Usuario</button>
+              <button class="${p.rol === 'JEFE' ? 'on' : ''}" onclick="pfEdit.rol='JEFE'; pintarApp()">Admin</button></div>
+            <span class="muted small">El tipo Admin ve los indicadores arriba del Plano.</span></div>
           ${pfLista.length ? `<div><label class="lbl" for="pfCopia">Copiar los permisos de otro perfil</label>
             <select id="pfCopia" class="campo" onchange="if (this.value) { pfEdit.permisos = [...perfilDe(this.value).permisos]; repintarPermisos(); this.value=''; }">
               <option value="">Escoge uno para copiarlo…</option>${pfLista.filter(x => x.id !== p.id).map(x => `<option value="${esc(x.id)}">${esc(x.nombre)}</option>`).join('')}</select></div>` : ''}
@@ -3203,8 +3221,8 @@
     const campoPerfil = pfFalta || !pfLista.length
       ? `<div><span class="lbl">Perfil</span>
           <div class="seg" role="group" aria-label="Perfil">
-            <button class="${u.rol === 'OPERARIO' ? 'on' : ''}" onclick="usRol('OPERARIO')">Operario</button>
-            <button class="${u.rol === 'JEFE' ? 'on' : ''}" onclick="usRol('JEFE')">Jefe</button>
+            <button class="${u.rol === 'OPERARIO' ? 'on' : ''}" onclick="usRol('OPERARIO')">Usuario</button>
+            <button class="${u.rol === 'JEFE' ? 'on' : ''}" onclick="usRol('JEFE')">Admin</button>
           </div></div>`
       : `<div><label class="lbl" for="usPerfil">Perfil</label>
           <select id="usPerfil" class="campo" onchange="usElegirPerfil(this.value)">
@@ -3377,7 +3395,7 @@
         <input id="ucArch" type="file" accept=".xlsx,.xls,.csv" class="oculto"></div>
       ${pfFalta || !pfLista.length ? '' : `<label class="lbl mt8" for="ucPerfil">Perfil para los nuevos</label>
         <select id="ucPerfil" class="campo" onchange="ucPerfil=this.value; pagInicio('uc'); if (ucCrudo) leerListaUsuarios(ucCrudo)">
-          <option value="_cargo">Según el cargo (jefes → ${esc((perfilPorCargo('jefe') || {}).nombre || 'Jefe')}, los demás → ${esc((perfilPorCargo('') || {}).nombre || 'Operario')})</option>
+          <option value="_cargo">Según el cargo (jefes → ${esc((perfilPorCargo('jefe') || {}).nombre || 'Admin')}, los demás → ${esc((perfilPorCargo('') || {}).nombre || 'Usuario')})</option>
           ${pfLista.map(p => `<option value="${esc(p.id)}">${esc(p.nombre)} (a todos)</option>`).join('')}</select>`}
       <div id="ucPrev" class="mt12"></div>
       <p id="fErr" class="error" hidden></p>`);
@@ -3450,12 +3468,12 @@
         <div><span class="muted small">Con problema</span><b class="${malas.length ? 'txt-naranja' : ''}">${malas.length}</b></div></div>
       ${ok.length ? `<div class="tabla-wrap mt8"><table class="tabla"><thead><tr><th>Cédula</th><th>Nombre</th><th>Cargo</th><th>Perfil</th><th>PIN</th></tr></thead>
         <tbody>${pg.filas.map(f => `<tr><td>${esc(f.cedula)}</td><td>${esc(f.nombre)}</td><td>${esc(f.cargo || '—')}</td>
-          <td>${f.existe ? '<span class="muted small">No cambia</span>' : usaPerfiles ? esc((perfilCarga(f) || {}).nombre || 'Personalizado') : f.rol === 'JEFE' ? 'Jefe' : 'Operario'}</td>
+          <td>${f.existe ? '<span class="muted small">No cambia</span>' : usaPerfiles ? esc((perfilCarga(f) || {}).nombre || 'Personalizado') : nombreRol(f.rol)}</td>
           <td>${f.existe ? '<span class="muted small">No cambia</span>' : `<b>${f.cedula.slice(-4)}</b>`}</td></tr>`).join('')}</tbody></table></div>${pg.barra}` : ''}
       ${malas.length ? `<div class="alerta-fefo mt8"><b>No se cargan (${malas.length}):</b><br>${malas.slice(0, 20).map(esc).join('<br>')}</div>` : ''}
       <span class="muted small mt8">${usaPerfiles ? (ucPerfil === '_cargo' ? 'Según el cargo: si dice jefe, coordinador, supervisor, líder, director o gerente le toca el perfil de jefe; a los demás el de operario. ' : '')
         + 'Después lo puedes cambiar a varios a la vez en Usuarios con «Poner perfil».'
-        : 'El perfil sale del cargo: si dice jefe, coordinador, supervisor, líder, director o gerente queda como <b>Jefe</b> (con todos los permisos menos Usuarios); los demás como <b>Operario</b>. Después lo puedes cambiar a cada uno.'}</span>
+        : 'El perfil sale del cargo: si dice jefe, coordinador, supervisor, líder, director o gerente queda como <b>Admin</b> (con todos los permisos menos Usuarios); los demás como <b>Usuario</b>. Después lo puedes cambiar a cada uno.'}</span>
       <button id="ucOk" class="btn btn-pri btn-xl mt12" onclick="guardarListaUsuarios()" ${ok.length ? '' : 'disabled'}>${ok.length ? `Cargar ${ok.length} usuario${ok.length === 1 ? '' : 's'}` : 'No hay usuarios para cargar'}</button>`;
   }
 
