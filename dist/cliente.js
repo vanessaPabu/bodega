@@ -269,6 +269,8 @@
   function cargarMiPerfil() {
     if (!ses || !ses.token) return;
     llamar('bdMiPerfil', ses.token).then(r => {
+      // Si falta el script 49 (o no se pudo leer), no se muestra nada: mejor nada que «Personalizado» sin serlo
+      if (r && (r.sinScript || r.error)) { if (r.sinScript) console.warn('Falta correr el script 49 (49_perfil_en_sesion.sql) para ver el perfil arriba'); return; }
       const n = (r && r.nombre) || null;
       if (ses && ses.perfilNombre !== n) { ses.perfilNombre = n; if (pantalla === 'app') pintarApp(); }
     }).catch(() => {});
@@ -291,6 +293,7 @@
       ['inv_contar', 'Registrar conteos', 'Llenar picking, calidad y bloqueado'],
       ['inv_sap', 'Cargar Excel de SAP', 'Subir el reporte de SAP (reemplaza el anterior), crear y cerrar inventarios'],
       ['inv_nombre', 'Cambiar el nombre de un inventario', 'El lápiz al lado de cada inventario'],
+      ['inv_eliminar', 'Borrar un inventario', 'La caneca al lado de cada inventario cerrado. Pide confirmar dos veces. Los conteos no se borran'],
       ['ciclico', 'Hacer cíclicos', 'Contar los productos de los cíclicos que le asignen'],
       ['ciclico_asignar', 'Asignar cíclicos', 'Crear cíclicos (a quién y qué productos), cerrarlos y borrarlos'],
       ['ciclico_sap', 'Ver SAP y diferencia de los cíclicos', 'Ver lo de SAP y la diferencia en los cíclicos que creó otra persona'],
@@ -306,6 +309,8 @@
       ['reportes', 'Descargar reportes', 'Inventario, salidas, rotación e historial en Excel']] },
     { k: 'rotular', t: 'Rotular', d: 'Rótulos de las estibas', p: [
       ['rotular', 'Crear e imprimir rótulos', 'Llenar rótulos nuevos e imprimirlos'],
+      ['rot_editar', 'Editar rótulos', 'Corregir producto, cantidad o fechas de un rótulo'],
+      ['rot_eliminar', 'Anular rótulos', 'Anular un rótulo que se creó por error (ya no se podrá ubicar)'],
       ['ean_rotular', 'Agregar o cambiar EAN (Rotular)', 'Ponerle el EAN a un producto al llenar el rótulo']] },
     { k: 'recibidor', t: 'Recibir mercancía', d: 'Facturas y lo que llega', p: [
       ['rc_facturas', 'Crear facturas', 'Abrir una factura nueva para recibir'],
@@ -4053,11 +4058,14 @@
   }
 
   /* ================= Códigos de barras ================= */
-  function dibujarCodigos(raiz) {
+  // grande = etiquetas para imprimir: barras más anchas y altas, y margen blanco de más de 10 barras a cada lado
+  // (lo que piden los lectores para leer bien un Code 128)
+  function dibujarCodigos(raiz, grande) {
     if (!window.JsBarcode || !raiz) return;
+    const o = grande ? { height: 52, width: 2, margin: 24, fontSize: 15, textMargin: 4 } : { height: 52, width: 2, margin: 12, fontSize: 15, textMargin: 4 };
     raiz.querySelectorAll('svg[data-cb]').forEach(el => {
       try {
-        JsBarcode(el, el.dataset.cb, { format: 'CODE128', height: 52, width: 2, margin: 12, displayValue: true, font: 'Arial', fontOptions: 'bold', fontSize: 15, textMargin: 4, background: '#FFFFFF', lineColor: '#000000' });
+        JsBarcode(el, el.dataset.cb, Object.assign({ format: 'CODE128', displayValue: true, font: 'Arial', fontOptions: 'bold', background: '#FFFFFF', lineColor: '#000000' }, o));
       } catch (e) {}
     });
   }
@@ -4071,10 +4079,19 @@
 
   // Imprime etiquetas: [{ titulo, sub, codigo }]
   function imprimirEtiquetas(lista) {
+    if (!window.JsBarcode) return toast('No se pudo cargar el dibujo del código de barras. Revisa la conexión y vuelve a intentarlo.', 'error');
+    // Con el código nuevo (ALMACÉN-RAK-NIVEL-POSICIÓN) todas las posiciones de un rak tienen el mismo código de rak (ej. 1000-01):
+    // esa etiqueta sale una sola vez, no repetida en cada posición (si no, al escanearla siempre abría la primera)
+    const vistos = new Set();
+    lista = lista.filter(x => { const k = String(x.codigo); if (vistos.has(k)) return false; vistos.add(k); return true; });
     modoEtiquetas();
     const pr = $('print');
+    pr.className = 'modo-etq';
+    // 3 por fila: se calcula el alto del código para que todo quepa en una hoja (si son demasiadas, siguen en la otra hoja)
+    const filas = Math.ceil(lista.length / 3);
+    pr.style.setProperty('--alto-cb', Math.max(15, Math.min(24, 249 / filas - 20)).toFixed(1) + 'mm');
     pr.innerHTML = lista.map(x => `<div class="etq"><b>${esc(x.titulo)}</b><span>${esc(x.sub)}</span><svg data-cb="${esc(x.codigo)}"></svg></div>`).join('');
-    dibujarCodigos(pr);
+    dibujarCodigos(pr, true);
     setTimeout(() => window.print(), 100);
   }
 
@@ -4082,7 +4099,7 @@
     const r = sede.rackPorId[rackId];
     const z = sede.zonaPorId[r.zonaId];
     const pc = posCodigo(rackId, p), nuevo = !/[A-Z]/i.test(pc);
-    const lista = [{ titulo: nuevo ? pc : `${r.nombre} · Posición ${p}`, sub: nuevo ? `${z.nombre} · ${r.nombre} · Posición ${p}` : z.nombre, codigo: pc }];
+    const lista = [{ titulo: nuevo ? pc : `${r.nombre} · Posición ${p}`, sub: nuevo ? `${z.nombre} · ${r.nombre} · rak` : z.nombre, codigo: pc }];
     if (conNiveles) {
       [...espaciosDe(rackId, p)].sort((a, b) => a.nivel - b.nivel || a.lado.localeCompare(b.lado))
         .forEach(e => lista.push(tieneCu(e.id) ? { titulo: cu(e.id), sub: `${z.nombre} · ${r.nombre} · P${p} · ${etiqueta(e)}`, codigo: cu(e.id) }
@@ -4194,7 +4211,7 @@
               `<option value="${esc(z.id)}" ${invF.zona === z.id ? 'selected' : ''}>${esc(z.nombre)}</option>`).join('')}
               <option value="-" ${invF.zona === '-' ? 'selected' : ''}>Sin ubicar en el plano</option></select></div>
           <div class="inv-buscar"><label class="lbl" for="invQ">Buscar</label>
-            <input id="invQ" class="campo" placeholder="Código o nombre" value="${esc(invF.q)}" autocomplete="off"></div>
+            <input id="invQ" class="campo" placeholder="Código Atlantic, Nutresa, EAN o nombre" value="${esc(invF.q)}" autocomplete="off"></div>
           <div class="inv-estado"><span class="lbl">Mostrar</span>
             <div class="seg inv-seg" role="group" aria-label="Mostrar">${[['', 'Todos'], ['pend', 'Pendientes'], ['hecho', 'Contados'], ['dif', 'Con diferencia']].map(([k, t]) =>
               `<button class="${invF.estado === k ? 'on' : ''}" onclick="invF.estado='${k}'; pagInicio('inv'); if ($('invTabla')) pintarInvTabla(); this.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === this))">${t}</button>`).join('')}</div></div>
@@ -4314,15 +4331,18 @@
 
   // Une SAP + plano + conteos por producto
   // Se calcula una sola vez mientras no cambien los datos (la pantalla lo pide varias veces y son miles de productos)
-  let diMemo = null;
-  function datosInventario() {
-    const k = [invData, invData && invData.conteos, invData && invData.sap, invData && invData.otrasSedes, sede, sede && sede.lineas, sede && sede.espPorId, ini.productos, ini.productos.length, codGen(), ini.prodReg];
-    if (diMemo && diMemo.k.length === k.length && diMemo.k.every((x, i) => x === k[i])) return diMemo.v;
-    const v = calcDatosInventario();
-    diMemo = { k, v };
+  // sinCapturas = true: cantidades de ahora (aéreo del plano en vivo y picking contado), sin las capturas.
+  // Las capturas son solo del módulo Inventario; Productos totales y la ficha del producto usan las de ahora.
+  let diMemo = null, diMemoVivo = null;
+  function datosInventario(sinCapturas) {
+    const k = [invData, invData && invData.conteos, invData && invData.sap, invData && invData.otrasSedes, invData && invData.capturas, sede, sede && sede.lineas, sede && sede.espPorId, ini.productos, ini.productos.length, codGen(), ini.prodReg];
+    const memo = sinCapturas ? diMemoVivo : diMemo;
+    if (memo && memo.k.length === k.length && memo.k.every((x, i) => x === k[i])) return memo.v;
+    const v = calcDatosInventario(!!sinCapturas);
+    if (sinCapturas) diMemoVivo = { k, v }; else diMemo = { k, v };
     return v;
   }
-  function calcDatosInventario() {
+  function calcDatosInventario(sinCapturas) {
     const m = {};
     const fila = cod => m[cod] || (m[cod] = { cod, p: prodDe(cod), sap: null, picking: 0, aereo: 0, calidad: 0, bloqueado: 0, zonas: new Set(), pas: new Set(), ult: null, alm: {}, pk: {}, ae: {} });
     const yo = ses.sedeId, suma = (o, k, n) => { o[k] = (o[k] || 0) + n; };
@@ -4334,7 +4354,8 @@
     const zonaDe = ubic => { const e = sede.espPorId[ubic]; const r = e && sede.rackPorId[e.rackId]; return r ? r.zonaId : ''; };
     ini.productos.forEach(p => { if (p.activo !== false && prodDeMiRegional(p)) fila(p.id); });   // todos los de la regional, aunque no tengan nada
     // Capturas: el aéreo capturado reemplaza al de ahora; al picking capturado se le suma lo que se cuente después
-    const capA = invData.capturas && invData.capturas.AEREO, capP = invData.capturas && invData.capturas.PICKING;
+    const caps = !sinCapturas && invData.capturas;
+    const capA = caps && caps.AEREO, capP = caps && caps.PICKING;
     const pkCap = (sid, c) => {   // cuánto suma un conteo de picking cuando hay captura
       if (!capP) return c.cantidad;
       if (!(String(c.fecha) > String(capP.fecha))) return 0;   // ya está en la captura
@@ -4448,6 +4469,15 @@
     if (w2) { w2.scrollLeft = x; w2.scrollTop = y; }
   }
 
+  // Texto en el que busca el buscador de las tablas de inventario y cíclico: código Atlantic, código Nutresa, nombre y los EAN
+  let tbpMapa = null, tbpDe = null;
+  function txtBuscaProd(cod, p, nombre) {
+    if (!p) {   // mapa por código (más rápido que buscar uno por uno en la lista de productos)
+      if (tbpDe !== ini.productos) { tbpDe = ini.productos; tbpMapa = new Map((ini.productos || []).map(x => [x.id, x])); }
+      p = tbpMapa.get(cod);
+    }
+    return sinTilde([cod, p && p.codigoNutresa, p && p.codigoBarras, p && p.ean2, p && p.ean14, (p && p.nombre) || nombre].filter(Boolean).join(' '));
+  }
   function filtrarInventario(l) {
     const pal = sinTilde(invF.q.trim()).split(/\s+/).filter(Boolean);
     return l.filter(f => {
@@ -4467,7 +4497,7 @@
       if (invF.estado === 'pend' && f.contado) return false;   // pendiente = de toda la lista, nadie lo ha contado
       if (invF.estado === 'hecho' && !f.contado) return false;
       if (!pal.length) return true;
-      const t = sinTilde(`${f.cod} ${f.p ? f.p.codigoNutresa + ' ' + f.p.nombre : ''}`);
+      const t = txtBuscaProd(f.cod, f.p);
       return pal.every(w => t.includes(w));
     }).sort((a, b) => {
       // Primero los que tienen algo (SAP o planta), después el resto del catálogo
@@ -4667,7 +4697,7 @@
     if (!caja) return;
     const p = prodDe(invForm.prod);
     if (!p) { caja.hidden = true; if ($('invUm')) $('invUm').textContent = '(unidades)'; return; }
-    const f = (ctxCic() && cicData ? datosCiclico() : datosInventario()).find(x => x.cod === p.id) || { picking: 0, aereo: 0, calidad: 0, bloqueado: 0, sap: null, sapTotal: 0, planta: 0, dif: 0 };
+    const f = (ctxCic() && cicData ? datosCiclico() : datosInventario(!(vista === 'productos' && prodTab === 'inventario'))).find(x => x.cod === p.id) || { picking: 0, aereo: 0, calidad: 0, bloqueado: 0, sap: null, sapTotal: 0, planta: 0, dif: 0 };
     TIPOS_CONTEO.forEach(([k]) => {
       const c = ((ctxCic() && cicData ? cicData.conteos : invData.conteos) || []).find(x => x.codigo === p.id && x.ubicacion === invForm.ubic && x.tipo === k);
       const u = $('invU' + k);
@@ -5565,7 +5595,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
           <td>${abierto ? '<span class="tag amar">En curso</span>' : '<span class="tag">Cerrado</span>'}</td>
           <td class="muted small">${esc(x.creadoPor || '—')}</td>
           <td class="muted small">${x.cerrado ? `${esc(x.cerradoPor || '—')} · ${fechaHora(x.cerrado)}` : '—'}</td>
-          <td class="nowrap">${puede('inv_nombre') ? `<button class="ec-btn" onclick="event.stopPropagation(); renombrarInventario(${invLista.indexOf(x)})" title="Cambiar el nombre" aria-label="Cambiar el nombre de ${esc(x.nombre || 'Inventario')}">✎</button>` : ''}</td></tr>`;
+          <td class="nowrap">${puede('inv_nombre') ? `<button class="ec-btn" onclick="event.stopPropagation(); renombrarInventario(${invLista.indexOf(x)})" title="Cambiar el nombre" aria-label="Cambiar el nombre de ${esc(x.nombre || 'Inventario')}">✎</button>` : ''}${!abierto && x.id && puede('inv_eliminar') ? `<button class="ec-btn txt-rojo" onclick="event.stopPropagation(); borrarInventario(${invLista.indexOf(x)})" title="Borrar este inventario" aria-label="Borrar ${esc(x.nombre || 'Inventario')}">🗑</button>` : ''}</td></tr>`;
       }).join('')}</tbody></table></div>${pg.barra}`;
   }
 
@@ -5612,7 +5642,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         </div>
         <div class="inv-filtros">
           <div class="inv-buscar"><label class="lbl" for="icmpQ">Buscar</label>
-            <input id="icmpQ" class="campo" placeholder="Código o nombre" value="${esc(c.q)}" autocomplete="off" oninput="invComp.q=this.value; pagInicio('invc'); $('icmpTabla').innerHTML = tablaComparar()"></div>
+            <input id="icmpQ" class="campo" placeholder="Código Atlantic, Nutresa, EAN o nombre" value="${esc(c.q)}" autocomplete="off" oninput="invComp.q=this.value; pagInicio('invc'); $('icmpTabla').innerHTML = tablaComparar()"></div>
           <div class="inv-estado"><span class="lbl">Mostrar</span>
             <div class="seg inv-seg" role="group" aria-label="Mostrar">${[['', 'Todos'], ['cambio', 'Cambiaron'], ['soloA', 'Solo en A'], ['soloB', 'Solo en B']].map(([k, t]) =>
               `<button class="${c.ver === k ? 'on' : ''}" onclick="invComp.ver='${k}'; pagInicio('invc'); $('icmpTabla').innerHTML = tablaComparar(); this.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === this))">${t}</button>`).join('')}</div></div>
@@ -5629,7 +5659,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   function tablaComparar() {
     const c = invComp, pal = sinTilde(c.q.trim()).split(/\s+/).filter(Boolean);
     const l = filasComparar().filter(x => (!c.ver || (c.ver === 'cambio' ? x.a && x.b && x.cambio : c.ver === 'soloA' ? x.a && !x.b : x.b && !x.a))
-      && (!pal.length || pal.every(w => sinTilde(`${x.c} ${x.n}`).includes(w)))).sort((x, y) => Math.abs(y.cambio) - Math.abs(x.cambio));
+      && (!pal.length || pal.every(w => txtBuscaProd(x.c, null, x.n).includes(w)))).sort((x, y) => Math.abs(y.cambio) - Math.abs(x.cambio));
     if (!l.length) return '<p class="muted small">No hay productos con ese filtro.</p>';
     const pg = paginar('invc', l, () => { if ($('icmpTabla')) $('icmpTabla').innerHTML = tablaComparar(); });
     const v = x => (x === null ? '<span class="muted">—</span>' : nInv(x));
@@ -5732,6 +5762,36 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     }).catch(e => { b.disabled = false; b.textContent = 'Guardar'; err(e.message); });
   }
 
+  // Borrar un inventario cerrado, con doble confirmación: 1) tocar «Sí, borrar»  2) escribir BORRAR
+  function borrarInventario(i) {
+    if (sinPermiso('inv_eliminar')) return;
+    const x = invLista && invLista[i];
+    if (!x || !x.id || x.estado === 'ABIERTO') return;
+    borrarInventario.x = x;
+    abrirModal(`<div class="fila-sb"><span class="h2 txt-rojo">Borrar inventario</span>${btnCerrar()}</div>
+      <p class="mt12">Vas a borrar <b>${esc(x.nombre || 'Inventario')}</b> (${fCorta(x.fecha)}).</p>
+      <span class="muted small">Se quita de la lista con su foto y lo cargado de SAP. <b>No se puede deshacer.</b> Los conteos no se borran: siguen en el historial de cada producto.</span>
+      <div id="biPaso1" class="dos mt16"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+        <button class="btn btn-sal btn-xl" onclick="$('biPaso1').hidden = true; $('biPaso2').hidden = false; $('biTxt').focus()">Sí, borrar</button></div>
+      <div id="biPaso2" class="col gap8 mt16" hidden>
+        <label class="lbl" for="biTxt">Para confirmar, escribe <b>BORRAR</b></label>
+        <input id="biTxt" class="campo" autocomplete="off" autocapitalize="characters" oninput="$('biOk').disabled = this.value.trim().toUpperCase() !== 'BORRAR'" onkeydown="if (event.key === 'Enter' && !$('biOk').disabled) confirmarBorrarInventario()">
+        <p id="biErr" class="error" hidden></p>
+        <div class="dos"><button class="btn btn-sec btn-xl" onclick="cerrarModal()">Cancelar</button>
+          <button id="biOk" class="btn btn-sal btn-xl" disabled onclick="confirmarBorrarInventario()">Borrar para siempre</button></div></div>`);
+  }
+  function confirmarBorrarInventario() {
+    const x = borrarInventario.x, b = $('biOk');
+    if (!x || sinPermiso('inv_eliminar') || $('biTxt').value.trim().toUpperCase() !== 'BORRAR') return;
+    b.disabled = true; b.textContent = 'Borrando…';
+    llamar('bdBorrarInventario', { id: x.id }).then(() => {
+      cerrarModal(); toast('Inventario borrado', 'ok');
+      if (invVer && invVer.d && invVer.d.id === x.id) invVer = null;
+      invLista = null; invData = null;
+      pintarApp();
+    }).catch(e => { b.disabled = false; b.textContent = 'Borrar para siempre'; $('biErr').textContent = e.message; $('biErr').hidden = false; });
+  }
+
   function entrarInventario() { invDentro = true; invVer = null; invNuevo = null; invComp = null; invSub = ''; pintarApp(); window.scrollTo(0, 0); }
   // Cerrar el inventario en curso (sin crear otro): queda guardado con su foto y ya no se cuenta en él
   async function cerrarInventario(b) {
@@ -5784,7 +5844,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       </div>
       ${fo.filas.length ? `<div class="inv-filtros">
         <div class="inv-buscar"><label class="lbl" for="ivQ">Buscar</label>
-          <input id="ivQ" class="campo" placeholder="Código o nombre" value="${esc(invVerF.q)}" autocomplete="off"
+          <input id="ivQ" class="campo" placeholder="Código Atlantic, Nutresa, EAN o nombre" value="${esc(invVerF.q)}" autocomplete="off"
             oninput="invVerF.q=this.value; pagInicio('invv'); $('ivTabla').innerHTML = tablaInventarioCerrado()"></div>
         <div class="inv-estado"><span class="lbl">Mostrar</span>
           <div class="seg inv-seg" role="group" aria-label="Mostrar">${[[false, 'Todos'], [true, 'Con diferencia']].map(([k, t]) =>
@@ -5795,7 +5855,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   }
   function filasInventarioCerrado() {
     const pal = sinTilde(invVerF.q.trim()).split(/\s+/).filter(Boolean);
-    return ((invVer.d.foto || {}).filas || []).filter(f => (!invVerF.dif || (f.d && (f.s || f.t))) && (!pal.length || pal.every(w => sinTilde(`${f.c} ${f.n}`).includes(w))));
+    return ((invVer.d.foto || {}).filas || []).filter(f => (!invVerF.dif || (f.d && (f.s || f.t))) && (!pal.length || pal.every(w => txtBuscaProd(f.c, null, f.n).includes(w))));
   }
   function tablaInventarioCerrado() {
     const l = filasInventarioCerrado();
@@ -5955,7 +6015,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const pal = sinTilde(rcc.q.trim()).split(/\s+/).filter(Boolean);
     const selR = rcc.racks || [];
     const l = todas.filter(f => (!rcc.pas || (rcc.pas === '-' ? !f.pasL.length : f.pasL.includes(rcc.pas))) && (!selR.length || f.racks.some(r => selR.includes(r)))
-      && (!pal.length || pal.every(w => sinTilde(`${f.cod} ${f.p ? f.p.codigoNutresa + ' ' + f.p.nombre : ''}`).includes(w))));
+      && (!pal.length || pal.every(w => txtBuscaProd(f.cod, f.p).includes(w))));
     if (!selR.length) return l;
     // Con racks marcados: en orden del primer rack al último y, dentro de cada rack, por ubicación
     const num_ = (a, b) => String(a).localeCompare(String(b), 'es', { numeric: true });
@@ -6681,7 +6741,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       <section class="card col gap12">
         <div class="cic-filtros">
           <div class="inv-buscar"><label class="lbl" for="cicQ">Buscar</label>
-            <input id="cicQ" class="campo" placeholder="Código o nombre" value="${esc(cicF.q)}" autocomplete="off"></div>
+            <input id="cicQ" class="campo" placeholder="Código Atlantic, Nutresa, EAN o nombre" value="${esc(cicF.q)}" autocomplete="off"></div>
           <div><span class="lbl">Mostrar</span>
             <div class="seg seg-c" role="group" aria-label="Mostrar">${[['', 'Todos'], ['pend', 'Pendientes'], ['hecho', 'Contados'], ['dif', 'Con diferencia']].filter(([k]) => k !== 'dif' || cicVeSap(c)).map(([k, t]) =>
               `<button class="${cicF.estado === k ? 'on' : ''}" onclick="cicF.estado='${k}'; pagInicio('cic'); pintarCicTabla(); this.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === this))">${t}</button>`).join('')}</div></div>
@@ -6809,7 +6869,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (!veSap && cicF.estado === 'dif') cicF.estado = '';
     const pal = sinTilde(cicF.q.trim()).split(/\s+/).filter(Boolean);
     const l = todos.filter(f => (cicF.estado !== 'pend' || !f.listo) && (cicF.estado !== 'hecho' || f.listo) && (cicF.estado !== 'dif' || (f.contado && f.dif))
-      && (!pal.length || pal.every(w => sinTilde(`${f.cod} ${f.p ? f.p.codigoNutresa + ' ' + f.p.nombre : ''}`).includes(w))))
+      && (!pal.length || pal.every(w => txtBuscaProd(f.cod, f.p).includes(w))))
       .sort((a, b) => (a.listo - b.listo) || (a.p ? a.p.nombre : a.cod).localeCompare(b.p ? b.p.nombre : b.cod));
     const lo = aplicarOrden('cic', l, valCic);
     const rc = esReconf(c);
@@ -6878,7 +6938,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     invProdInfo();
     $('invLug').closest('.inv-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (!sede.espPorId[invForm.ubic]) $('invLug').focus({ preventScroll: true }); else $('invCPICKING').focus({ preventScroll: true });
-  }  /* ================= Códigos nuevos de ubicación: ALMACÉN-RAK-NIVEL-POSICIÓN =================
+  }/* ================= Códigos nuevos de ubicación: ALMACÉN-RAK-NIVEL-POSICIÓN =================
      El código interno de cada espacio (SEC-F01-P001-2A) NUNCA cambia: lo ubicado, los rótulos y el historial siguen igual.
      El código nuevo (2000-01-02-01) va al lado: es el que se ve, se imprime y se escanea (el viejo también sirve).
      - Almacén: lo tiene cada zona (Configuración → Códigos). Varias zonas pueden ser del mismo almacén y siguen la numeración.
@@ -7337,15 +7397,13 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       const esps = espaciosDe(c.r.id, p);
       if (!esps.length) return;
       const z = sede.zonaPorId[c.r.zonaId];
-      lista.push({ titulo: posCodigo(c.r.id, p), sub: `${z.nombre} · Pasillo ${c.pasillo}`, codigo: posCodigo(c.r.id, p) });
+      lista.push({ titulo: posCodigo(c.r.id, p), sub: `${z.nombre} · Pasillo ${c.pasillo} · rak`, codigo: posCodigo(c.r.id, p) });   // el rak sale una vez (se quitan repetidos al imprimir)
       if (niv) [...esps].sort((a, b) => a.nivel - b.nivel || a.lado.localeCompare(b.lado))
         .forEach(e => lista.push({ titulo: cu(e.id), sub: `${z.nombre} · Pasillo ${c.pasillo} · ${etiqueta(e)}`, codigo: cu(e.id) }));
     }));
     if (!lista.length) return toast('Ese pasillo no tiene espacios con código nuevo', 'error');
     imprimirEtiquetas(lista);
-  }
-
-/* ================= Contar por almacén y pasillo (Inventario y Cíclico) =================
+  }/* ================= Contar por almacén y pasillo (Inventario y Cíclico) =================
      Quien cuenta escoge almacén → pasillo y le sale una tabla con los productos de ese pasillo:
      llena picking, confirma calidad y bloqueado (vienen de lo que cargó el encargado) y el aéreo queda confirmado.
      El jefe ve el avance de cada pasillo y de cada persona, y asigna pasillos. */
@@ -9511,7 +9569,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   // Una fila por producto y almacén
   let ptMemo = null;
   function filasProdTotales() {
-    const d = datosInventario();
+    const d = datosInventario(true);   // aéreo del plano y picking contado, sin capturas del inventario
     asegurarUbicSede(ses.sedeId);
     const ub = (ubicSede[ses.sedeId] || {}).m;
     if (ptMemo && ptMemo.d === d && ptMemo.alm === prodAlm && ptMemo.sede === sede && ptMemo.ub === ub && ptMemo.pc === usarPasCargado()) return ptMemo.v;
@@ -10261,9 +10319,9 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const botones = [
       acc(!anulado, nunca ? 'btn-pri' : 'btn-sec', nunca ? 'Imprimir' : 'Reimprimir', 'reimprimir'),
       acc(r && !anulado, 'btn-sec', 'Duplicar', 'duplicarRotulo'),
-      acc(r && (e.estado === 'PENDIENTE' || e.estado === 'UBICADA'), 'btn-sec', 'Editar', 'editarRotulo'),
+      acc(puede('rot_editar') && (e.estado === 'PENDIENTE' || e.estado === 'UBICADA'), 'btn-sec', 'Editar', 'editarRotulo'),
       acc(r && e.estado === 'PENDIENTE' && ini.sedes.length > 1, 'btn-sec', 'Trasladar a otra sede', 'trasladarRotulo'),
-      acc(r && e.estado === 'PENDIENTE', 'btn-sec txt-rojo', 'Anular', 'anularRotulo')
+      acc(puede('rot_eliminar') && e.estado === 'PENDIENTE', 'btn-sec txt-rojo', 'Anular', 'anularRotulo')
     ].filter(Boolean);
     abrirModal(`<div class="fila-sb"><span class="h2">Rótulo ${esc(e.id)}</span>${btnCerrar()}</div>
       <span class="fila gap8 wrap-f mt8"><span class="tag ${st.cls}">${st.txt}</span>${st.det ? `<span class="small">${esc(st.det)}</span>` : ''}</span>
@@ -10458,7 +10516,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   /* ----- Corregir o anular un rótulo hecho por error ----- */
   function editarRotulo(i) {
     const e = rotulos[i];
-    if (!e || sinPermiso('rotular')) return;
+    if (!e || sinPermiso('rot_editar')) return;
     const peso = e.tipo === 'PESO', ub = e.estado === 'UBICADA';
     abrirModal(`<div class="fila-sb"><span class="h2">Corregir rótulo ${esc(e.id)}</span>${btnCerrar()}</div>
       ${ub ? `<div class="alerta-fefo mt8">Está ubicado en <b>${esc(cu(e.ubicacion))}</b>: si cambias la cantidad o el vencimiento, también se corrige en el plano.
@@ -10524,7 +10582,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
 
   function anularRotulo(i) {
     const e = rotulos[i];
-    if (!e || sinPermiso('rotular')) return;
+    if (!e || sinPermiso('rot_eliminar')) return;
     abrirModal(`<div class="fila-sb"><span class="h2">¿Anular el rótulo ${esc(e.id)}?</span>${btnCerrar()}</div>
       <div class="info mt12"><span class="fuerte">${esc(e.producto)}</span>
         <span class="muted small">${e.tipo === 'PESO' ? kg(e.total) + ' · ' + e.cajas + ' cavas' : e.cajas + ' cj · ' + e.total + ' und'} · vence ${fCorta(e.vencimiento)}</span></div>
@@ -10611,8 +10669,20 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         try { JsBarcode(el, el.dataset.cb, { format: 'CODE128', height: 44, width: 4, margin: 6, displayValue: true, font: 'Arial', fontOptions: 'bold', fontSize: 16, textMargin: 3, background: '#FFFFFF', lineColor: '#000000' }); } catch (x) {}
       });
     }
+    // Al guardar como PDF, el archivo sale con el nombre del producto y la fecha
+    tituloImpresion(lista.length === 1
+      ? `Rótulo ${lista[0].id} ${lista[0].producto || ''} ${hoyISO()}`
+      : `Rótulos ${lista.length} ${lista.every(e => e.producto === lista[0].producto) ? lista[0].producto || '' : ''} ${hoyISO()}`);
     setTimeout(() => window.print(), 150);
     registrarImpresion(lista);
+  }
+  // Nombre de la página mientras se imprime (es el nombre que propone «Guardar como PDF»); después vuelve el de siempre
+  function tituloImpresion(t) {
+    const antes = document.title;
+    document.title = String(t).replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const volver = () => { document.title = antes; window.removeEventListener('afterprint', volver); };
+    window.addEventListener('afterprint', volver);
+    setTimeout(volver, 60000);
   }
 
   // Suma una impresión a cada rótulo (cuántas veces, quién y cuándo)
@@ -12665,14 +12735,125 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const guardado = leerLS('planoBorrador:' + ses.sedeId);
     ed = guardado && guardado.sedeId === ses.sedeId ? Object.assign(guardado, { sel: null, herr: 'mover', fondoModo: false, fondoUrl: null, restaurado: true }) : edDesdeSede();
     if (!ed.pasillos) ed.pasillos = clon(sede.pasillos || []);   // borradores de antes no traían pasillos
+    ed.hist = []; ed.fut = []; ed.ultimo = edFoto(); ed.grupo = null;   // para Deshacer / Rehacer (no se guarda en el borrador)
     if (ed.fondo && ed.fondo.ruta) llamar('bdFondoUrl', ed.fondo.ruta).then(u => { if (ed) { ed.fondoUrl = u; edPintarLienzo(); } }).catch(() => {});
   }
-  function edCambio() {
+  // Cada cambio deja una foto de cómo estaba antes, para poder deshacerlo (Ctrl+Z).
+  // grupo: los cambios seguidos del mismo campo (escribir un nombre, mover con flechas) se deshacen de una sola vez
+  function edCambio(grupo) {
+    const ahora = Date.now();
+    if (ed.ultimo) {
+      const junta = grupo && ed.grupo === grupo && ahora - (ed.grupoT || 0) < 1500;
+      if (!junta) { ed.hist.push(ed.ultimo); if (ed.hist.length > 80) { ed.hist.shift(); ed.histCorto = true; } }
+      ed.fut = [];
+    }
+    ed.grupo = grupo || null; ed.grupoT = ahora;
+    ed.ultimo = edFoto();
     ed.cambios = true;
-    const { sel, herr, fondoModo, fondoUrl, arr, dibujo, areaDe, ...guardar } = ed;
-    guardarLS('planoBorrador:' + ses.sedeId, guardar);
+    edPersistir();
     if ($('edEstado')) $('edEstado').innerHTML = edEstadoHtml();
     document.querySelectorAll('.ed-barra .btn').forEach(b => { b.disabled = false; });
+    edBotonesHist();
+  }
+  const edFoto = () => clon({ zonas: ed.zonas, racks: ed.racks, muros: ed.muros, pasillos: ed.pasillos, fondo: ed.fondo, borrar: ed.borrar });
+  function edPersistir() {
+    if (!ed.cambios) { try { localStorage.removeItem('planoBorrador:' + ses.sedeId); } catch (e) { /* nada */ } return; }
+    const { sel, herr, fondoModo, fondoUrl, arr, dibujo, areaDe, hist, fut, ultimo, grupo, grupoT, histCorto, copia, ...guardar } = ed;
+    guardarLS('planoBorrador:' + ses.sedeId, guardar);
+  }
+  function edBotonesHist() {
+    if ($('edUndo')) $('edUndo').disabled = !ed.hist.length;
+    if ($('edRedo')) $('edRedo').disabled = !ed.fut.length;
+  }
+  function edDeshacer() {
+    if (!ed || !ed.hist || !ed.hist.length || ed.arr || ed.dibujo) return;
+    ed.fut.push(edFoto());
+    edAplicarFoto(ed.hist.pop());
+    toast('Deshecho');
+  }
+  function edRehacer() {
+    if (!ed || !ed.fut || !ed.fut.length || ed.arr || ed.dibujo) return;
+    ed.hist.push(edFoto());
+    edAplicarFoto(ed.fut.pop());
+    toast('Rehecho');
+  }
+  function edAplicarFoto(f) {
+    Object.assign(ed, clon(f));
+    ed.ultimo = clon(f); ed.grupo = null; ed.herr = 'mover'; ed.dibujo = null; ed.areaDe = null;
+    const s = ed.sel;
+    if (s && !(s.k === 'zona' ? ed.zonas.some(z => z.id === s.id) : s.k === 'fila' ? ed.racks.some(r => r.id === s.id) : s.k === 'pasillo' ? ed.pasillos.some(p => p.id === s.id)
+      : s.k === 'muro' ? !!ed.muros[s.id] : s.k === 'area' ? !!edParte(s.id) : false)) ed.sel = null;
+    // Si se deshizo todo, vuelve a quedar como el plano guardado
+    ed.cambios = ed.hist.length > 0 || !!ed.histCorto || !!ed.restaurado;
+    edPersistir();
+    pintarApp();
+    // La imagen de fondo que volvió (si se había quitado o cambiado)
+    if (ed.fondo && ed.fondo.ruta) llamar('bdFondoUrl', ed.fondo.ruta).then(u => { if (ed && ed.fondo) { ed.fondoUrl = u; edPintarLienzo(); } }).catch(() => {});
+    else ed.fondoUrl = null;
+  }
+
+  /* ----- Duplicar y hacer copias (para no dibujar una por una las filas iguales) ----- */
+  const edGrueso = r => (r.fondo === 'D' ? 44 : 20);
+  function edSiguienteFila(zonaId) {
+    const nums = ed.racks.filter(r => r.zonaId === zonaId).map(r => Number((String(r.nombre).match(/(\d+)\s*$/) || [])[1])).filter(n => n >= 0);
+    return 'Fila ' + ((nums.length ? Math.max(...nums) : 0) + 1);
+  }
+  // Copia de una fila corrida dx, dy (queda como fila nueva: al guardar se le crean sus niveles)
+  function edCopiaFila(r, dx, dy, zonaId) {
+    const c = clon(r);
+    Object.assign(c, { id: 'nueva-' + (ed.sec++), nuevo: true, niveles: r.nuevo ? r.niveles : 4, picking: r.nuevo ? r.picking : true });
+    edMoverRack(c, dx, dy);
+    const t = c.tramos ? c.tramos[0] : c, z = zonaId ? null : zonaEn(t.x + 5, t.y + 5);
+    c.zonaId = zonaId || (z ? z.id : r.zonaId);
+    c.nombre = zonaId ? r.nombre : edSiguienteFila(c.zonaId);
+    ed.racks.push(c);
+    return c;
+  }
+  function edDuplicar(s) {
+    s = s || ed.sel;
+    if (!s) return toast('Primero toca lo que quieres duplicar', 'error');
+    if (s.k === 'fila') {
+      const r = ed.racks.find(x => x.id === s.id);
+      if (!r) return;
+      const vert = r.tramos || r.orientacion === 'V', paso = edGrueso(r) + 40;
+      const c = edCopiaFila(r, vert ? paso : 0, vert ? 0 : paso);
+      ed.sel = { k: 'fila', id: c.id };
+    } else if (s.k === 'zona') {
+      const z = ed.zonas.find(x => x.id === s.id);
+      if (!z) return;
+      const dx = z.ancho + 30, id = 'nueva-' + (ed.sec++), n = ed.zonas.length;
+      ed.zonas.push({ id, nombre: 'Zona ' + (n + 1), color: ED_COLORES[n % ED_COLORES.length], x: z.x + dx, y: z.y, ancho: z.ancho, alto: z.alto,
+        etqX: z.etqX === null || z.etqX === undefined ? null : z.etqX + dx, etqY: z.etqY === null || z.etqY === undefined ? null : z.etqY,
+        areas: (z.areas || []).map(a => Object.assign({}, a, { x: a.x + dx })) });
+      ed.racks.filter(r => r.zonaId === z.id).forEach(r => edCopiaFila(r, dx, 0, id));   // con sus filas
+      ed.sel = { k: 'zona', id };
+    } else if (s.k === 'pasillo') {
+      const pa = ed.pasillos.find(x => x.id === s.id);
+      if (!pa) return;
+      const id = 'nuevo-pa-' + (ed.sec++), vert = pa.alto >= pa.ancho;
+      ed.pasillos.push({ id, nombre: edSiguientePasillo(), filas: [], x: pa.x + (vert ? pa.ancho + 60 : 0), y: pa.y + (vert ? 0 : pa.alto + 60), ancho: pa.ancho, alto: pa.alto });
+      ed.sel = { k: 'pasillo', id };
+    } else if (s.k === 'muro') {
+      const m = ed.muros[s.id];
+      if (!m) return;
+      ed.muros.push([m[0] + 20, m[1] + 20, m[2] + 20, m[3] + 20]);
+      ed.sel = { k: 'muro', id: ed.muros.length - 1 };
+    } else return;
+    edCambio(); pintarApp();
+    toast('Duplicado. Arrástralo a donde va.', 'ok');
+  }
+  // Varias filas iguales a la escogida, una al lado de la otra
+  function edCopiasFila() {
+    const r = ed.sel && ed.sel.k === 'fila' && ed.racks.find(x => x.id === ed.sel.id);
+    if (!r) return;
+    const n = Math.floor(Number($('edCopN').value)), sep = Math.max(0, Math.round(Number($('edCopSep').value) || 0)), signo = $('edCopDir').value === '-' ? -1 : 1;
+    if (!(n >= 1 && n <= 50)) return toast('Escribe cuántas copias (de 1 a 50)', 'error');
+    const vert = r.tramos || r.orientacion === 'V', paso = signo * (edGrueso(r) + sep);
+    let ult = null;
+    for (let i = 1; i <= n; i++) ult = edCopiaFila(r, vert ? paso * i : 0, vert ? 0 : paso * i);
+    ed.sel = { k: 'fila', id: ult.id };
+    edCambio(); pintarApp();
+    toast(`Listo: ${n} fila${n === 1 ? '' : 's'} nueva${n === 1 ? '' : 's'}. Si te equivocaste, Ctrl+Z.`, 'ok');
   }
   const edEstadoHtml = () => ed.cambios ? '<span class="ed-sin">● Cambios sin guardar</span>' : '<span class="muted small">Todo guardado</span>';
 
@@ -12689,11 +12870,14 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     if (window.innerWidth < 1000) return `<div class="card col gap8"><span class="h3">El editor del plano se usa en un computador</span>
       <span class="muted">Ábrelo desde un PC para dibujar zonas y filas. Desde aquí puedes usar la pestaña «Zonas y filas».</span></div>`;
     if (!ed || ed.sedeId !== ses.sedeId) edIniciar();
-    const herr = (k, t, ayuda) => `<button class="ed-herr ${ed.herr === k ? 'on' : ''}" onclick="edHerr('${k}')" title="${ayuda}">${t}</button>`;
+    const tecla = { mover: 1, zona: 2, fila: 3, muro: 4, pasillo: 5 };
+    const herr = (k, t, ayuda) => `<button class="ed-herr ${ed.herr === k ? 'on' : ''}" onclick="edHerr('${k}')" title="${ayuda} (tecla ${tecla[k]})">${t}</button>`;
     return `<div class="ed">
       <div class="ed-barra">
         <div class="fila gap4 wrap-f">${herr('mover', '✥ Mover y escoger', 'Toca algo para escogerlo y arrástralo para moverlo')}${herr('zona', '▭ + Zona', 'Arrastra en el dibujo para hacer el recuadro de la zona')}${herr('fila', '┃ + Fila', 'Traza la fila de punta a punta dentro de su zona')}${herr('muro', '╱ + Pared', 'Traza la pared o separación')}${herr('pasillo', '▤ + Pasillo', 'Arrastra en el dibujo para marcar el pasillo; después escoges sus filas')}</div>
         <button class="ed-herr ${ed.fondoModo ? 'on' : ''}" onclick="edFondo()" title="Imagen del plano para calcar encima">🖼 Imagen de fondo</button>
+        <button class="ed-herr" onclick="edPlantilla()" title="Armar el plano desde un Excel, sin dibujar">📄 Desde Excel</button>
+        <div class="zoom" role="group" aria-label="Deshacer y rehacer"><button id="edUndo" onclick="edDeshacer()" title="Deshacer (Ctrl+Z)" ${ed.hist && ed.hist.length ? '' : 'disabled'}>↶ Deshacer</button><button id="edRedo" onclick="edRehacer()" title="Rehacer (Ctrl+Y)" ${ed.fut && ed.fut.length ? '' : 'disabled'}>↷ Rehacer</button></div>
         <div class="zoom" role="group" aria-label="Zoom"><button onclick="edZoom(1 / 1.25)" aria-label="Alejar">−</button><button onclick="edZoom(0)">Ajustar</button><button onclick="edZoom(1.25)" aria-label="Acercar">+</button></div>
         <span class="flex1"></span>
         <span id="edEstado">${edEstadoHtml()}</span>
@@ -12706,6 +12890,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         <aside class="ed-panel card" id="edPanel">${edPanelHtml()}</aside>
       </div>
       <input id="edFondoArch" type="file" accept="image/*" class="oculto">
+      <input id="edPlantArch" type="file" accept=".xlsx,.xls,.csv" class="oculto">
     </div>`;
   }
 
@@ -12816,19 +13001,30 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     l.addEventListener('pointermove', edMueve);
     l.addEventListener('pointerup', edArriba);
     l.addEventListener('pointercancel', edArriba);
+    // Ctrl + rueda del mouse: acercar o alejar
+    const wrap = $('edWrap');
+    if (wrap) wrap.addEventListener('wheel', ev => { if (!ev.ctrlKey) return; ev.preventDefault(); edZoom(ev.deltaY < 0 ? 1.1 : 1 / 1.1); }, { passive: false });
+    $('edPlantArch').addEventListener('change', ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) edLeerPlantilla(f); });
     $('edFondoArch').addEventListener('change', ev => { const f = ev.target.files[0]; ev.target.value = ''; if (f) edSubirFondo(f); });
     if (!enlazarEditor.teclas) {
       enlazarEditor.teclas = true;
       document.addEventListener('keydown', ev => {
         if (!ed || vista !== 'config' || cfgTab !== 'editor' || !$('edLienzo')) return;
         if (/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '') || !$('modal').hidden) return;
+        const ctrl = ev.ctrlKey || ev.metaKey, k = String(ev.key || '').toLowerCase();
+        if (ctrl && k === 'z' && !ev.shiftKey) { ev.preventDefault(); edDeshacer(); return; }
+        if (ctrl && (k === 'y' || (k === 'z' && ev.shiftKey))) { ev.preventDefault(); edRehacer(); return; }
+        if (ctrl && k === 'd') { ev.preventDefault(); edDuplicar(); return; }
+        if (ctrl && k === 'c' && ed.sel) { ed.copia = clon(ed.sel); toast('Copiado. Ctrl+V para pegar una copia.'); return; }
+        if (ctrl && k === 'v' && ed.copia) { ev.preventDefault(); edDuplicar(ed.copia); return; }
+        if (!ctrl && !ev.altKey && /^[1-5]$/.test(ev.key)) { edHerr(['mover', 'zona', 'fila', 'muro', 'pasillo'][Number(ev.key) - 1]); return; }
         if ((ev.key === 'Delete' || ev.key === 'Backspace') && ed.sel) { ev.preventDefault(); edBorrarSel(); }
         else if (ev.key === 'Escape') { ed.sel = null; ed.herr = 'mover'; ed.fondoModo = false; pintarApp(); }
         else if (ed.sel && /^Arrow/.test(ev.key)) {
           ev.preventDefault();
           const p = ev.shiftKey ? 20 : ED_PASO;
           const dx = ev.key === 'ArrowLeft' ? -p : ev.key === 'ArrowRight' ? p : 0, dy = ev.key === 'ArrowUp' ? -p : ev.key === 'ArrowDown' ? p : 0;
-          edMoverSel(ed.sel, dx, dy); edCambio(); edPintarLienzo();
+          edMoverSel(ed.sel, dx, dy); edCambio('flecha:' + ed.sel.k + ed.sel.id); edPintarLienzo();
         }
       });
     }
@@ -13008,7 +13204,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
       return `<span class="h3">Imagen de fondo</span>
         <span class="muted small">Arrastra la imagen para acomodarla y la esquina de abajo para cambiar su tamaño. Solo se ve aquí, en el editor: sirve de guía para calcar.</span>
         <label class="lbl" for="edOpa">Qué tan clara se ve</label>
-        <input id="edOpa" type="range" min="0.1" max="1" step="0.05" value="${ed.fondo.opacidad ?? 0.5}" oninput="ed.fondo.opacidad = Number(this.value); edCambio(); edPintarLienzo()">
+        <input id="edOpa" type="range" min="0.1" max="1" step="0.05" value="${ed.fondo.opacidad ?? 0.5}" oninput="ed.fondo.opacidad = Number(this.value); edCambio('opacidad'); edPintarLienzo()">
         <div class="fila gap8 wrap-f mt8"><button class="btn btn-sec" onclick="$('edFondoArch').click()">Cambiar imagen</button>
           <button class="btn btn-sal" onclick="ed.fondo = null; ed.fondoUrl = null; ed.fondoModo = false; edCambio(); pintarApp()">Quitar imagen</button></div>
         <button class="btn btn-pri mt12" onclick="ed.fondoModo = false; pintarApp()">Listo, seguir dibujando</button>`;
@@ -13018,14 +13214,15 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         <ol class="ed-guia">
           <li><b>Imagen de fondo</b> (si la tienes): súbela para calcar encima.</li>
           <li><b>+ Zona</b>: arrastra en el dibujo para hacer el recuadro de cada zona.</li>
-          <li><b>+ Fila</b>: traza cada fila de punta a punta, dentro de su zona. Después le dices cuántas posiciones y niveles tiene.</li>
+          <li><b>+ Fila</b>: traza una fila de punta a punta, dentro de su zona, y dile cuántas posiciones y niveles tiene. Si las demás son iguales, usa <b>Crear filas iguales</b> y salen todas de una vez.</li>
           <li><b>+ Pared</b>: traza las paredes o separaciones.</li>
           <li><b>+ Pasillo</b>: arrastra sobre el pasillo y escoge sus filas (una o dos). Así cada producto dice en qué pasillo está.</li>
           <li>Con <b>Mover y escoger</b> arrastras cualquier cosa, incluido el <b>nombre de la zona</b> para que no tape nada.</li>
           <li>Toca <b>Guardar cambios</b>. Mientras no guardes, los demás siguen viendo el plano de antes.</li>
         </ol>
         <span class="muted small">Si un espacio no se puede usar (por ejemplo, un aire acondicionado), después de guardar tócalo en el plano y bloquéalo.</span>
-        <span class="muted small">Atajos: <b>Supr</b> borra lo escogido, las <b>flechas</b> lo mueven poquito, <b>Esc</b> suelta lo escogido.</span>`;
+        <span class="muted small">¿Te equivocaste? <b>↶ Deshacer</b> (o <b>Ctrl+Z</b>) lo devuelve; <b>↷ Rehacer</b> (Ctrl+Y) lo vuelve a poner.</span>
+        <span class="muted small">Atajos: <b>Ctrl+Z</b> deshacer · <b>Ctrl+Y</b> rehacer · <b>Ctrl+D</b> duplicar · <b>Ctrl+C / Ctrl+V</b> copiar y pegar · <b>Supr</b> borrar · <b>flechas</b> mover poquito · <b>Esc</b> soltar · <b>1–5</b> herramientas · <b>Ctrl + rueda</b> acercar o alejar.</span>`;
     }
     if (s.k === 'zona') {
       const z = ed.zonas.find(x => x.id === s.id);
@@ -13041,7 +13238,8 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         <span class="lbl mt12 fila gap8">Partes de la zona ${ayudaHtml('Si la zona no es un solo rectángulo (por ejemplo, unas filas que quedan entre otras zonas), agrégale otra parte: dibujas el recuadro y queda de esta misma zona, con su color. Las filas que queden dentro pasan a esta zona.')}</span>
         <span class="muted small">${(z.areas || []).length ? `Tiene ${z.areas.length + 1} partes.` : 'Tiene una sola parte.'}</span>
         <button class="btn btn-sec" onclick="edAgregarParte()">+ Agregar otra parte</button>
-        <button class="btn btn-sal mt12" onclick="edBorrarSel()">Borrar zona</button>`;
+        <button class="btn btn-sec mt12" onclick="edDuplicar()" title="Ctrl+D">Duplicar zona (con sus filas)</button>
+        <button class="btn btn-sal mt8" onclick="edBorrarSel()">Borrar zona</button>`;
     }
     if (s.k === 'fila') {
       const r = ed.racks.find(x => x.id === s.id);
@@ -13060,10 +13258,12 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         <div class="seg"><button class="${r.orientacion === 'V' ? 'on' : ''}" onclick="edFila('orientacion', 'V', true)">Vertical</button><button class="${r.orientacion === 'H' ? 'on' : ''}" onclick="edFila('orientacion', 'H', true)">Horizontal</button></div>`}
         <span class="lbl">¿Dónde queda la posición 1?</span>
         <div class="seg"><button class="${r.numeracion !== 'INVERTIDA' ? 'on' : ''}" onclick="edFila('numeracion', 'NORMAL', true)">${r.orientacion === 'H' && !r.tramos ? 'Izquierda' : 'Abajo'}</button><button class="${r.numeracion === 'INVERTIDA' ? 'on' : ''}" onclick="edFila('numeracion', 'INVERTIDA', true)">${r.orientacion === 'H' && !r.tramos ? 'Derecha' : 'Arriba'}</button></div>
-        ${r.nuevo ? `<span class="lbl">Niveles que se crean al guardar</span>
-          <div class="fila gap8"><input class="campo" type="number" min="0" max="20" value="${r.niveles}" style="width:90px" oninput="edFila('niveles', Math.max(0, Math.floor(Number(this.value)) || 0))" aria-label="Niveles">
-            <label class="fila gap8 small"><input type="checkbox" ${r.picking ? 'checked' : ''} onchange="edFila('picking', this.checked)"> con picking (nivel 1)</label></div>
-          <span class="muted small">Se crean en todas las posiciones. Después cambias una posición puntual tocándola en el plano.</span>`
+        ${r.nuevo ? `<label class="lbl" for="edRNiv">Niveles de almacenamiento (sin contar el picking)</label>
+          <input id="edRNiv" class="campo" type="number" min="0" max="20" value="${r.niveles}" style="width:90px" oninput="edFila('niveles', Math.max(0, Math.floor(Number(this.value)) || 0)); $('edRNivTxt').innerHTML = edNivelesTxt(ed.racks.find(x => x.id === ed.sel.id))">
+          <span class="lbl">¿Tiene picking abajo, en el piso?</span>
+          <div class="seg"><button class="${r.picking ? 'on' : ''}" onclick="edFila('picking', true, true)">Sí, tiene picking</button><button class="${r.picking ? '' : 'on'}" onclick="edFila('picking', false, true)">No tiene picking</button></div>
+          <span id="edRNivTxt" class="small">${edNivelesTxt(r)}</span>
+          <span class="muted small">Se crean así en todas las posiciones al guardar. Después cambias una posición puntual tocándola en el plano.</span>`
           : '<span class="muted small mt8">Los niveles de cada posición se cambian en el plano, tocando la posición.</span>'}
         <label class="lbl" for="edRPas">Pasillo</label>
         <select id="edRPas" class="campo" onchange="edFilaPasillo(this.value)">
@@ -13072,7 +13272,13 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
         </select>
         ${ed.pasillos.length ? '' : '<span class="muted small">Para crear un pasillo usa «+ Pasillo» arriba.</span>'}
         <span class="muted small mt8">Arrástrala para moverla${r.tramos ? '' : ' y usa el punto de la punta para alargarla o acortarla'}.</span>
-        <button class="btn btn-sal mt12" onclick="edBorrarSel()">Borrar fila</button>`;
+        <span class="lbl mt12 fila gap8">Hacer filas iguales ${ayudaHtml('Crea filas iguales a esta (mismas posiciones, tipo y dirección), una al lado de la otra. Así no tienes que dibujarlas una por una. Si no quedó bien, Ctrl+Z o «Deshacer».')}</span>
+        <div class="fila gap8 wrap-f"><input id="edCopN" class="campo" type="number" min="1" max="50" value="1" style="width:76px" aria-label="Cuántas copias"><span class="small">copias, con</span>
+          <input id="edCopSep" class="campo" type="number" min="0" step="5" value="40" style="width:76px" aria-label="Espacio entre filas"><span class="small">de espacio, hacia</span>
+          <select id="edCopDir" class="campo" style="width:auto" aria-label="Hacia dónde">${r.tramos || r.orientacion === 'V' ? '<option value="+">la derecha</option><option value="-">la izquierda</option>' : '<option value="+">abajo</option><option value="-">arriba</option>'}</select></div>
+        <button class="btn btn-sec" onclick="edCopiasFila()">Crear filas iguales</button>
+        <div class="fila gap8 wrap-f mt12"><button class="btn btn-sec" onclick="edDuplicar()" title="Ctrl+D">Duplicar fila</button>
+          <button class="btn btn-sal" onclick="edBorrarSel()">Borrar fila</button></div>`;
     }
     if (s.k === 'area') {
       const pt = edParte(s.id);
@@ -13101,27 +13307,36 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
           ${g.filas.map(r => { const o = otro(r.id); return `<label class="fila gap8 small"><input type="checkbox" ${pa.filas.includes(r.id) ? 'checked' : ''} onchange="edPasilloFila('${esc(r.id)}', this.checked)">
             ${esc(r.nombre)}${o ? ` <span class="muted">(en Pasillo ${esc(o.nombre)})</span>` : ''}</label>`; }).join('')}`).join('')}</div>
         <span class="muted small mt8">Arrástralo para moverlo y usa la esquina de abajo para cambiar el tamaño.</span>
-        <button class="btn btn-sal mt12" onclick="edBorrarSel()">Borrar pasillo</button>`;
+        <div class="fila gap8 wrap-f mt12"><button class="btn btn-sec" onclick="edDuplicar()" title="Ctrl+D">Duplicar pasillo</button>
+          <button class="btn btn-sal" onclick="edBorrarSel()">Borrar pasillo</button></div>`;
     }
     if (s.k === 'muro') {
       return `<span class="h3">Pared</span>
         <span class="muted small">Arrástrala para moverla, o arrastra sus puntas para cambiarla.</span>
-        <button class="btn btn-sal mt12" onclick="edBorrarSel()">Borrar pared</button>`;
+        <div class="fila gap8 wrap-f mt12"><button class="btn btn-sec" onclick="edDuplicar()" title="Ctrl+D">Duplicar pared</button>
+          <button class="btn btn-sal" onclick="edBorrarSel()">Borrar pared</button></div>`;
     }
     return '';
   }
   function edZona(campo, v) {
     const z = ed.zonas.find(x => x.id === ed.sel.id);
     z[campo] = v;
-    edCambio(); edPintarLienzo();
+    edCambio('z:' + z.id + campo); edPintarLienzo();
   }
   function edFila(campo, v, repintarPanel) {
     const r = ed.racks.find(x => x.id === ed.sel.id);
     r[campo] = v;
-    edCambio(); edPintarLienzo();
+    edCambio('f:' + r.id + campo); edPintarLienzo();
     if (repintarPanel) $('edPanel').innerHTML = edPanelHtml();
   }
 
+  // Cómo queda cada posición con esos niveles, en palabras
+  function edNivelesTxt(r) {
+    if (!r) return '';
+    const n = Number(r.niveles) || 0, tot = n + (r.picking ? 1 : 0);
+    if (!tot) return '<span class="txt-rojo">Así no se crea ningún nivel. Pon al menos 1 nivel o el picking.</span>';
+    return `Cada posición queda con <b>${tot} nivel${tot === 1 ? '' : 'es'}</b>: ${[r.picking ? 'el picking abajo' : '', n ? `${n} de almacenamiento${r.picking ? ' encima' : ''}` : ''].filter(Boolean).join(' + ')}.`;
+  }
   // Parte de una zona por su id "zona|i"
   function edParte(id) {
     const [zid, i] = String(id).split('|'), z = ed.zonas.find(x => x.id === zid), a = z && (z.areas || [])[Number(i)];
@@ -13153,7 +13368,7 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
   function edPasillo(campo, v) {
     const pa = ed.pasillos.find(x => x.id === ed.sel.id);
     pa[campo] = v;
-    edCambio(); edPintarLienzo();
+    edCambio('p:' + pa.id + campo); edPintarLienzo();
   }
   // Meter o sacar una fila del pasillo escogido (una fila solo puede estar en un pasillo)
   function edPasilloFila(rackId, on) {
@@ -13171,6 +13386,193 @@ ${hojas.map((h, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" Con
     const pa = ed.pasillos.find(x => x.id === paId);
     if (pa) pa.filas.push(rackId);
     edCambio(); edPintarLienzo();
+  }
+
+  /* ----- Armar el plano desde una plantilla de Excel (se puede llenar a mano o pedírsela a una IA) ----- */
+  // No se guarda solo: queda en el editor para revisarlo, corregirlo y después «Guardar cambios». Solo agrega; no borra nada del plano.
+  const ED_PL_COLS = ['Zona', 'Fila', 'Posiciones', 'Tipo', 'Dirección', 'Posición 1', 'Niveles', 'Picking', 'Pasillo'];
+  function edPlantilla() {
+    abrirModal(`<div class="fila-sb"><span class="h2">Armar el plano desde Excel</span>${btnCerrar()}</div>
+      <ol class="ed-guia mt8">
+        <li>Descarga la plantilla.</li>
+        <li>Llénala tú, o pásasela a una IA con una foto o la descripción de la bodega (en la hoja «Instrucciones» está el texto para pedírselo).</li>
+        <li>Súbela aquí. Las zonas y filas aparecen en el dibujo para que las acomodes y corrijas.</li>
+        <li>Cuando esté bien, toca <b>Guardar cambios</b>. Si algo sale mal, <b>Ctrl+Z</b> lo quita todo.</li>
+      </ol>
+      <span class="muted small">Solo agrega. No borra ni cambia lo que ya está en el plano. Una fila que ya existe en esa zona (mismo nombre) no se repite.</span>
+      <div class="dos mt16"><button class="btn btn-sec btn-xl" onclick="edBajarPlantilla()">Descargar plantilla</button>
+        <button class="btn btn-pri btn-xl" onclick="$('edPlantArch').click()">Subir plantilla llena</button></div>`);
+  }
+  function edBajarPlantilla() {
+    if (!window.XLSX) return toast('No se pudo cargar Excel. Revisa la conexión y vuelve a intentarlo.', 'error');
+    const ej = [
+      ['Congelados', 'Fila 1', 16, 'A-B', 'Vertical', 'Abajo', 4, 'Sí', '1'],
+      ['Congelados', 'Fila 2', 16, 'A-B', 'Vertical', 'Abajo', 4, 'Sí', '1'],
+      ['Congelados', 'Fila 3', 16, 'Doble fondo', 'Vertical', 'Abajo', 4, 'Sí', '2'],
+      ['Seco', 'Fila 1', 20, 'A-B', 'Vertical', 'Arriba', 5, 'Sí', '3'],
+      ['Seco', 'Fila 2', 20, 'A-B', 'Vertical', 'Arriba', 5, 'No', '3'],
+      ['Seco', 'Fila 3', 12, 'A-B', 'Horizontal', 'Izquierda', 3, 'Sí', '']];
+    const ins = [
+      ['Cómo llenar la hoja «Filas» (una fila del Excel = una fila de racks de la bodega)'],
+      ['Los renglones que trae la hoja «Filas» y la hoja «Zonas» son solo EJEMPLOS: bórrelos y ponga los de su bodega.'],
+      [''],
+      ['Zona', 'Nombre de la zona (ej. Congelados, Seco). Todas las filas con el mismo nombre de zona quedan juntas.'],
+      ['Fila', 'Nombre de la fila (ej. Fila 1). No se repite dentro de la misma zona.'],
+      ['Posiciones', 'Cuántas posiciones tiene la fila de punta a punta (número).'],
+      ['Tipo', 'A-B (normal) o Doble fondo (A-B-C-D). Si se deja vacío: A-B.'],
+      ['Dirección', 'Vertical u Horizontal, como se ve en el plano. Si se deja vacío: Vertical.'],
+      ['Posición 1', 'Dónde queda la posición 1: Abajo o Arriba (filas verticales), Izquierda o Derecha (horizontales). Si se deja vacío: Abajo / Izquierda.'],
+      ['Niveles', 'Niveles de almacenamiento SIN contar el picking (número de 0 a 20). Si se deja vacío: 4.'],
+      ['Picking', 'Sí o No: si abajo, en el piso, hay picking. Si se deja vacío: Sí.'],
+      ['Pasillo', 'Número o nombre del pasillo al que da la fila (opcional). Las filas del mismo pasillo quedan una frente a la otra.'],
+      [''],
+      ['Hoja «Zonas» (opcional): el color de cada zona, en formato #RRGGBB. Si no se pone, la app escoge uno.'],
+      ['Ponga las filas en el orden en que están en la bodega, de izquierda a derecha.'],
+      [''],
+      ['Texto para pedírselo a una IA (cópielo junto con la foto o el plano de la bodega):'],
+      ['Llena esta plantilla de Excel con las filas de racks de mi bodega. Usa solo la hoja «Filas» y la hoja «Zonas», con los mismos encabezados, sin cambiarlos ni agregar columnas. Una fila del Excel por cada fila de racks, en el orden en que están de izquierda a derecha. En «Niveles» pon los niveles de almacenamiento sin contar el picking. Usa solo los valores permitidos que dice cada columna. Devuélveme el archivo .xlsx.']];
+    const libro = XLSX.utils.book_new();
+    const hf = XLSX.utils.aoa_to_sheet([ED_PL_COLS].concat(ej));
+    hf['!cols'] = [16, 12, 11, 13, 12, 12, 9, 9, 9].map(w => ({ wch: w }));
+    XLSX.utils.book_append_sheet(libro, hf, 'Filas');
+    const hz = XLSX.utils.aoa_to_sheet([['Zona', 'Color'], ['Congelados', '#1F9BA6'], ['Seco', '#E65100']]);
+    hz['!cols'] = [{ wch: 18 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(libro, hz, 'Zonas');
+    const hi = XLSX.utils.aoa_to_sheet(ins);
+    hi['!cols'] = [{ wch: 14 }, { wch: 110 }];
+    XLSX.utils.book_append_sheet(libro, hi, 'Instrucciones');
+    const out = XLSX.write(libro, { bookType: 'xlsx', type: 'array' });
+    entregarArchivo(new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'Plantilla plano ' + (nombreSede(ses.sedeId) || '') + '.xlsx', 'Plantilla del plano');
+  }
+  async function edLeerPlantilla(f) {
+    if (!window.XLSX) return toast('No se pudo cargar Excel. Revisa la conexión y vuelve a intentarlo.', 'error');
+    let wb;
+    try { wb = XLSX.read(new Uint8Array(await f.arrayBuffer()), { type: 'array' }); } catch (e) { return toast('No se pudo leer el archivo. Debe ser Excel (.xlsx) o CSV.', 'error'); }
+    const nom = n => sinTilde(String(n || '')).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const hojaF = wb.SheetNames.find(n => nom(n) === 'filas') || wb.SheetNames.find(n => nom(n) !== 'zonas' && nom(n) !== 'instrucciones');
+    const filas = hojaF ? XLSX.utils.sheet_to_json(wb.Sheets[hojaF], { header: 1, defval: '' }) : [];
+    // Encabezados: se buscan por nombre (no importa el orden ni las tildes)
+    const iCab = filas.findIndex(f => f.some(c => nom(c) === 'zona') && f.some(c => nom(c) === 'posiciones'));
+    if (iCab < 0) return toast('No encontré los encabezados de la plantilla (Zona, Fila, Posiciones…). Descarga la plantilla y úsala tal cual.', 'error');
+    const cab = filas[iCab].map(nom);
+    const col = k => cab.indexOf(nom(k));
+    const C = {}; ED_PL_COLS.forEach(k => { C[k] = col(k); });
+    if (C['Posición 1'] < 0) C['Posición 1'] = cab.findIndex(c => c.startsWith('posicion1') || c === 'posicion');
+    const colores = {};
+    const hz = wb.SheetNames.find(n => nom(n) === 'zonas');
+    if (hz) XLSX.utils.sheet_to_json(wb.Sheets[hz], { header: 1, defval: '' }).slice(1).forEach(f => { if (/^#[0-9a-f]{6}$/i.test(String(f[1]).trim())) colores[nom(f[0])] = String(f[1]).trim(); });
+    const errores = [], lista = [];
+    filas.slice(iCab + 1).forEach((f, i) => {
+      const v = k => (C[k] >= 0 ? String(f[C[k]] ?? '').trim() : '');
+      if (!f.some(c => String(c).trim())) return;
+      const n = i + iCab + 2, zona = v('Zona'), fila = v('Fila'), pos = Number(v('Posiciones'));
+      if (!zona) return errores.push(`Renglón ${n}: falta la zona`);
+      if (!fila) return errores.push(`Renglón ${n}: falta el nombre de la fila`);
+      if (!(Number.isInteger(pos) && pos >= 1 && pos <= 300)) return errores.push(`Renglón ${n} (${fila}): «Posiciones» debe ser un número de 1 a 300`);
+      const dir = nom(v('Dirección')), p1 = nom(v('Posición 1')), tipo = nom(v('Tipo')), pk = nom(v('Picking')), nv = v('Niveles');
+      const niveles = nv === '' ? 4 : Number(nv);
+      if (!(Number.isInteger(niveles) && niveles >= 0 && niveles <= 20)) return errores.push(`Renglón ${n} (${fila}): «Niveles» debe ser un número de 0 a 20`);
+      const picking = !/^(no|n|0|false|sin)/.test(pk);
+      if (!niveles && !picking) return errores.push(`Renglón ${n} (${fila}): sin niveles y sin picking no se crea nada`);
+      lista.push({ zona, fila, pos, niveles, picking, pasillo: v('Pasillo'), orientacion: dir.startsWith('h') ? 'H' : 'V',
+        fondo: /doble|abcd|^d$/.test(tipo) ? 'D' : 'S', numeracion: /^(arriba|derecha|invertida)/.test(p1) ? 'INVERTIDA' : 'NORMAL' });
+    });
+    if (!lista.length) return toast(errores[0] || 'La plantilla no tiene filas para agregar.', 'error');
+    edArmarDesdePlantilla(lista, colores, errores);
+  }
+  // Acomoda zonas y filas en el dibujo (debajo de lo que ya hay) para que después se arrastren a su sitio
+  function edArmarDesdePlantilla(lista, colores, errores) {
+    const nom = n => sinTilde(String(n || '')).toLowerCase().trim();
+    const GAP_PAS = 60, GAP_ESP = 20, PAD = 30, POS = 30;
+    // Debajo de todo lo que ya está dibujado
+    let y0 = 20;
+    if (ed.zonas.length || ed.racks.length) {
+      ed.zonas.forEach(z => [z].concat(z.areas || []).forEach(a => { y0 = Math.max(y0, a.y + a.alto + 60); }));
+      ed.racks.forEach(r => (r.tramos || [r]).forEach(t => { y0 = Math.max(y0, t.y + (r.orientacion === 'H' && !r.tramos ? 44 : (t.largo || 0)) + 60); }));
+    }
+    let x = 20, y = y0, altoFila = 0;
+    const porZona = new Map();
+    lista.forEach(f => { const k = nom(f.zona); if (!porZona.has(k)) porZona.set(k, { nombre: f.zona, filas: [] }); porZona.get(k).filas.push(f); });
+    let nZ = 0, nF = 0, nP = 0;
+    const repetidas = [];
+    porZona.forEach((g, k) => {
+      let z = ed.zonas.find(zz => nom(zz.nombre) === k);
+      const yaEstaba = !!z;
+      const nuevas = g.filas.filter(f => {
+        if (z && ed.racks.some(r => r.zonaId === z.id && nom(r.nombre) === nom(f.fila))) { repetidas.push(`${f.fila} (${g.nombre})`); return false; }
+        return true;
+      });
+      if (!nuevas.length) return;
+      // Cuánto ocupan las filas: las verticales una al lado de la otra; las horizontales, debajo, una encima de la otra
+      // Después de una fila va el espacio de su pasillo si la siguiente es del mismo pasillo (quedan frente a frente) o si el pasillo no quedó antes de ella
+      const gapTras = (arr, i) => { const a = arr[i], b = arr[i + 1]; return a.pasillo && ((b && b.pasillo === a.pasillo) || !(i > 0 && arr[i - 1].pasillo === a.pasillo)) ? GAP_PAS : GAP_ESP; };
+      const V = nuevas.filter(f => f.orientacion === 'V'), H = nuevas.filter(f => f.orientacion === 'H');
+      const gr = f => (f.fondo === 'D' ? 44 : 20);
+      let anchoV = 0; V.forEach((f, i) => { const g = gapTras(V, i); anchoV += gr(f) + (i < V.length - 1 ? g : g === GAP_PAS ? g : 0); });
+      const altoV = V.length ? Math.max(...V.map(f => f.pos * POS)) : 0;
+      let altoH = 0; H.forEach((f, i) => { const g = gapTras(H, i); altoH += gr(f) + (i < H.length - 1 ? g : g === GAP_PAS ? g : 0); });
+      const anchoH = H.length ? Math.max(...H.map(f => f.pos * POS)) : 0;
+      const w = Math.max(anchoV, anchoH, 120) + PAD * 2, h = altoV + altoH + (V.length && H.length ? 40 : 0) + PAD * 2 + 20;
+      let ox, oy;
+      if (z) {   // zona que ya existía: las filas nuevas van a su derecha y la zona se agranda
+        ox = z.x + z.ancho; oy = z.y;
+        z.ancho += w - PAD; z.alto = Math.max(z.alto, h);
+      } else {
+        if (x > 20 && x + w > 2600) { x = 20; y += altoFila + 40; altoFila = 0; }
+        const n = ed.zonas.length;
+        z = { id: 'nueva-' + (ed.sec++), nombre: g.nombre, color: colores[nom(g.nombre).replace(/[^a-z0-9]/g, '')] || ED_COLORES[n % ED_COLORES.length],
+          x, y, ancho: w, alto: h, etqX: null, etqY: null, areas: [] };
+        ed.zonas.push(z); nZ++;
+        ox = x; oy = y; x += w + 40; altoFila = Math.max(altoFila, h);
+      }
+      const creadas = [];
+      let cx = ox + PAD;
+      V.forEach((f, i) => {
+        const r = { id: 'nueva-' + (ed.sec++), zonaId: z.id, nombre: f.fila, posiciones: f.pos, fondo: f.fondo, orientacion: 'V', numeracion: f.numeracion,
+          x: cx, y: oy + PAD + 20, largo: f.pos * POS, tramos: null, nuevo: true, niveles: f.niveles, picking: f.picking };
+        ed.racks.push(r); creadas.push({ r, f }); nF++;
+        cx += gr(f) + (i < V.length - 1 ? gapTras(V, i) : 0);
+      });
+      let cy = oy + PAD + 20 + altoV + (V.length ? 40 : 0);
+      H.forEach((f, i) => {
+        const r = { id: 'nueva-' + (ed.sec++), zonaId: z.id, nombre: f.fila, posiciones: f.pos, fondo: f.fondo, orientacion: 'H', numeracion: f.numeracion,
+          x: ox + PAD, y: cy, largo: f.pos * POS, tramos: null, nuevo: true, niveles: f.niveles, picking: f.picking };
+        ed.racks.push(r); creadas.push({ r, f }); nF++;
+        cy += gr(f) + (i < H.length - 1 ? gapTras(H, i) : 0);
+      });
+      // Pasillos: el recuadro va entre sus filas (o al lado, si es una sola)
+      const pasG = {};
+      creadas.forEach(c => { if (c.f.pasillo) (pasG[c.f.pasillo] = pasG[c.f.pasillo] || []).push(c.r); });
+      Object.keys(pasG).forEach(nomP => {
+        const rs = pasG[nomP], quien = new Set(rs.map(r => r.id));
+        ed.pasillos.forEach(p => { p.filas = p.filas.filter(id => !quien.has(id)); });
+        const existe = ed.pasillos.find(p => String(p.nombre).trim().toUpperCase() === String(nomP).trim().toUpperCase());
+        if (existe) { existe.filas.push(...rs.map(r => r.id)); return; }
+        const vert = rs[0].orientacion === 'V', a = rs[0], b = rs[rs.length - 1];
+        const grA = a.fondo === 'D' ? 44 : 20;
+        let caja;
+        if (vert) {
+          const x1 = a.x + grA + 8, x2 = rs.length > 1 ? b.x - 8 : x1 + GAP_PAS - 16;
+          caja = { x: x1, y: Math.min(...rs.map(r => r.y)), ancho: Math.max(15, x2 - x1), alto: Math.max(...rs.map(r => r.largo)) };
+        } else {
+          const y1 = a.y + grA + 8, y2 = rs.length > 1 ? b.y - 8 : y1 + GAP_PAS - 16;
+          caja = { x: Math.min(...rs.map(r => r.x)), y: y1, ancho: Math.max(...rs.map(r => r.largo)), alto: Math.max(15, y2 - y1) };
+        }
+        ed.pasillos.push(Object.assign({ id: 'nuevo-pa-' + (ed.sec++), nombre: String(nomP).trim(), filas: rs.map(r => r.id) }, caja));
+        nP++;
+      });
+      if (yaEstaba && nuevas.length) toast(`Las filas nuevas de ${z.nombre} quedaron a la derecha de esa zona`);
+    });
+    if (!nF) return toast(repetidas.length ? 'Todas las filas de la plantilla ya están en el plano.' : 'No hay filas para agregar.', 'error');
+    ed.sel = null; ed.herr = 'mover'; ed.zoom = null;
+    edCambio();
+    pintarApp();
+    const avisos = errores.concat(repetidas.length ? [`Ya estaban en el plano (no se repitieron): ${repetidas.join(', ')}`] : []);
+    abrirModal(`<div class="fila-sb"><span class="h2">Listo para revisar</span>${btnCerrar()}</div>
+      <p class="mt12">Se agregaron al dibujo <b>${nZ} zona${nZ === 1 ? '' : 's'}</b>, <b>${nF} fila${nF === 1 ? '' : 's'}</b> y <b>${nP} pasillo${nP === 1 ? '' : 's'}</b>.</p>
+      <span class="muted small">Todavía <b>no está guardado</b>: los demás siguen viendo el plano de antes. Arrastra cada zona a su sitio (sus filas se mueven con ella), corrige lo que haga falta y toca «Guardar cambios». Si no te sirvió, <b>Ctrl+Z</b> o «Deshacer» lo quita todo.</span>
+      ${avisos.length ? `<span class="lbl mt12">No se agregó:</span><ul class="small txt-naranja">${avisos.slice(0, 30).map(t => `<li>${esc(t)}</li>`).join('')}${avisos.length > 30 ? `<li>… y ${avisos.length - 30} más</li>` : ''}</ul>` : ''}
+      <button class="btn btn-pri btn-xl mt16" onclick="cerrarModal()">Revisar en el dibujo</button>`);
   }
 
   function edFondo() {

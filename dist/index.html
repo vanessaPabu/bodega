@@ -250,6 +250,7 @@
   .quitada { border: 1px dotted var(--txt-rojo); border-radius: 2px; background: transparent; padding: 0; opacity: .7; cursor: pointer; }
   .zoom { display: flex; gap: 6px; }
   .zoom button { min-width: 44px; height: 40px; border: 1px solid var(--borde2); border-radius: 10px; background: var(--card); color: var(--txt); font-size: 15px; font-weight: 600; }
+  .zoom button:disabled { opacity: .45; cursor: default; }
   .rack-pos { display: flex; flex-direction: column-reverse; gap: 3px; }
 
   .alerta { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; font-size: 13px; color: var(--txt); background: transparent; border: none; border-top: 1px solid var(--borde); padding: 8px 0 2px; min-height: 44px; }
@@ -267,6 +268,11 @@
     .etq { border: 1px solid #000; border-radius: 4px; padding: 3mm; break-inside: avoid; display: flex; flex-direction: column; align-items: center; gap: 1mm; }
     .etq b { font-size: 13pt; } .etq span { font-size: 9pt; }
     .etq svg { width: 100%; height: auto; }
+    /* Etiquetas de ubicación: 3 por fila como siempre; el alto del código se ajusta para que una posición con sus niveles quepa en una sola hoja */
+    #print.modo-etq { gap: 4mm; }
+    #print.modo-etq .etq { padding: 2mm; }
+    #print.modo-etq .etq span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #print.modo-etq .etq svg { width: auto; max-width: 100%; height: var(--alto-cb, 22mm); }
     body { background: #FFFFFF !important; }
     #print.modo-rotulo { display: block !important; }
     .rotulo { border: 2px solid #000; color: #000; font-family: Arial, Helvetica, sans-serif; break-after: page; page-break-after: always; display: flex; flex-direction: column; }
@@ -1331,7 +1337,7 @@
   .toast { bottom: auto !important; top: calc(12px + env(safe-area-inset-top)); }
   @media (min-width: 640px) { .caja, .modal .caja { padding-bottom: 18px; } .modal { padding-bottom: var(--sello); } }
 </style>
-  <script type="module" crossorigin src="./assets/index-BLw8H38u.js"></script>
+  <script type="module" crossorigin src="./assets/index-DAJXzFme.js"></script>
 </head>
 <body>
 <div id="app"><div class="cargando">Cargando…</div></div>
